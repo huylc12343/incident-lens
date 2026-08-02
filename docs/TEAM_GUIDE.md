@@ -15,7 +15,7 @@ Mọi người kéo nhánh `develop` về và làm việc.
 User
     │
     ▼
-Frontend (Vue)
+Frontend (Next.js)
     │
     ▼
 FastAPI Backend

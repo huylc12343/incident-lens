@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any
 
 import httpx
 import streamlit as st
+
+_REQUEST_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="incident-ui")
 
 
 def api_request(
@@ -63,18 +66,13 @@ def main() -> None:
         if video_file is None:
             st.error("Bạn phải chọn một file video.")
         else:
-            _upload_and_start(base_url, incident_id, analysis_prompt, video_file, log_file)
+            _upload_and_start_async(base_url, incident_id, analysis_prompt, video_file, log_file)
 
     active_id = st.session_state.get("incident_id", incident_id)
     if st.button("Refresh status") and active_id:
         _run_and_store("GET", base_url, f"/api/v1/incidents/{active_id}")
 
-    snapshot = st.session_state.get("snapshot")
-    if not isinstance(snapshot, dict):
-        return
-    _render_snapshot(snapshot)
-    if snapshot.get("status") == "awaiting_review":
-        _render_review_form(base_url, snapshot)
+    _render_live_incident(base_url, active_id)
 
 
 def _run_and_store(
@@ -118,8 +116,64 @@ def _upload_and_start(
         st.error(str(exc) if isinstance(exc, RuntimeError) else "API upload trả về dữ liệu không hợp lệ.")
 
 
+def _upload_and_start_async(
+    base_url: str,
+    incident_id: str,
+    analysis_prompt: str,
+    video_file: Any,
+    log_file: Any | None,
+) -> None:
+    files = {"video": (video_file.name, video_file.getvalue(), video_file.type or "application/octet-stream")}
+    if log_file is not None:
+        files["log"] = (log_file.name, log_file.getvalue(), log_file.type or "text/csv")
+    try:
+        uploaded = api_request("POST", base_url, "/api/v1/incidents/uploads", files=files)
+        payload = {
+            "incident_id": incident_id,
+            "video_uri": uploaded["video_uri"],
+            "analysis_prompt": analysis_prompt,
+        }
+        if uploaded.get("log_uri"):
+            payload["log_uri"] = uploaded["log_uri"]
+        st.session_state.incident_id = incident_id
+        st.session_state.incident_future = _REQUEST_EXECUTOR.submit(
+            api_request, "POST", base_url, "/api/v1/incidents", payload
+        )
+        st.success("Upload thành công. Workflow đang chạy và giao diện sẽ cập nhật theo thời gian thực.")
+    except (KeyError, RuntimeError) as exc:
+        st.error(str(exc) if isinstance(exc, RuntimeError) else "API upload trả về dữ liệu không hợp lệ.")
+
+
+@st.fragment(run_every=1)
+def _render_live_incident(base_url: str, incident_id: str) -> None:
+    future = st.session_state.get("incident_future")
+    if isinstance(future, Future):
+        if future.done():
+            try:
+                st.session_state.snapshot = future.result()
+            except RuntimeError as exc:
+                st.error(str(exc))
+            finally:
+                del st.session_state.incident_future
+        elif incident_id:
+            try:
+                st.session_state.snapshot = api_request(
+                    "GET", base_url, f"/api/v1/incidents/{incident_id}", timeout_s=10
+                )
+            except RuntimeError:
+                st.info("Workflow is starting…")
+
+    snapshot = st.session_state.get("snapshot")
+    if not isinstance(snapshot, dict):
+        return
+    _render_snapshot(snapshot)
+    if snapshot.get("status") == "awaiting_review":
+        _render_review_form(base_url, snapshot)
+
+
 def _render_snapshot(snapshot: dict[str, Any]) -> None:
     st.subheader(f"{snapshot.get('incident_id')} — {snapshot.get('status')}")
+    _render_model_activity(snapshot.get("model_activities", []))
     if snapshot.get("video_summary"):
         st.subheader("Video summary")
         st.info(snapshot["video_summary"])
@@ -155,7 +209,7 @@ def _render_snapshot(snapshot: dict[str, Any]) -> None:
         ]
         for label, key in labels:
             with st.expander(label, expanded=key in {"summary", "evidence_and_warnings"}):
-                st.json(report.get(key))
+                _render_report_value(report.get(key))
 
     st.subheader("Evidence claims")
     st.dataframe(snapshot.get("claims", []), use_container_width=True)
@@ -163,6 +217,73 @@ def _render_snapshot(snapshot: dict[str, Any]) -> None:
         st.warning(warning)
     if snapshot.get("error_message"):
         st.error(f"{snapshot.get('error_code')}: {snapshot.get('error_message')}")
+
+
+def _render_model_activity(activities: Any) -> None:
+    st.subheader("Model activity")
+    if not isinstance(activities, list) or not activities:
+        st.info("No model usage data. Incidents created before usage tracking will not have historical token data.")
+        return
+
+    running = [item for item in activities if isinstance(item, dict) and item.get("status") == "running"]
+    if running:
+        current = running[-1]
+        st.info(
+            f"{current.get('provider')} / {current.get('model')} đang thực hiện "
+            f"{current.get('description', current.get('operation'))}"
+        )
+
+    totals = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cached_tokens": 0,
+        "reasoning_tokens": 0,
+        "total_tokens": 0,
+    }
+    rows = []
+    for item in activities:
+        if not isinstance(item, dict):
+            continue
+        usage = item.get("usage") if isinstance(item.get("usage"), dict) else {}
+        for key in totals:
+            totals[key] += int(usage.get(key) or 0)
+        rows.append(
+            {
+                "status": item.get("status"),
+                "step": item.get("step"),
+                "operation": item.get("operation"),
+                "provider": item.get("provider"),
+                "model": item.get("model"),
+                "doing": item.get("description"),
+                "started_at": item.get("started_at"),
+                "completed_at": item.get("completed_at"),
+                "input_tokens": usage.get("input_tokens"),
+                "output_tokens": usage.get("output_tokens"),
+                "cached_tokens": usage.get("cached_tokens"),
+                "reasoning_tokens": usage.get("reasoning_tokens"),
+                "total_tokens": usage.get("total_tokens"),
+                "duration_ms": item.get("duration_ms"),
+                "error_code": item.get("error_code"),
+                "request_metadata": item.get("metadata"),
+            }
+        )
+
+    columns = st.columns(5)
+    columns[0].metric("Input tokens", f"{totals['input_tokens']:,}")
+    columns[1].metric("Output tokens", f"{totals['output_tokens']:,}")
+    columns[2].metric("Cached tokens", f"{totals['cached_tokens']:,}")
+    columns[3].metric("Reasoning tokens", f"{totals['reasoning_tokens']:,}")
+    columns[4].metric("Total tokens", f"{totals['total_tokens']:,}")
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
+def _render_report_value(value: Any) -> None:
+    if isinstance(value, (dict, list)):
+        st.json(value)
+    elif value is None:
+        st.caption("No data")
+    else:
+        st.write(str(value))
 
 
 def _render_review_form(base_url: str, snapshot: dict[str, Any]) -> None:

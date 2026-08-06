@@ -549,6 +549,50 @@ async def test_draft_report_skips_model_when_log_verification_is_unavailable() -
 
 
 @pytest.mark.asyncio
+async def test_draft_report_uses_code_log_summary_and_verification_alignment() -> None:
+    memory = _claim_memory(AnalysisMode.SINGLE_REQUEST)
+    verification = VerificationResult(
+        results=[
+            ClaimVerification(
+                claim_id="claim-1",
+                status=VerificationStatus.SUPPORTED,
+                reason="Brake tăng mạnh gần timestamp của claim",
+                evidence_ids=["log-evidence:2:brake_rise"],
+            )
+        ]
+    )
+    log_summary = LogEvidenceSummary(
+        summary="Tốc độ giảm và brake tăng mạnh tại 2 giây.",
+        evidence_ids=["log-evidence:2:brake_rise"],
+    )
+    narrative = ReportNarrative(
+        summary="Tóm tắt video.",
+        timeline="Timeline.",
+        video_observations="Quan sát.",
+        log_findings="Nội dung model không được dùng.",
+        alignment="Đối chiếu model không được dùng.",
+        hypothesized_causes="Chưa xác định.",
+    )
+    report = SimpleNamespace(build_narrative=AsyncMock(return_value=narrative))
+
+    result = await build_draft_report_node(
+        {
+            "incident_id": "INC-DETERMINISTIC-REPORT",
+            "video_uri": "video.mp4",
+            "video_memory": memory,
+            "log_evidence_summary": log_summary,
+            "verification": verification,
+        },
+        report=report,
+    )
+
+    draft = result["draft_report"]
+    assert draft.log_findings.narrative == log_summary.summary
+    assert "claim-1 được log hỗ trợ" in draft.alignment.narrative
+    assert "log-evidence:2:brake_rise" in draft.alignment.narrative
+
+
+@pytest.mark.asyncio
 async def test_conflict_can_be_reanalyzed_once_then_verified_supported(tmp_path: Path) -> None:
     memory = _claim_memory(AnalysisMode.SINGLE_REQUEST)
     service = _service(VLMInputMode.TIMESTAMPED_FRAMES, memory)

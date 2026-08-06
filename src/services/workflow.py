@@ -15,6 +15,7 @@ from src.models.api import (
     StoredReport,
 )
 from src.models.incidents import VerificationStatus
+from src.services.model_observability import ModelActivityRegistry
 from src.services.report_repository import ReportRepository, ReportRepositoryError
 
 
@@ -43,10 +44,12 @@ class WorkflowService:
         runner: IncidentGraphRunner,
         repository: ReportRepository,
         input_validator: IncidentInputValidator | None = None,
+        observability: ModelActivityRegistry | None = None,
     ) -> None:
         self._runner = runner
         self._repository = repository
         self._input_validator = input_validator
+        self._observability = observability
         self._states: dict[str, IncidentState] = {}
         self._review_locks: dict[str, asyncio.Lock] = {}
         self._audit: dict[str, list[ReviewAuditEntry]] = {}
@@ -70,6 +73,7 @@ class WorkflowService:
             "artifact_uris": {},
             "warnings": [],
             "review_audit": [],
+            "model_activities": [],
         }
         async with self._registry_lock:
             checkpoint_state = await self._checkpoint_state(incident_id)
@@ -191,6 +195,8 @@ class WorkflowService:
             self._stored_at[incident_id] = stored_at
 
     async def _register_recovered_state(self, incident_id: str, state: IncidentState) -> None:
+        if self._observability is not None:
+            self._observability.restore(incident_id, state.get("model_activities", []))
         async with self._registry_lock:
             self._states.setdefault(incident_id, state)
             self._review_locks.setdefault(incident_id, asyncio.Lock())
@@ -222,6 +228,7 @@ class WorkflowService:
                     claims=state.get("claims", []),
                     warnings=state.get("warnings", []),
                     review_audit=state.get("review_audit", []),
+                    model_activities=state.get("model_activities", []),
                     final_report=state.get("draft_report") if status == "approved" else None,
                     evidence_ids=list(dict.fromkeys(evidence_ids)),
                     reviewer=decision.reviewer,
@@ -245,6 +252,11 @@ class WorkflowService:
         video_summary = ""
         if memory is not None:
             video_summary = memory.video_summary or memory.global_scene
+        activities = state.get("model_activities", [])
+        if self._observability is not None:
+            live_activities = self._observability.list(incident_id)
+            if live_activities:
+                activities = live_activities
         return IncidentSnapshot(
             incident_id=incident_id,
             status=status,
@@ -258,6 +270,7 @@ class WorkflowService:
             draft_report=report if status == "awaiting_review" else None,
             final_report=report if status == "approved" else None,
             review_audit=state.get("review_audit") or self._audit.get(incident_id, []),
+            model_activities=activities,
             warnings=state.get("warnings", []),
             error_code=state.get("error_code"),
             error_message=_safe_processing_error(state.get("error_code")) if state.get("error_message") else None,
@@ -277,6 +290,7 @@ def _stored_snapshot(stored: StoredReport) -> IncidentSnapshot:
             claim.claim_id for claim in stored.claims if claim.verification_status == VerificationStatus.CONTRADICTED
         ],
         warnings=stored.warnings,
+        model_activities=stored.model_activities,
         final_report=stored.final_report,
         review_audit=stored.review_audit
         or [ReviewAuditEntry(action=stored.decision, reviewer=stored.reviewer, reason=stored.reason)],

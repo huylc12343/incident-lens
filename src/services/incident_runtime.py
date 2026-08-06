@@ -18,6 +18,7 @@ from src.models.incidents import VLMProvider
 from src.services.charts import ChartService
 from src.services.log_analysis import LogAnalysisService
 from src.services.media import MediaService
+from src.services.model_observability import ModelActivityRegistry
 from src.services.report_repository import SQLiteReportRepository
 from src.services.reporting import OpenAIReportService
 from src.services.verification import OpenAIVerificationService
@@ -98,7 +99,8 @@ async def incident_workflow_service(
 ) -> AsyncIterator[WorkflowService]:
     clients = clients or ProviderClients()
     media = MediaService()
-    vlm = _build_vlm(settings, clients)
+    observability = ModelActivityRegistry()
+    vlm = _build_vlm(settings, clients, observability)
     video_workflow = VideoMemoryWorkflow(
         vlm=vlm,
         config=VideoMemoryWorkflowConfig(
@@ -141,6 +143,7 @@ async def incident_workflow_service(
         timeout_s=settings.verification_timeout_s,
         temperature=settings.verification_temperature,
         prompt_version=settings.verification_prompt_version,
+        observability=observability,
     )
     report = OpenAIReportService(
         model=settings.report_model_name,
@@ -149,6 +152,7 @@ async def incident_workflow_service(
         timeout_s=settings.report_timeout_s,
         temperature=settings.report_temperature,
         prompt_version=settings.reporting_prompt_version,
+        observability=observability,
     )
     dependencies = IncidentGraphDependencies(
         media=media,
@@ -164,6 +168,7 @@ async def incident_workflow_service(
         timestamp_tolerance_s=settings.log_timestamp_tolerance_s,
         reanalysis_prompt_version=settings.reanalysis_prompt_version,
         cleanup_remote_resources=settings.gemini_delete_remote_file_on_terminal,
+        observability=observability,
     )
     checkpoint_path = Path(settings.incident_checkpoint_path).resolve()
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
@@ -176,13 +181,18 @@ async def incident_workflow_service(
             runner=LangGraphIncidentRunner(graph),
             repository=SQLiteReportRepository(settings.incident_database_path),
             input_validator=ConfiguredIncidentInputValidator(settings=settings, media=media),
+            observability=observability,
         )
         yield service
     finally:
         connection.close()
 
 
-def _build_vlm(settings: Settings, clients: ProviderClients) -> OpenAIVLMService | GeminiNativeVideoVLMService:
+def _build_vlm(
+    settings: Settings,
+    clients: ProviderClients,
+    observability: ModelActivityRegistry | None = None,
+) -> OpenAIVLMService | GeminiNativeVideoVLMService:
     if settings.vlm_provider == VLMProvider.OPENAI:
         return OpenAIVLMService(
             model=settings.openai_vlm_model_name,
@@ -191,6 +201,7 @@ def _build_vlm(settings: Settings, clients: ProviderClients) -> OpenAIVLMService
             timeout_s=settings.vlm_timeout_s,
             temperature=settings.vlm_temperature,
             max_images_per_request=settings.vlm_max_frames_per_request,
+            observability=observability,
         )
     if clients.gemini is None and not settings.gemini_api_key.strip():
         raise ValueError("GEMINI_API_KEY is required for the configured VLM provider")
@@ -206,6 +217,7 @@ def _build_vlm(settings: Settings, clients: ProviderClients) -> OpenAIVLMService
         media_resolution=settings.gemini_media_resolution,
         video_fps=settings.gemini_video_fps,
         reupload_missing_file=settings.gemini_reupload_missing_file,
+        observability=observability,
     )
 
 

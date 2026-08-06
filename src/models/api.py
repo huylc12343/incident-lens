@@ -112,6 +112,31 @@ class ReviewAuditEntry(APIModel):
     target_claim_ids: list[str] = Field(default_factory=list)
 
 
+class TokenUsage(APIModel):
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    total_tokens: int = Field(default=0, ge=0)
+    cached_tokens: int = Field(default=0, ge=0)
+    reasoning_tokens: int = Field(default=0, ge=0)
+
+
+class ModelActivity(APIModel):
+    activity_id: str
+    incident_id: str
+    step: str
+    operation: str
+    description: str
+    provider: str
+    model: str
+    status: Literal["running", "completed", "failed", "skipped"]
+    started_at: datetime
+    completed_at: datetime | None = None
+    duration_ms: int | None = Field(default=None, ge=0)
+    usage: TokenUsage | None = None
+    error_code: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class IncidentSnapshot(APIModel):
     incident_id: str
     status: IncidentStatus
@@ -125,6 +150,7 @@ class IncidentSnapshot(APIModel):
     draft_report: DraftReport | None = None
     final_report: DraftReport | None = None
     review_audit: list[ReviewAuditEntry] = Field(default_factory=list)
+    model_activities: list[ModelActivity] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     error_code: str | None = None
     error_message: str | None = None
@@ -139,6 +165,7 @@ class StoredReport(APIModel):
     claims: list[Claim] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     review_audit: list[ReviewAuditEntry] = Field(default_factory=list)
+    model_activities: list[ModelActivity] = Field(default_factory=list)
     final_report: DraftReport | None = None
     evidence_ids: list[str] = Field(default_factory=list)
     reviewer: str

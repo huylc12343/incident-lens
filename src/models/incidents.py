@@ -217,6 +217,7 @@ class ReanalysisRequest(ContractModel):
 
 
 class LogEvidenceSummary(ContractModel):
+    summary: str = ""
     metrics: dict[str, float | int | str | bool | None] = Field(default_factory=dict)
     events: list[dict[str, Any]] = Field(default_factory=list)
     evidence_ids: list[str] = Field(default_factory=list)
@@ -252,7 +253,7 @@ class VerificationRequest(ContractModel):
 
 class ClaimVerification(ContractModel):
     claim_id: str = Field(min_length=1)
-    status: VerificationStatus
+    status: Literal[VerificationStatus.SUPPORTED, VerificationStatus.CONTRADICTED]
     reason: str = Field(min_length=1)
     evidence_ids: list[str] = Field(default_factory=list)
 

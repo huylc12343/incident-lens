@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
-from src.models.api import ReviewAuditEntry, StoredReport
+from src.models.api import ModelActivity, ReviewAuditEntry, StoredReport
 from src.models.incidents import Claim, DraftReport
 
 
@@ -56,8 +56,9 @@ class SQLiteReportRepository:
                     INSERT INTO incident_reports (
                         incident_id, status, final_report_json, evidence_json,
                         reviewer, decision, reason, stored_at, has_log,
-                        artifact_json, claims_json, warnings_json, audit_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        artifact_json, claims_json, warnings_json, audit_json,
+                        model_activities_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         stored.incident_id,
@@ -75,6 +76,9 @@ class SQLiteReportRepository:
                         json.dumps(
                             [entry.model_dump(mode="json") for entry in stored.review_audit], separators=(",", ":")
                         ),
+                        json.dumps(
+                            [entry.model_dump(mode="json") for entry in stored.model_activities], separators=(",", ":")
+                        ),
                     ),
                 )
         except sqlite3.IntegrityError as exc:
@@ -90,7 +94,8 @@ class SQLiteReportRepository:
                     """
                     SELECT incident_id, status, final_report_json, evidence_json,
                            reviewer, decision, reason, stored_at, has_log,
-                           artifact_json, claims_json, warnings_json, audit_json
+                           artifact_json, claims_json, warnings_json, audit_json,
+                           model_activities_json
                     FROM incident_reports WHERE incident_id = ?
                     """,
                     (incident_id,),
@@ -107,6 +112,7 @@ class SQLiteReportRepository:
             claims=[Claim.model_validate(item) for item in json.loads(row[10])],
             warnings=_parse_json_list(row[11]),
             review_audit=[ReviewAuditEntry.model_validate(item) for item in json.loads(row[12])],
+            model_activities=[ModelActivity.model_validate(item) for item in json.loads(row[13])],
             final_report=DraftReport.model_validate_json(row[2]) if row[2] else None,
             evidence_ids=_parse_json_list(row[3]),
             reviewer=row[4],
@@ -133,7 +139,8 @@ class SQLiteReportRepository:
                         artifact_json TEXT NOT NULL DEFAULT '{}',
                         claims_json TEXT NOT NULL DEFAULT '[]',
                         warnings_json TEXT NOT NULL DEFAULT '[]',
-                        audit_json TEXT NOT NULL DEFAULT '[]'
+                        audit_json TEXT NOT NULL DEFAULT '[]',
+                        model_activities_json TEXT NOT NULL DEFAULT '[]'
                     )
                     """
                 )
@@ -144,6 +151,9 @@ class SQLiteReportRepository:
                     "claims_json": "ALTER TABLE incident_reports ADD COLUMN claims_json TEXT NOT NULL DEFAULT '[]'",
                     "warnings_json": "ALTER TABLE incident_reports ADD COLUMN warnings_json TEXT NOT NULL DEFAULT '[]'",
                     "audit_json": "ALTER TABLE incident_reports ADD COLUMN audit_json TEXT NOT NULL DEFAULT '[]'",
+                    "model_activities_json": (
+                        "ALTER TABLE incident_reports ADD COLUMN model_activities_json TEXT NOT NULL DEFAULT '[]'"
+                    ),
                 }
                 for column, statement in migrations.items():
                     if column not in columns:

@@ -373,6 +373,75 @@ def merge_video_memory_patch(memory: VideoMemory, patch: VideoMemoryPatch) -> Vi
     return merged
 
 
+def reconcile_video_memory_patch_evidence(
+    patch: VideoMemoryPatch,
+    frames: list[TimestampedFrame],
+    *,
+    fallback_timestamp_s: float,
+) -> VideoMemoryPatch:
+    """Canonicalize frame evidence aliases returned by a focused reanalysis call."""
+    frames_by_id = {frame.frame_id: frame for frame in frames}
+    evidence_by_id = {item.evidence_id: item for item in patch.evidence}
+    items = [*patch.observations, *patch.claims]
+    reference_timestamps: dict[str, list[float]] = {}
+    for item in items:
+        if item.timestamp_s is None:
+            continue
+        for evidence_id in item.evidence_ids:
+            reference_timestamps.setdefault(evidence_id, []).append(item.timestamp_s)
+
+    all_ids = {
+        *evidence_by_id,
+        *(evidence_id for item in items for evidence_id in item.evidence_ids),
+    }
+    id_mapping: dict[str, str] = {}
+    descriptions: dict[str, str] = {}
+    for evidence_id in all_ids:
+        if evidence_id in frames_by_id:
+            canonical_id = evidence_id
+        else:
+            evidence = evidence_by_id.get(evidence_id)
+            timestamp_s = evidence.timestamp_s if evidence is not None else None
+            if timestamp_s is None and reference_timestamps.get(evidence_id):
+                timestamp_s = sum(reference_timestamps[evidence_id]) / len(reference_timestamps[evidence_id])
+            target_timestamp_s = timestamp_s if timestamp_s is not None else fallback_timestamp_s
+            canonical_id = min(frames, key=lambda item: abs(item.timestamp_s - target_timestamp_s)).frame_id
+        id_mapping[evidence_id] = canonical_id
+        evidence = evidence_by_id.get(evidence_id)
+        if evidence is not None and evidence.description and canonical_id not in descriptions:
+            descriptions[canonical_id] = evidence.description
+
+    def canonical_ids(values: list[str]) -> list[str]:
+        return list(dict.fromkeys(id_mapping.get(value, value) for value in values if value in id_mapping))
+
+    observations = [
+        item.model_copy(update={"evidence_ids": canonical_ids(item.evidence_ids)}) for item in patch.observations
+    ]
+    claims = [item.model_copy(update={"evidence_ids": canonical_ids(item.evidence_ids)}) for item in patch.claims]
+    referenced_ids = {
+        evidence_id for item in [*observations, *claims] for evidence_id in item.evidence_ids
+    }
+    canonical_evidence_ids = {
+        *referenced_ids,
+        *(id_mapping[evidence_id] for evidence_id in evidence_by_id),
+    }
+    evidence = [
+        EvidenceReference(
+            evidence_id=frame.frame_id,
+            kind="frame",
+            artifact_uri=frame.image_uri,
+            timestamp_s=frame.timestamp_s,
+            description=descriptions.get(
+                frame.frame_id,
+                "Khung hình được kết quả reanalysis có cấu trúc của VLM tham chiếu.",
+            ),
+        )
+        for frame in frames
+        if frame.frame_id in canonical_evidence_ids
+    ]
+    return patch.model_copy(update={"observations": observations, "claims": claims, "evidence": evidence})
+
+
 def _frame_batches(frames: list[TimestampedFrame], batch_size: int, overlap: int) -> list[list[TimestampedFrame]]:
     batches = []
     start = 0
@@ -413,34 +482,85 @@ def _reset_claim_verification(memory: VideoMemory) -> VideoMemory:
 
 
 def _reconcile_frame_evidence(memory: VideoMemory, frames: list[TimestampedFrame]) -> VideoMemory:
-    """Canonicalize references to frames that were actually supplied to the VLM."""
+    """Map model-created evidence aliases back to frames that were actually supplied."""
     frames_by_id = {frame.frame_id: frame for frame in frames}
     evidence_by_id = {item.evidence_id: item for item in memory.evidence}
+    reference_timestamps: dict[str, list[float]] = {}
+    items = [*memory.timeline, *memory.observations, *memory.claims]
+    for item in items:
+        timestamp_s = getattr(item, "timestamp_s", None)
+        if timestamp_s is None:
+            continue
+        for evidence_id in item.evidence_ids:
+            reference_timestamps.setdefault(evidence_id, []).append(timestamp_s)
 
-    for evidence_id, item in list(evidence_by_id.items()):
-        frame = frames_by_id.get(evidence_id)
-        if frame is not None and item.kind == "frame":
-            evidence_by_id[evidence_id] = item.model_copy(
-                update={"artifact_uri": frame.image_uri, "timestamp_s": frame.timestamp_s}
-            )
-
-    referenced_ids = {
-        evidence_id
-        for item in [*memory.timeline, *memory.observations, *memory.claims]
-        for evidence_id in item.evidence_ids
+    all_ids = {
+        *evidence_by_id,
+        *(evidence_id for item in items for evidence_id in item.evidence_ids),
     }
-    for evidence_id in referenced_ids - set(evidence_by_id):
-        frame = frames_by_id.get(evidence_id)
-        if frame is not None:
-            evidence_by_id[evidence_id] = EvidenceReference(
-                evidence_id=evidence_id,
-                kind="frame",
-                artifact_uri=frame.image_uri,
-                timestamp_s=frame.timestamp_s,
-                description="Khung hình được kết quả có cấu trúc của VLM tham chiếu.",
-            )
+    id_mapping: dict[str, str] = {}
+    descriptions: dict[str, str] = {}
+    fallback_timestamp_s = (
+        memory.representative_timestamp_s
+        if memory.representative_timestamp_s is not None
+        else memory.incident_window.t0
+    )
+    for evidence_id in all_ids:
+        if evidence_id in frames_by_id:
+            canonical_id = evidence_id
+        else:
+            evidence = evidence_by_id.get(evidence_id)
+            timestamp_s = evidence.timestamp_s if evidence is not None else None
+            if timestamp_s is None and reference_timestamps.get(evidence_id):
+                timestamp_s = sum(reference_timestamps[evidence_id]) / len(reference_timestamps[evidence_id])
+            target_timestamp_s = timestamp_s if timestamp_s is not None else fallback_timestamp_s
+            frame = min(frames, key=lambda item: abs(item.timestamp_s - target_timestamp_s))
+            canonical_id = frame.frame_id
+        id_mapping[evidence_id] = canonical_id
+        evidence = evidence_by_id.get(evidence_id)
+        if evidence is not None and evidence.description and canonical_id not in descriptions:
+            descriptions[canonical_id] = evidence.description
 
-    return memory.model_copy(update={"evidence": list(evidence_by_id.values())})
+    def canonical_ids(values: list[str]) -> list[str]:
+        return list(dict.fromkeys(id_mapping.get(value, value) for value in values if value in id_mapping))
+
+    timeline = [item.model_copy(update={"evidence_ids": canonical_ids(item.evidence_ids)}) for item in memory.timeline]
+    observations = [
+        item.model_copy(update={"evidence_ids": canonical_ids(item.evidence_ids)}) for item in memory.observations
+    ]
+    claims = [item.model_copy(update={"evidence_ids": canonical_ids(item.evidence_ids)}) for item in memory.claims]
+    referenced_ids = {
+        evidence_id for item in [*timeline, *observations, *claims] for evidence_id in item.evidence_ids
+    }
+    canonical_evidence_ids = {
+        *referenced_ids,
+        *(id_mapping[evidence_id] for evidence_id in evidence_by_id),
+    }
+    evidence = [
+        EvidenceReference(
+            evidence_id=frame.frame_id,
+            kind="frame",
+            artifact_uri=frame.image_uri,
+            timestamp_s=frame.timestamp_s,
+            description=descriptions.get(
+                frame.frame_id,
+                "Khung hình được kết quả có cấu trúc của VLM tham chiếu.",
+            ),
+        )
+        for frame in frames
+        if frame.frame_id in canonical_evidence_ids
+    ]
+    valid_source_ids = [frame_id for frame_id in memory.source_frame_ids if frame_id in frames_by_id]
+    source_frame_ids = list(dict.fromkeys([*valid_source_ids, *[item.evidence_id for item in evidence]]))
+    return memory.model_copy(
+        update={
+            "timeline": timeline,
+            "observations": observations,
+            "claims": claims,
+            "evidence": evidence,
+            "source_frame_ids": source_frame_ids,
+        }
+    )
 
 
 def _batch_prompt(

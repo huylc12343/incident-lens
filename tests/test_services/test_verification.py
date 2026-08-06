@@ -67,7 +67,7 @@ async def test_verification_rejects_missing_or_reordered_claim_results() -> None
 
 
 @pytest.mark.asyncio
-async def test_verification_rejects_invented_log_evidence() -> None:
+async def test_verification_removes_invented_log_evidence_without_discarding_result() -> None:
     invalid = VerificationResult(
         results=[
             ClaimVerification(
@@ -82,10 +82,10 @@ async def test_verification_rejects_invented_log_evidence() -> None:
         responses=SimpleNamespace(parse=AsyncMock(return_value=SimpleNamespace(output_parsed=invalid)))
     )
 
-    with pytest.raises(VerificationServiceError) as exc_info:
-        await OpenAIVerificationService(model="gpt-test", client=client).verify(_request())
+    result = await OpenAIVerificationService(model="gpt-test", client=client).verify(_request())
 
-    assert exc_info.value.code == "VERIFICATION_EVIDENCE_INVALID"
+    assert result.results[0].status == VerificationStatus.SUPPORTED
+    assert result.results[0].evidence_ids == []
 
 
 @pytest.mark.asyncio

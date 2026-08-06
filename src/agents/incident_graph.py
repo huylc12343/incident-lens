@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from langgraph.graph import END, START, StateGraph
@@ -25,6 +25,7 @@ from src.agents.nodes.incident import (
 from src.agents.nodes.review import human_review_interrupt_node
 from src.models.api import ReviewDecision
 from src.models.incidents import ReportService, VerificationService
+from src.services.model_observability import ModelActivityRegistry
 from src.services.video_memory import VideoMemoryWorkflow
 
 
@@ -40,13 +41,15 @@ class IncidentGraphDependencies:
     timestamp_tolerance_s: float = 0.5
     reanalysis_prompt_version: str = "v1"
     cleanup_remote_resources: bool = True
+    observability: ModelActivityRegistry = field(default_factory=ModelActivityRegistry)
 
 
 def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointer: Any) -> Any:
     graph = StateGraph(IncidentState)
 
     async def analyze_video(state: IncidentState) -> dict[str, object]:
-        return await analyze_video_node(state, media=dependencies.media, workflow=dependencies.video_workflow)
+        result = await analyze_video_node(state, media=dependencies.media, workflow=dependencies.video_workflow)
+        return _with_model_activities(state, result, dependencies.observability)
 
     async def cut_video(state: IncidentState) -> dict[str, object]:
         return await cut_incident_video_node(state, media=dependencies.media, workflow=dependencies.video_workflow)
@@ -60,30 +63,34 @@ def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointe
         )
 
     async def verify(state: IncidentState) -> dict[str, object]:
-        return await align_and_verify_claims_node(
+        result = await align_and_verify_claims_node(
             state,
             verification=dependencies.verification,
             timestamp_tolerance_s=dependencies.timestamp_tolerance_s,
         )
+        return _with_model_activities(state, result, dependencies.observability)
 
     async def auto_reanalyze(state: IncidentState) -> dict[str, object]:
-        return await auto_reanalyze_node(
+        result = await auto_reanalyze_node(
             state,
             media=dependencies.media,
             workflow=dependencies.video_workflow,
             prompt_version=dependencies.reanalysis_prompt_version,
         )
+        return _with_model_activities(state, result, dependencies.observability)
 
     async def manual_reanalyze(state: IncidentState) -> dict[str, object]:
-        return await manual_reanalyze_node(
+        result = await manual_reanalyze_node(
             state,
             media=dependencies.media,
             workflow=dependencies.video_workflow,
             prompt_version=dependencies.reanalysis_prompt_version,
         )
+        return _with_model_activities(state, result, dependencies.observability)
 
     async def build_report(state: IncidentState) -> dict[str, object]:
-        return await build_draft_report_node(state, report=dependencies.report)
+        result = await build_draft_report_node(state, report=dependencies.report)
+        return _with_model_activities(state, result, dependencies.observability)
 
     async def cleanup(state: IncidentState) -> dict[str, object]:
         handles = state.get("remote_media_handles", [])
@@ -173,3 +180,13 @@ class LangGraphIncidentRunner:
     @staticmethod
     def _public_state(value: dict[str, Any]) -> IncidentState:
         return {key: item for key, item in value.items() if not key.startswith("__")}
+
+
+def _with_model_activities(
+    state: IncidentState,
+    result: dict[str, object],
+    observability: ModelActivityRegistry,
+) -> dict[str, object]:
+    incident_id = state.get("incident_id", "")
+    activities = observability.list(incident_id)
+    return {**result, "model_activities": activities or state.get("model_activities", [])}

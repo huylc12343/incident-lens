@@ -20,6 +20,7 @@ from src.models.incidents import (
     VideoSequenceManifest,
     VLMProvider,
 )
+from src.services.model_observability import ModelActivityRegistry
 from src.services.vlm import GeminiNativeVideoVLMService, OpenAIVLMService, VLMServiceError
 
 
@@ -92,12 +93,20 @@ def _gemini_client(
 
 @pytest.mark.asyncio
 async def test_openai_sends_all_ordered_frames_in_one_request(tmp_path: Path) -> None:
+    observability = ModelActivityRegistry()
     client = SimpleNamespace(
         responses=SimpleNamespace(
-            parse=AsyncMock(return_value=SimpleNamespace(output_parsed=_memory(AnalysisMode.SINGLE_REQUEST)))
+            parse=AsyncMock(
+                return_value=SimpleNamespace(
+                    output_parsed=_memory(AnalysisMode.SINGLE_REQUEST),
+                    usage=SimpleNamespace(input_tokens=100, output_tokens=20, total_tokens=120),
+                )
+            )
         )
     )
-    service = OpenAIVLMService(model="gpt-test", client=client, max_images_per_request=10)
+    service = OpenAIVLMService(
+        model="gpt-test", client=client, max_images_per_request=10, observability=observability
+    )
 
     result = await service.analyze_video(_openai_request(tmp_path))
 
@@ -116,6 +125,12 @@ async def test_openai_sends_all_ordered_frames_in_one_request(tmp_path: Path) ->
     assert "sequence_index=1" in content[3]["text"]
     assert content[2]["image_url"].startswith("data:image/jpeg;base64,")
     assert call["text_format"] is VideoMemory
+    activity = observability.list("INC-OPENAI")[0]
+    assert activity.status == "completed"
+    assert activity.model == "gpt-test"
+    assert activity.metadata["image_count"] == 2
+    assert activity.usage is not None
+    assert activity.usage.total_tokens == 120
 
 
 @pytest.mark.asyncio

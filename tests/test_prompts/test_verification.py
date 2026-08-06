@@ -6,8 +6,9 @@ from src.prompts.verification import build_verification_prompt
 
 def test_verification_prompt_requires_one_result_per_claim() -> None:
     prompt = build_verification_prompt(
-        claims=[Claim(claim_id="claim-1", text="Hard braking")],
+        claims=[Claim(claim_id="claim-1", text="Hard braking", evidence_ids=["frame-1"])],
         log_evidence_summary=LogEvidenceSummary(
+            summary="Brake tăng mạnh tại 12.5 giây.",
             metrics={"max_brake": 0.82},
             events=[{"timestamp_s": 12.5, "type": "brake_rise"}],
             evidence_ids=["log-1"],
@@ -17,9 +18,12 @@ def test_verification_prompt_requires_one_result_per_claim() -> None:
 
     assert "chính xác một kết quả cho mỗi claim_id" in prompt.text
     assert "supported" in prompt.text
+    assert "status chỉ được là supported hoặc contradicted" in prompt.text
     assert "reason phải ngắn gọn bằng tiếng Việt" in prompt.text
     assert prompt.context["timestamp_tolerance_s"] == 0.5
     assert prompt.context["log_evidence_summary"]["evidence_ids"] == ["log-1"]
+    assert prompt.context["allowed_log_evidence_ids"] == ["log-1"]
+    assert "evidence_ids" not in prompt.context["claims"][0]
 
 
 def test_verification_prompt_is_deterministic() -> None:

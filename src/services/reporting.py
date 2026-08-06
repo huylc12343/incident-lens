@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from src.models.incidents import ReportNarrative, ReportRequest
 from src.prompts.reporting import build_report_prompt
+from src.services.model_observability import ModelActivityRegistry
 
 
 class ReportServiceError(RuntimeError):
@@ -29,6 +30,7 @@ class OpenAIReportService:
         timeout_s: float = 60.0,
         temperature: float = 0.0,
         prompt_version: str = "v1",
+        observability: ModelActivityRegistry | None = None,
     ) -> None:
         if not model.strip() or not prompt_version.strip():
             raise ValueError("model and prompt_version must not be blank")
@@ -41,6 +43,7 @@ class OpenAIReportService:
         self._timeout_s = timeout_s
         self._temperature = temperature
         self._prompt_version = prompt_version
+        self._observability = observability
 
     async def build_narrative(self, request: ReportRequest) -> ReportNarrative:
         prompt = build_report_prompt(
@@ -50,6 +53,18 @@ class OpenAIReportService:
             log_evidence_summary=request.log_evidence_summary,
             version=self._prompt_version,
         )
+        activity_id = None
+        response = None
+        if self._observability is not None:
+            activity_id = self._observability.start(
+                incident_id=request.incident_id,
+                step="report",
+                operation="report_generation",
+                description="Tổng hợp báo cáo sự cố bằng tiếng Việt từ VideoMemory và kết quả verification.",
+                provider="openai",
+                model=self._model,
+                metadata={"claim_count": len(request.video_memory.claims)},
+            )
         try:
             response = await self._client.responses.parse(
                 model=self._model,
@@ -63,11 +78,15 @@ class OpenAIReportService:
                 parsed = json.loads(getattr(response, "output_text", ""))
             narrative = ReportNarrative.model_validate(parsed)
         except (ValidationError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            if activity_id is not None:
+                self._observability.fail(activity_id, "REPORT_STRUCTURED_OUTPUT_INVALID", response)
             raise ReportServiceError(
                 "REPORT_STRUCTURED_OUTPUT_INVALID",
                 "report model returned invalid structured output",
             ) from exc
         except Exception as exc:
+            if activity_id is not None:
+                self._observability.fail(activity_id, "OPENAI_REPORT_FAILED", response)
             raise ReportServiceError(
                 "OPENAI_REPORT_FAILED",
                 "OpenAI report generation failed",
@@ -77,8 +96,12 @@ class OpenAIReportService:
         if request.log_evidence_summary is not None:
             allowed_evidence.update(request.log_evidence_summary.evidence_ids)
         if not set(narrative.evidence_ids).issubset(allowed_evidence):
+            if activity_id is not None:
+                self._observability.fail(activity_id, "REPORT_EVIDENCE_INVALID", response)
             raise ReportServiceError(
                 "REPORT_EVIDENCE_INVALID",
                 "report references evidence not supplied by the workflow",
             )
+        if activity_id is not None:
+            self._observability.complete(activity_id, response)
         return narrative

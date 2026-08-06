@@ -75,3 +75,12 @@ def test_streamlit_reports_non_json_backend_response() -> None:
             assert "HTTP 500" in str(exc)
         else:
             raise AssertionError("non-JSON responses must be explained")
+
+
+def test_report_renderer_does_not_parse_plain_text_as_json() -> None:
+    streamlit = SimpleNamespace(json=Mock(), write=Mock(), caption=Mock())
+    with patch("main_test.st", streamlit):
+        main_test._render_report_value("Video bắt đầu trên cầu.")
+
+    streamlit.write.assert_called_once_with("Video bắt đầu trên cầu.")
+    streamlit.json.assert_not_called()

@@ -232,5 +232,11 @@ async def test_fastapi_lifespan_bootstraps_configured_workflow(monkeypatch, tmp_
     assert health.status_code == 200
     assert created.status_code == 202
     assert created.json()["status"] == "awaiting_review"
+    activities = created.json()["model_activities"]
+    assert [(item["step"], item["status"]) for item in activities] == [
+        ("vlm", "completed"),
+        ("report", "completed"),
+    ]
+    assert all(item["model"] for item in activities)
     assert closed.status_code == 200
     assert closed.json()["status"] == "not_incident"

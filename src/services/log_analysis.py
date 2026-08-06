@@ -92,22 +92,29 @@ class LogAnalysisService:
         brake_values = [value for value in brake if value is not None]
         acceleration_values = [value for value in acceleration if value is not None]
         steering_changes = _changes(steering)
+        max_deceleration = min(acceleration_values) if acceleration_values else None
+        if max_deceleration is not None and max_deceleration > 0:
+            max_deceleration = 0.0
         metrics: dict[str, float | int | str | bool | None] = {
             "speed_start": speed_values[0] if speed_values else None,
             "speed_end": speed_values[-1] if speed_values else None,
             "speed_min": min(speed_values) if speed_values else None,
             "speed_max": max(speed_values) if speed_values else None,
-            "max_deceleration": min(acceleration_values) if acceleration_values else None,
+            "max_deceleration": max_deceleration,
             "max_brake": max(brake_values) if brake_values else None,
             "brake_rise_time": _first_event_time(events, "brake_rise"),
             "max_steering_change": max(steering_changes, default=None),
             "steering_change_time": _first_event_time(events, "steering_change"),
             "disengagement_time": _first_event_time(events, "disengagement"),
         }
+        metric_evidence_ids = [
+            _metric_evidence_id(name) for name, value in metrics.items() if value is not None
+        ]
         summary = LogEvidenceSummary(
+            summary=_build_summary(window, metrics, warnings, errors),
             metrics=metrics,
             events=[event.model_dump(mode="json") for event in events],
-            evidence_ids=[event.evidence_id for event in events],
+            evidence_ids=[*metric_evidence_ids, *(event.evidence_id for event in events)],
             warnings=warnings,
             errors=errors,
         )
@@ -273,6 +280,46 @@ def _event(
         details=details,
         evidence_id=f"log-evidence:{timestamp_key}:{event_type}",
     )
+
+
+def _metric_evidence_id(name: str) -> str:
+    return f"log-metric:{name}"
+
+
+def _build_summary(
+    window: IncidentWindow,
+    metrics: dict[str, float | int | str | bool | None],
+    warnings: list[str],
+    errors: list[str],
+) -> str:
+    statements = [f"Log được cắt trong khoảng [{window.t_start:g}, {window.t_end:g}] giây."]
+    speed_names = (
+        ("speed_start", "Tốc độ đầu"),
+        ("speed_end", "tốc độ cuối"),
+        ("speed_min", "nhỏ nhất"),
+        ("speed_max", "lớn nhất"),
+    )
+    speeds = [f"{label} {metrics[name]:g} km/h" for name, label in speed_names if metrics[name] is not None]
+    if speeds:
+        statements.append(", ".join(speeds) + ".")
+    if metrics["max_deceleration"] is not None:
+        statements.append(f"Mức giảm tốc lớn nhất là {abs(float(metrics['max_deceleration'])):.3f} m/s².")
+    if metrics["max_brake"] is not None:
+        statements.append(f"Giá trị brake lớn nhất là {metrics['max_brake']:g}.")
+    if metrics["brake_rise_time"] is not None:
+        statements.append(f"Brake tăng mạnh lần đầu tại {metrics['brake_rise_time']:g} giây.")
+    else:
+        statements.append("Không phát hiện brake tăng mạnh trong cửa sổ sự cố.")
+    if metrics["max_steering_change"] is not None:
+        steering = f"Thay đổi steering angle lớn nhất là {metrics['max_steering_change']:g}"
+        if metrics["steering_change_time"] is not None:
+            steering += f" tại {metrics['steering_change_time']:g} giây"
+        statements.append(steering + ".")
+    if metrics["disengagement_time"] is not None:
+        statements.append(f"Disengagement hoặc tài xế tiếp quản tại {metrics['disengagement_time']:g} giây.")
+    statements.append(f"Warning: {', '.join(warnings)}." if warnings else "Không có warning trong đoạn log.")
+    statements.append(f"Error: {', '.join(errors)}." if errors else "Không có error trong đoạn log.")
+    return " ".join(statements)
 
 
 def _changes(values: list[float | None]) -> list[float]:

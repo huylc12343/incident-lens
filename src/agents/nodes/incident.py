@@ -27,6 +27,7 @@ from src.models.incidents import (
     ReportVideoObservationsSection,
     TimestampedFramesAnalysisRequest,
     VerificationRequest,
+    VerificationResult,
     VerificationService,
     VerificationStatus,
     VideoMemory,
@@ -36,7 +37,11 @@ from src.models.incidents import (
 from src.prompts.reanalysis import build_auto_reanalysis_prompt_for_conflicts, build_human_reanalysis_prompt
 from src.prompts.video_analysis import build_video_analysis_prompt
 from src.services.media import NormalizedVideoArtifact
-from src.services.video_memory import VideoMemoryWorkflow, merge_video_memory_patch
+from src.services.video_memory import (
+    VideoMemoryWorkflow,
+    merge_video_memory_patch,
+    reconcile_video_memory_patch_evidence,
+)
 
 
 class MediaWorkflowService(Protocol):
@@ -471,8 +476,18 @@ async def build_draft_report_node(
             warnings = list(dict.fromkeys([*warnings, warning]))
             narrative = _fallback_report_narrative(memory, has_log=state.get("log_evidence_summary") is not None)
 
+    if memory.video_summary:
+        narrative = narrative.model_copy(update={"summary": memory.video_summary})
     if state.get("log_evidence_summary") is None:
         narrative = narrative.model_copy(update={"log_findings": "Không có dữ liệu log."})
+    else:
+        log_summary = state["log_evidence_summary"]
+        narrative = narrative.model_copy(
+            update={
+                "log_findings": log_summary.summary or "Không có dữ liệu log có thể tổng hợp trong cửa sổ sự cố.",
+                "alignment": _verification_alignment(state.get("verification")),
+            }
+        )
     conflict_ids = [
         claim.claim_id for claim in memory.claims if claim.verification_status == VerificationStatus.CONTRADICTED
     ]
@@ -567,6 +582,12 @@ async def _reanalyze(
             remote_media_handles=state.get("remote_media_handles", memory.remote_media_handles),
         )
     )
+    if frame_manifest is not None:
+        patch = reconcile_video_memory_patch_evidence(
+            patch,
+            frame_manifest.frames,
+            fallback_timestamp_s=memory.incident_window.t0,
+        )
     return merge_video_memory_patch(memory, patch), artifacts
 
 
@@ -620,3 +641,14 @@ def _fallback_report_narrative(memory: VideoMemory, *, has_log: bool) -> ReportN
         ),
         evidence_ids=[item.evidence_id for item in memory.evidence],
     )
+
+
+def _verification_alignment(verification: VerificationResult | None) -> str:
+    if verification is None:
+        return "Không thể đối chiếu claim vì bước verification không trả về kết quả."
+    statements = []
+    for item in verification.results:
+        conclusion = "được log hỗ trợ" if item.status == VerificationStatus.SUPPORTED else "mâu thuẫn với log"
+        evidence = f" Bằng chứng: {', '.join(item.evidence_ids)}." if item.evidence_ids else ""
+        statements.append(f"{item.claim_id} {conclusion}: {item.reason.rstrip('.')}.{evidence}")
+    return " ".join(statements) or "Không có claim để đối chiếu với log."

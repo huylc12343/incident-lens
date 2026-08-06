@@ -28,6 +28,7 @@ from src.services.video_memory import (
     analyze_rolling_batches,
     build_sequence_manifest,
     merge_video_memory_patch,
+    reconcile_video_memory_patch_evidence,
     validate_video_memory,
 )
 
@@ -182,6 +183,44 @@ async def test_video_analysis_recovers_and_canonicalizes_supplied_frame_evidence
 
 
 @pytest.mark.asyncio
+async def test_video_analysis_maps_model_evidence_alias_to_nearest_real_frame() -> None:
+    request = _frame_request(3)
+    memory = _memory(duration_s=3, frame_ids=["invented-source-id"])
+    memory = memory.model_copy(
+        update={
+            "claims": [
+                Claim(
+                    claim_id="claim-1",
+                    text="Hai xe va chạm",
+                    timestamp_s=1.8,
+                    evidence_ids=["collision-evidence"],
+                )
+            ],
+            "evidence": [
+                EvidenceReference(
+                    evidence_id="collision-evidence",
+                    kind="frame",
+                    artifact_uri="hallucinated.jpg",
+                    timestamp_s=1.8,
+                    description="Khung hình va chạm.",
+                )
+            ],
+        }
+    )
+    workflow = VideoMemoryWorkflow(
+        vlm=_vlm(input_mode=VLMInputMode.TIMESTAMPED_FRAMES, max_images=3, side_effect=memory),
+        config=VideoMemoryWorkflowConfig(max_frames_per_request=3),
+    )
+
+    result = await workflow.analyze(request)
+
+    assert result.claims[0].evidence_ids == ["frame-2"]
+    assert result.evidence[0].evidence_id == "frame-2"
+    assert result.evidence[0].artifact_uri == request.manifest.frames[2].image_uri
+    assert result.source_frame_ids == ["frame-2"]
+
+
+@pytest.mark.asyncio
 async def test_rolling_batches_only_on_overflow_and_finish_with_synthesis() -> None:
     request = _frame_request(6)
 
@@ -327,6 +366,35 @@ def test_validate_video_memory_rejects_representative_timestamp_outside_incident
         validate_video_memory(memory, source_duration_s=5)
 
     assert exc_info.value.code == "VLM_REPRESENTATIVE_TIMESTAMP_INVALID"
+
+
+def test_reanalysis_patch_maps_evidence_alias_to_real_frame() -> None:
+    patch = VideoMemoryPatch(
+        target_claim_ids=["claim-1"],
+        claims=[
+            Claim(
+                claim_id="claim-1",
+                text="Va chạm được xác nhận lại",
+                timestamp_s=1.9,
+                evidence_ids=["model-collision-proof"],
+            )
+        ],
+        evidence=[
+            EvidenceReference(
+                evidence_id="model-collision-proof",
+                kind="frame",
+                artifact_uri="invented.jpg",
+                timestamp_s=1.9,
+            )
+        ],
+        base_revision=1,
+    )
+
+    result = reconcile_video_memory_patch_evidence(patch, _frames(3), fallback_timestamp_s=1)
+
+    assert result.claims[0].evidence_ids == ["frame-2"]
+    assert result.evidence[0].evidence_id == "frame-2"
+    assert result.evidence[0].artifact_uri == "data:image/jpeg;base64,2"
 
 
 def test_merge_video_memory_patch_updates_only_targets_and_revision() -> None:

@@ -50,6 +50,11 @@ def build_video_analysis_prompt(
             "Tạo claim riêng có bằng chứng cho từng giai đoạn quan trọng nhìn thấy được, gồm sự kiện chính, diễn biến "
             "và kết cục quan sát được. Không gộp sự cố nhiều giai đoạn thành một claim chung và không tạo thêm claim "
             "khi bằng chứng chỉ cho thấy một sự thật.",
+            "Chỉ mô tả điều quan sát được trực tiếp trong chuỗi. Không suy diễn nguyên nhân, ý định, làn đường, thao "
+            "tác phanh/đánh lái, danh tính phương tiện hoặc kết cục ngoài khung hình nếu hình ảnh không thể hiện rõ. "
+            "Khi chi tiết không chắc chắn, ghi vào uncertainties thay vì biến thành claim.",
+            "Mỗi câu trong video_summary phải nhất quán với timeline và claims có evidence. Không khẳng định màu sắc, "
+            "loại xe, hướng di chuyển hoặc va chạm nếu không có ít nhất một frame nhìn thấy rõ chi tiết đó.",
             "Mỗi claim thực tế phải dẫn evidence ID. Nếu thiếu bằng chứng, nêu rõ sự không chắc chắn thay vì bịa.",
             "Mỗi evidence_id được timeline, observations hoặc claims sử dụng phải có đúng một object cùng "
             "evidence_id trong danh sách evidence. Với bằng chứng khung hình, dùng trực tiếp frame_id đã được cung "

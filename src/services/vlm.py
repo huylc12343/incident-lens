@@ -29,6 +29,7 @@ from src.models.incidents import (
     VLMInputMode,
     VLMProvider,
 )
+from src.services.model_observability import ModelActivityRegistry
 
 logger = logging.getLogger(__name__)
 StructuredModel = TypeVar("StructuredModel", bound=BaseModel)
@@ -51,6 +52,7 @@ class OpenAIVLMService:
         timeout_s: float = 120.0,
         temperature: float = 0.0,
         max_images_per_request: int = 120,
+        observability: ModelActivityRegistry | None = None,
     ) -> None:
         if not model.strip():
             raise ValueError("model must not be blank")
@@ -60,6 +62,7 @@ class OpenAIVLMService:
         self._model = model
         self._timeout_s = timeout_s
         self._temperature = temperature
+        self._observability = observability
         self._capabilities = VLMCapabilities(
             provider=VLMProvider.OPENAI,
             input_mode=VLMInputMode.TIMESTAMPED_FRAMES,
@@ -74,7 +77,15 @@ class OpenAIVLMService:
         if not isinstance(request, TimestampedFramesAnalysisRequest):
             raise VLMServiceError("OPENAI_UNSUPPORTED_INPUT_MODE", "OpenAI VLM accepts timestamped frames only")
         content = await self._build_frame_content(request.prompt.text, request.manifest.frames)
-        return await self._parse_response(content, VideoMemory, "OPENAI_VIDEO_ANALYSIS_FAILED")
+        return await self._parse_response(
+            content,
+            VideoMemory,
+            "OPENAI_VIDEO_ANALYSIS_FAILED",
+            incident_id=request.incident_id,
+            operation="video_analysis",
+            description="Phân tích toàn bộ video và tạo VideoMemory có cấu trúc.",
+            metadata={"image_count": len(request.manifest.frames), "input_mode": "timestamped_frames"},
+        )
 
     async def reanalyze_claims(self, request: ReanalysisRequest) -> VideoMemoryPatch:
         if request.frame_manifest is None:
@@ -83,7 +94,18 @@ class OpenAIVLMService:
                 "OpenAI re-analysis requires a timestamped frame manifest",
             )
         content = await self._build_frame_content(request.prompt.text, request.frame_manifest.frames)
-        patch = await self._parse_response(content, VideoMemoryPatch, "OPENAI_REANALYSIS_FAILED")
+        patch = await self._parse_response(
+            content,
+            VideoMemoryPatch,
+            "OPENAI_REANALYSIS_FAILED",
+            incident_id=request.incident_id,
+            operation="claim_reanalysis",
+            description="Phân tích lại các claim được chọn trong cửa sổ sự cố.",
+            metadata={
+                "image_count": len(request.frame_manifest.frames),
+                "target_claim_ids": request.target_claim_ids,
+            },
+        )
         _validate_patch_targets(patch, request.target_claim_ids)
         return patch
 
@@ -112,7 +134,7 @@ class OpenAIVLMService:
                 {
                     "type": "input_image",
                     "image_url": await _image_data_url(frame.image_uri, frame.mime_type),
-                    "detail": "high",
+                    "detail": "low",
                 }
             )
         return content
@@ -122,7 +144,24 @@ class OpenAIVLMService:
         content: list[dict[str, Any]],
         output_model: type[StructuredModel],
         error_code: str,
+        *,
+        incident_id: str,
+        operation: str,
+        description: str,
+        metadata: dict[str, Any],
     ) -> StructuredModel:
+        activity_id = None
+        response = None
+        if self._observability is not None:
+            activity_id = self._observability.start(
+                incident_id=incident_id,
+                step="vlm",
+                operation=operation,
+                description=description,
+                provider="openai",
+                model=self._model,
+                metadata=metadata,
+            )
         try:
             response = await self._client.responses.parse(
                 model=self._model,
@@ -135,12 +174,19 @@ class OpenAIVLMService:
             if parsed is None:
                 output_text = getattr(response, "output_text", "")
                 parsed = json.loads(output_text)
-            return output_model.model_validate(parsed)
+            result = output_model.model_validate(parsed)
+            if activity_id is not None:
+                self._observability.complete(activity_id, response)
+            return result
         except VLMServiceError:
             raise
         except (ValidationError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            if activity_id is not None:
+                self._observability.fail(activity_id, "VLM_STRUCTURED_OUTPUT_INVALID", response)
             raise VLMServiceError("VLM_STRUCTURED_OUTPUT_INVALID", str(exc)) from exc
         except Exception as exc:
+            if activity_id is not None:
+                self._observability.fail(activity_id, error_code, response)
             raise VLMServiceError(error_code, str(exc), retryable=True) from exc
 
 
@@ -161,6 +207,7 @@ class GeminiNativeVideoVLMService:
         reupload_missing_file: bool = True,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         monotonic: Callable[[], float] = time.monotonic,
+        observability: ModelActivityRegistry | None = None,
     ) -> None:
         if not model.strip():
             raise ValueError("model must not be blank")
@@ -180,6 +227,7 @@ class GeminiNativeVideoVLMService:
         self._reupload_missing_file = reupload_missing_file
         self._sleep = sleep
         self._monotonic = monotonic
+        self._observability = observability
         self._capabilities = VLMCapabilities(
             provider=VLMProvider.GEMINI,
             input_mode=VLMInputMode.NATIVE_VIDEO,
@@ -195,6 +243,9 @@ class GeminiNativeVideoVLMService:
         handle = await self._upload_and_wait(request.normalized_video_uri)
         try:
             memory = await self._generate(
+                incident_id=request.incident_id,
+                operation="video_analysis",
+                description="Phân tích toàn bộ video native và tạo VideoMemory có cấu trúc.",
                 handle=handle,
                 prompt=request.prompt.text,
                 output_model=VideoMemory,
@@ -215,6 +266,9 @@ class GeminiNativeVideoVLMService:
         handle = await self._resolve_reanalysis_handle(request)
         try:
             patch = await self._generate(
+                incident_id=request.incident_id,
+                operation="claim_reanalysis",
+                description="Phân tích lại các claim được chọn trong cửa sổ sự cố.",
                 handle=handle,
                 prompt=request.prompt.text,
                 output_model=VideoMemoryPatch,
@@ -297,6 +351,9 @@ class GeminiNativeVideoVLMService:
     async def _generate(
         self,
         *,
+        incident_id: str,
+        operation: str,
+        description: str,
         handle: RemoteMediaHandle,
         prompt: str,
         output_model: type[StructuredModel],
@@ -317,6 +374,24 @@ class GeminiNativeVideoVLMService:
             end_offset=f"{video_end_s}s" if video_end_s is not None else None,
             fps=self._video_fps,
         )
+        activity_id = None
+        response = None
+        if self._observability is not None:
+            activity_id = self._observability.start(
+                incident_id=incident_id,
+                step="vlm",
+                operation=operation,
+                description=description,
+                provider="gemini",
+                model=self._model,
+                metadata={
+                    "input_mode": "native_video",
+                    "media_resolution": self._media_resolution,
+                    "video_fps": self._video_fps,
+                    "video_start_s": video_start_s,
+                    "video_end_s": video_end_s,
+                },
+            )
         try:
             response = await self._client.aio.models.generate_content(
                 model=self._model,
@@ -331,12 +406,19 @@ class GeminiNativeVideoVLMService:
             parsed = getattr(response, "parsed", None)
             if parsed is None:
                 parsed = json.loads(getattr(response, "text", ""))
-            return output_model.model_validate(parsed)
+            result = output_model.model_validate(parsed)
+            if activity_id is not None:
+                self._observability.complete(activity_id, response)
+            return result
         except (ValidationError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            if activity_id is not None:
+                self._observability.fail(activity_id, "VLM_STRUCTURED_OUTPUT_INVALID", response)
             raise VLMServiceError("VLM_STRUCTURED_OUTPUT_INVALID", str(exc)) from exc
         except Exception as exc:
             if isinstance(exc, VLMServiceError):
                 raise
+            if activity_id is not None:
+                self._observability.fail(activity_id, "GEMINI_GENERATION_FAILED", response)
             raise VLMServiceError("GEMINI_GENERATION_FAILED", str(exc), retryable=True) from exc
 
 

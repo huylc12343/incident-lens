@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypedDict
 
-from src.models.api import ReviewAuditEntry
+from src.models.api import ModelActivity, ReviewAuditEntry
 from src.models.incidents import (
     Claim,
     DraftReport,
@@ -49,6 +49,7 @@ class IncidentState(TypedDict, total=False):
     review_feedback: str
     last_review_action: Literal["approve", "edit", "reanalyze", "not_incident"]
     review_audit: list[ReviewAuditEntry]
+    model_activities: list[ModelActivity]
     artifact_uris: dict[str, str]
     warnings: list[str]
     error_code: str

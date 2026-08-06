@@ -5,14 +5,38 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.routes import router
 from src.config import get_settings
+from src.services.incident_runtime import incident_workflow_service
+from src.services.uploads import IncidentUploadService
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
     print(f"Starting {settings.app_name} in {settings.app_env} mode")
-    yield
-    print("Shutting down...")
+    app.state.incident_upload_service = IncidentUploadService(
+        upload_dir=settings.incident_upload_dir,
+        max_video_bytes=settings.incident_max_video_bytes,
+        max_log_bytes=settings.incident_max_log_bytes,
+    )
+    try:
+        runtime = incident_workflow_service(settings)
+        service = await runtime.__aenter__()
+    except Exception:
+        app.state.incident_workflow_startup_error = "Incident workflow configuration is unavailable."
+        try:
+            yield
+        finally:
+            del app.state.incident_upload_service
+            print("Shutting down...")
+    else:
+        app.state.incident_workflow_service = service
+        try:
+            yield
+        finally:
+            del app.state.incident_workflow_service
+            del app.state.incident_upload_service
+            await runtime.__aexit__(None, None, None)
+            print("Shutting down...")
 
 
 app = FastAPI(

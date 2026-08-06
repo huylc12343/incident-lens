@@ -1,201 +1,170 @@
-# 🤖 AI20K Agent Template
+# Incident Analysis Agent
 
-Template chính thức cho học viên **VinUni AI20K Build Phase** — cung cấp sẵn cấu trúc dự án, code mẫu, và hướng dẫn kỹ thuật chi tiết để xây dựng AI Agent đạt điểm cao (35+/50).
+Backend FastAPI + LangGraph phân tích video giao thông dưới 60 giây, kết hợp log xe tùy chọn, tạo báo cáo 10 mục và dừng tại bước kỹ thuật viên review. Dự án có Streamlit client độc lập trong `main_test.py` để chạy toàn bộ lifecycle qua HTTP API.
 
-> 📖 **Technical Guidebook:** [phoenix.note.transformerlabs.ai/technical-book](https://phoenix.note.transformerlabs.ai/technical-book)
+## Luồng xử lý
 
-## 🎯 Template này dùng để làm gì?
-
-Khi tham gia AI20K Build Phase, mỗi đội cần xây dựng một AI Agent hoàn chỉnh — từ kiến trúc, code, test, đến deploy. Thay vì bắt đầu từ con số không, template này cung cấp:
-
-- **Cấu trúc thư mục chuẩn** — đã được thiết kế theo best practices (separation of concerns)
-- **Code mẫu** cho các phần cốt lõi: LangGraph agent, FastAPI API, config, schemas
-- **Docker + CI/CD sẵn** — Dockerfile multi-stage, GitHub Actions workflow
-- **Hướng dẫn kỹ thuật 10 chương** — từ clone template đến nộp bài Demo Day
-- **Checklist 10 deliverables** — đảm bảo không bỏ sót yêu cầu BTC
-- **AI Usage Logging tự động** — Pre-configured hooks cho Claude Code, Cursor, Codex, Gemini CLI, Antigravity, và GitHub Copilot
-
-## ⚡ Quick Start
-
-### Bước 1: Fork hoặc Clone
-
-```bash
-# Clone template
-git clone https://github.com/AI20K-Build-Cohort-2/starter-code-template.git team-YOUR_TEAM_NAME
-cd team-YOUR_TEAM_NAME
-
-# Xóa git history cũ và khởi tạo lại
-rm -rf .git
-git init
-git add .
-git commit -m "feat: khởi tạo dự án từ template"
+```text
+video + optional log
+  → VLM tìm t_start, t0, t_end, timeline và claims
+  → cắt incident clip + representative frames
+  → nếu có log: cắt log + metrics/events + 4 charts + verify claims
+  → nếu có conflict: focused VLM re-analysis tối đa 1 lần + verify lại
+  → backend lắp báo cáo cố định 10 mục
+  → LangGraph interrupt chờ human review
+  → approve | edit | reanalyze | not_incident
+  → SQLite checkpoint + terminal report repository
 ```
 
-### Bước 2: Setup môi trường
+`edit` chỉ sửa sáu trường narrative và quay lại `awaiting_review`; không tự approve và không gọi LLM. `reanalyze` bắt buộc có feedback cùng target claim IDs, sau đó tạo lại báo cáo và quay lại review. Chỉ `approve` và `not_incident` là terminal.
+
+## Cài đặt
+
+Yêu cầu Python 3.11 và FFmpeg. `MediaService` ưu tiên `ffmpeg`/`ffprobe` trong `PATH`; package `imageio-ffmpeg` cung cấp fallback cho FFmpeg.
 
 ```bash
-# Tạo virtual environment
 python3.11 -m venv .venv
 source .venv/bin/activate
-
-# Cài dependencies
-pip install -e ".[dev]"
-
-# Cấu hình API keys
+pip install -r requirements.txt
 cp .env.example .env
-# Mở .env và thêm OPENAI_API_KEY của bạn
-# Đồng thời cập nhật AI_LOG_API_KEY bằng key riêng từ link mời của BTC
-# (giá trị trong .env.example chỉ là placeholder)
 ```
 
-### Bước 3: Cài AI Logging Hooks
+Cấu hình tối thiểu cho OpenAI timestamped frames:
 
-```bash
-# Linux / macOS / Git Bash
-bash scripts/setup_hooks.sh
-
-# Windows PowerShell
-# powershell -ExecutionPolicy Bypass -File scripts\setup_hooks.ps1
+```dotenv
+OPENAI_API_KEY=...
+VLM_PROVIDER=openai
+VLM_INPUT_MODE=timestamped_frames
+INCIDENT_INPUT_ROOTS=./data_mock
+INCIDENT_UPLOAD_DIR=./data/uploads
+ARTIFACT_DIR=./data/artifacts
+INCIDENT_DATABASE_PATH=./data/incident_reports.sqlite3
+INCIDENT_CHECKPOINT_PATH=./data/incident_checkpoints.sqlite3
 ```
 
-Hooks tự động log mọi AI prompt khi dùng Claude Code, Cursor, Codex, Gemini CLI, Antigravity, hoặc GitHub Copilot. Không cần thao tác thủ công.
+Incident clip mặc định có tối thiểu 5 giây, thêm 1 giây trước và 2 giây sau window do VLM xác định. Có thể điều chỉnh bằng `INCIDENT_CLIP_MIN_DURATION_S`, `INCIDENT_CLIP_PRE_ROLL_S` và `INCIDENT_CLIP_POST_ROLL_S`. Ảnh `representative_frame` được chọn gần `t0` thay vì lấy frame đầu tiên.
 
-### Bước 4: Chạy server
+Gemini native video dùng cặp cấu hình `VLM_PROVIDER=gemini`, `VLM_INPUT_MODE=native_video` và `GEMINI_API_KEY`. Hai tổ hợp provider/input mode ngược lại bị Settings từ chối.
+
+Streamlit upload file vào `INCIDENT_UPLOAD_DIR`; backend kiểm tra phần mở rộng, dung lượng, path root, file tồn tại và video không quá 60 giây. URL từ xa và external object storage không thuộc baseline.
+
+## Chạy backend và Streamlit
+
+Terminal 1:
 
 ```bash
-# Chạy FastAPI backend
 uvicorn src.main:app --reload --port 8000
-
-# Mở Swagger UI
-# http://localhost:8000/docs
 ```
 
-### Bước 5: Đọc hướng dẫn
+Terminal 2:
 
-📖 Mở **[Technical Guidebook](https://phoenix.note.transformerlabs.ai/technical-book)** và làm theo từng chương.
-
-## 📁 Cấu trúc dự án
-
-```
-├── src/
-│   ├── agents/           # 🧠 LangGraph Agent
-│   │   ├── graph.py      #    State graph (nodes + edges)
-│   │   ├── state.py      #    State schema (TypedDict)
-│   │   ├── nodes/        #    Node functions
-│   │   └── tools/        #    Agent tools (@tool)
-│   ├── api/              # 🌐 FastAPI Backend
-│   │   └── routes.py     #    API endpoints
-│   ├── models/           # 📋 Pydantic schemas
-│   ├── services/         # 🔧 Business logic (LLM, etc.)
-│   ├── config.py         # ⚙️ Pydantic Settings
-│   └── main.py           # 🚀 App entry point
-├── tests/                # 🧪 pytest suite
-│   ├── test_agents/      #    Agent/graph tests
-│   └── test_api/         #    API endpoint tests
-├── scripts/              # 🔌 AI Logging Hooks
-│   ├── log_hook.py       #    Auto-log cho Claude/Cursor/Codex/Gemini/Copilot
-│   ├── log_antigravity.py#    Antigravity IDE prompt scanner
-│   ├── log_manual.py     #    Manual log cho ChatGPT / web tools
-│   ├── submit_log.py     #    Submit logs on git push
-│   └── setup_hooks.sh    #    One-time hook installer
-├── .claude/ .codex/ .cursor/ .gemini/  # Per-tool hook configs
-├── .agents/              # Antigravity rules + workflows
-├── .ai-log/              # 📊 AI usage logs (auto-generated)
-├── docs/
-│   ├── guide/            # 📖 Technical Guidebook (10 chapters)
-│   └── architecture_diagram.md
-├── eval/                 # 📊 Evaluation results
-├── presentation/         # 🎤 Demo Day slides
-├── .github/workflows/    # ⚡ CI/CD (GitHub Actions)
-├── .github/hooks/        # 🪝 Copilot hook config
-├── Dockerfile            # 🐳 Multi-stage build
-├── docker-compose.yml    # 🐙 Full stack orchestration
-└── README_boilerplate.md # 📝 README template cho đội của bạn
-```
-
-## 📚 Technical Guidebook — 10 Chương
-
-| Chương | Nội dung | Thời gian |
-|---------|----------|-----------|
-| 1 | Lời mở đầu — Mục tiêu, cách sử dụng | 15 phút |
-| 2 | Khởi tạo dự án — Clone, setup, git workflow | 4 giờ |
-| 3 | Thiết kế kiến trúc — 3-tier, diagrams, ADR | 6 giờ |
-| 4 | **LangGraph Agent** — State, nodes, edges, tools, RAG | 8 giờ |
-| 5 | FastAPI — Routes, validation, error handling, streaming | 6 giờ |
-| 6 | Giao diện — Next.js + Streamlit quickstart | 6 giờ |
-| 7 | DevOps — Docker, CI/CD, deploy, logging | 6 giờ |
-| 8 | Kiểm thử — Unit test, integration test, RAGAS | 4 giờ |
-| 9 | Demo Day — 10 deliverables, checklist, tips | 2 giờ |
-| 10 | Tài nguyên — Khóa học, docs, BMAD method | tham khảo |
-
-📖 **Đọc online:** [phoenix.note.transformerlabs.ai/technical-book](https://phoenix.note.transformerlabs.ai/technical-book)
-
-## 📋 10 Deliverables cho Demo Day
-
-| # | Deliverable | File vị trí | Template có sẵn |
-|---|-------------|-------------|:---:|
-| 1 | Source Code | `src/` | ✅ |
-| 2 | README.md | `README_boilerplate.md` → copy thành `README.md` | ✅ |
-| 3 | Architecture Diagram | `docs/architecture_diagram.md` | ✅ |
-| 4 | AI Logs | LangSmith (3 env vars) + Auto AI Usage Logging | ✅ |
-| 5 | Live URL | Deploy lên Render/Vercel | ⚡ CI/CD sẵn |
-| 6 | Video Demo | `presentation/` | 📝 |
-| 7 | Pitch Deck | `presentation/` | 📝 |
-| 8 | Development Journal | `JOURNAL.md` | ✅ |
-| 9 | Worklog | `WORKLOG.md` | ✅ |
-| 10 | Evaluation Evidence | `eval/` | 📝 |
-
-## 🛠 Tech Stack
-
-| Layer | Technology | Version |
-|-------|-----------|---------|
-| AI Agent | LangGraph + LangChain | Latest |
-| Backend | FastAPI + Uvicorn | 0.100+ |
-| LLM | OpenAI GPT-4o-mini | API |
-| Frontend | Next.js / Streamlit | 14+ / 1.30+ |
-| Database | SQLite (dev) / PostgreSQL (prod) | — |
-| DevOps | Docker + GitHub Actions | — |
-| Testing | pytest + pytest-asyncio | 8+ |
-
-## 📊 AI Usage Logging
-
-Template đã tích hợp sẵn auto-logging hooks cho 6 AI tools:
-
-| Tool | Cơ chế | Config |
-|------|--------|--------|
-| Claude Code | `.claude/settings.json` hooks | Tự động |
-| Cursor | `.cursor/hooks.json` | Tự động |
-| OpenAI Codex CLI | `.codex/hooks.json` | Tự động |
-| Gemini CLI | `.gemini/settings.json` | Tự động |
-| GitHub Copilot | `.github/hooks/hooks.json` | Tự động |
-| Antigravity IDE | Pre-push scan transcript | Tự động trên `git push` |
-
-Tất cả prompts và tool calls được log vào `.ai-log/session.jsonl` và tự động submit lên grading server mỗi khi `git push`.
-
-**ChatGPT / web tools khác** — log thủ công:
 ```bash
-bash scripts/_pyrun.sh scripts/log_manual.py --tool chatgpt --prompt "What you asked"
+streamlit run main_test.py
 ```
 
-> ⚠️ Chạy `bash scripts/setup_hooks.sh` một lần sau khi clone để cài pre-push hook.
+Swagger: `http://localhost:8000/docs`.
 
-## 📖 Đọc Technical Guidebook
+Trong Streamlit, chọn video bằng nút **Browse files** và chọn log CSV nếu có; không cần nhập đường dẫn file.
 
-**Online (khuyến nghị):** [phoenix.note.transformerlabs.ai/technical-book](https://phoenix.note.transformerlabs.ai/technical-book)
+Workflow chạy đồng bộ đến Human Review nên VLM + verification + report có thể mất vài phút. Streamlit chờ tối đa 900 giây và hiển thị riêng lỗi kết nối, timeout hoặc response backend không phải JSON; xem terminal Uvicorn nếu backend báo HTTP 500.
 
-Đăng nhập bằng GitHub (cùng account đã được BTC mời vào org `AI20K-Build-Cohort-2`)
-→ chọn tab **Technical Book** ở sidebar trái → đọc 10 chương + topic sections,
-có table of contents bên phải, hỗ trợ light/dark/cyberpunk theme.
+Nếu OpenAI verification thất bại, workflow không còn kết thúc bằng lỗi: claims giữ trạng thái `unverified`, snapshot ghi warning và backend tạo báo cáo fallback từ `video_summary`, timeline và evidence mà VLM đã trả. Khi verification của incident có log không khả dụng, lần gọi report model được bỏ qua. Sau khi sửa `.env` hoặc cập nhật code, phải khởi động lại FastAPI và dùng incident ID mới vì incident cũ vẫn có checkpoint.
 
-**Offline:** mọi chương đều ở thư mục `docs/guide/` trong template này — mở bằng
-bất kỳ markdown viewer/editor nào (VS Code, Obsidian, GitHub UI, …).
+## Incident API
 
-## 🔗 Liên kết
+### Upload video và log
 
-- 📖 **Technical Guidebook:** [phoenix.note.transformerlabs.ai/technical-book](https://phoenix.note.transformerlabs.ai/technical-book)
-- 🏫 **AI20K Program:** VinUni AI20K Build Phase
-- 👨‍🏫 **Mentor:** Đặng Hải Lộc
+```http
+POST /api/v1/incidents/uploads
+Content-Type: multipart/form-data
 
-## 📄 License
+video=<video file, bắt buộc>
+log=<CSV file, tùy chọn>
+```
 
-MIT — Sử dụng tự do cho mục đích giáo dục.
+Video hỗ trợ `.mp4`, `.mov`, `.avi`, `.mkv`, `.webm`; log hỗ trợ `.csv`. Response trả `video_uri` và `log_uri` nội bộ để dùng trong request tạo incident.
+
+### Tạo incident
+
+```http
+POST /api/v1/incidents
+Content-Type: application/json
+
+{
+  "incident_id": "INC-001",
+  "video_uri": "data_mock/front_camera.mp4",
+  "log_uri": "data_mock/vehicle_state.csv",
+  "analysis_prompt": "Phân tích sự cố trong video."
+}
+```
+
+### Lấy snapshot
+
+```http
+GET /api/v1/incidents/INC-001
+```
+
+Snapshot chỉ trả public lifecycle, báo cáo, claims, artifacts, warnings và audit; không trả raw graph state, API key, prompt nội bộ, remote provider handle hay chain-of-thought.
+
+### Gửi review
+
+```http
+POST /api/v1/incidents/INC-001/review
+Content-Type: application/json
+
+{
+  "action": "approve",
+  "reviewer": "reviewer@example.com"
+}
+```
+
+Các payload khác:
+
+```json
+{"action":"edit","reviewer":"tech","edits":{"summary":"Nội dung đã sửa"}}
+{"action":"reanalyze","reviewer":"tech","feedback":"Kiểm tra lại phanh","target_claim_ids":["claim-1"]}
+{"action":"not_incident","reviewer":"tech","reason":"Không phải sự cố an toàn"}
+```
+
+Create/review trả `202` khi đang chờ review, `200` khi terminal; `404` cho incident không tồn tại, `409` cho duplicate/sai lifecycle và `422` cho schema/input không hợp lệ.
+
+## Báo cáo 10 mục
+
+`DraftReport` gồm đúng 10 section:
+
+1. Thông tin chung.
+2. Khoảng thời gian sự cố.
+3. Tóm tắt sự cố.
+4. Timeline và typed events.
+5. Quan sát video và typed observations.
+6. Kết quả log và typed metrics/events.
+7. Đối chiếu và typed claim verification.
+8. Nguyên nhân giả thuyết.
+9. Evidence/artifact/warnings.
+10. Review status.
+
+LLM chỉ sinh sáu narrative fields. Backend sở hữu timestamps, metrics, verification status, evidence/artifact URI, warning và review status. Video-only luôn ghi `Không có dữ liệu log.`.
+
+## Persistence
+
+- `INCIDENT_CHECKPOINT_PATH`: SQLite LangGraph checkpoint để GET/resume incident `awaiting_review` sau process restart.
+- `INCIDENT_DATABASE_PATH`: SQLite repository cho terminal `approved | not_incident`.
+- Gemini remote handle được giữ trong pending checkpoint để reuse/re-upload; terminal/failure thực hiện cleanup best-effort.
+
+## Kiểm thử
+
+```bash
+ruff check src tests main_test.py
+ruff format --check src tests main_test.py
+python -m compileall -q src tests main_test.py
+pytest tests -v --tb=short
+pip check
+```
+
+E2E tests chạy graph, API, SQLite restart, FFmpeg, log và chart thật với asset trong `data_mock/`; OpenAI/Gemini chỉ được mock tại SDK boundary nên không phát sinh chi phí model.
+
+## Giới hạn hiện tại
+
+- Chưa có authentication/authorization, external object storage, queue phân tán hoặc production observability.
+- SQLite phù hợp demo/single-process; deployment nhiều worker cần database/checkpointer có concurrency model phù hợp hơn.
+- Live startup FastAPI/Streamlit và E2E mocked-provider đã được kiểm tra. Chưa gọi model thật vì không có explicit approval phát sinh chi phí, vì vậy kết quả không được tuyên bố production-ready.

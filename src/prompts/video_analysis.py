@@ -39,7 +39,7 @@ def build_video_analysis_prompt(
             "Xác định đầy đủ cửa sổ sự cố bằng t_start, t0 và t_end, thỏa mãn t_start <= t0 <= t_end. Đặt t_start "
             "tại dấu hiệu sớm nhất liên quan trực tiếp, t0 tại sự kiện nguy cấp chính và chỉ đặt t_end sau khi hậu "
             "quả hoặc kết cục cuối cùng nhìn thấy được đã kết thúc.",
-            "Nếu hai phương tiện va chạm, t0 phải là thời điểm tiếp xúc thực tế hoặc tiếp cận gần nhất; không dùng "
+            "Nếu hai phương tiện va chạm, t0 phải là thời điểm tiếp xúc thực tế; không dùng "
             "thời điểm lao khỏi đường, va xuống nước, xuất hiện mảnh vỡ hoặc cảnh hậu quả về sau.",
             "Trả về VideoMemory có cấu trúc gồm global_scene, video_summary, tracked_entities, incident_window, "
             "representative_timestamp_s, timeline, observations, claims, uncertainties, evidence và source_frame_ids.",

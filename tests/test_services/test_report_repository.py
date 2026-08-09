@@ -51,6 +51,16 @@ def test_sqlite_repository_persists_across_instances(tmp_path: Path) -> None:
     assert loaded.stored_at is not None
 
 
+def test_sqlite_repository_lists_reports_newest_first(tmp_path: Path) -> None:
+    database = tmp_path / "reports.sqlite3"
+    repository = SQLiteReportRepository(str(database))
+    repository.store(_stored_report())
+
+    reports = repository.list_reports()
+
+    assert [report.incident_id for report in reports] == ["INC-STORED"]
+
+
 def test_sqlite_repository_rejects_duplicate_terminal_outcome(tmp_path: Path) -> None:
     repository = SQLiteReportRepository(str(tmp_path / "reports.sqlite3"))
     repository.store(_stored_report())

@@ -23,6 +23,8 @@ class ReportRepository(Protocol):
 
     def get(self, incident_id: str) -> StoredReport | None: ...
 
+    def list_reports(self) -> list[StoredReport]: ...
+
 
 class InMemoryReportRepository:
     def __init__(self) -> None:
@@ -37,6 +39,9 @@ class InMemoryReportRepository:
 
     def get(self, incident_id: str) -> StoredReport | None:
         return self._reports.get(incident_id)
+
+    def list_reports(self) -> list[StoredReport]:
+        return list(self._reports.values())
 
 
 class SQLiteReportRepository:
@@ -104,22 +109,23 @@ class SQLiteReportRepository:
             raise ReportRepositoryError("REPORT_STORAGE_FAILED", "could not read terminal outcome") from exc
         if row is None:
             return None
-        return StoredReport(
-            incident_id=row[0],
-            status=row[1],
-            has_log=bool(row[8]),
-            artifact_uris=json.loads(row[9]),
-            claims=[Claim.model_validate(item) for item in json.loads(row[10])],
-            warnings=_parse_json_list(row[11]),
-            review_audit=[ReviewAuditEntry.model_validate(item) for item in json.loads(row[12])],
-            model_activities=[ModelActivity.model_validate(item) for item in json.loads(row[13])],
-            final_report=DraftReport.model_validate_json(row[2]) if row[2] else None,
-            evidence_ids=_parse_json_list(row[3]),
-            reviewer=row[4],
-            decision=row[5],
-            reason=row[6],
-            stored_at=datetime.fromisoformat(row[7]),
-        )
+        return _stored_report_from_row(row)
+
+    def list_reports(self) -> list[StoredReport]:
+        try:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    """
+                    SELECT incident_id, status, final_report_json, evidence_json,
+                           reviewer, decision, reason, stored_at, has_log,
+                           artifact_json, claims_json, warnings_json, audit_json,
+                           model_activities_json
+                    FROM incident_reports ORDER BY stored_at DESC
+                    """
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise ReportRepositoryError("REPORT_STORAGE_FAILED", "could not list terminal outcomes") from exc
+        return [_stored_report_from_row(row) for row in rows]
 
     def _initialize(self) -> None:
         try:
@@ -167,6 +173,25 @@ class SQLiteReportRepository:
 
 def _json_list(values: list[str]) -> str:
     return json.dumps(values, separators=(",", ":"))
+
+
+def _stored_report_from_row(row: tuple[object, ...]) -> StoredReport:
+    return StoredReport(
+        incident_id=str(row[0]),
+        status=row[1],
+        has_log=bool(row[8]),
+        artifact_uris=json.loads(str(row[9])),
+        claims=[Claim.model_validate(item) for item in json.loads(str(row[10]))],
+        warnings=_parse_json_list(str(row[11])),
+        review_audit=[ReviewAuditEntry.model_validate(item) for item in json.loads(str(row[12]))],
+        model_activities=[ModelActivity.model_validate(item) for item in json.loads(str(row[13]))],
+        final_report=DraftReport.model_validate_json(str(row[2])) if row[2] else None,
+        evidence_ids=_parse_json_list(str(row[3])),
+        reviewer=str(row[4]),
+        decision=row[5],
+        reason=row[6],
+        stored_at=datetime.fromisoformat(str(row[7])),
+    )
 
 
 def _parse_json_list(value: str) -> list[str]:

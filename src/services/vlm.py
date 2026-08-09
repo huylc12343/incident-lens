@@ -13,7 +13,16 @@ from typing import Any, TypeVar
 
 from google import genai
 from google.genai import types
-from openai import AsyncOpenAI
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    AsyncOpenAI,
+    AuthenticationError,
+    BadRequestError,
+    NotFoundError,
+    PermissionDeniedError,
+    RateLimitError,
+)
 from pydantic import BaseModel, ValidationError
 
 from src.models.incidents import (
@@ -163,12 +172,16 @@ class OpenAIVLMService:
                 metadata=metadata,
             )
         try:
+            request_kwargs: dict[str, Any] = {
+                "model": self._model,
+                "input": [{"role": "user", "content": content}],
+                "text_format": output_model,
+                "timeout": self._timeout_s,
+            }
+            if not self._model.startswith("gpt-5"):
+                request_kwargs["temperature"] = self._temperature
             response = await self._client.responses.parse(
-                model=self._model,
-                input=[{"role": "user", "content": content}],
-                text_format=output_model,
-                temperature=self._temperature,
-                timeout=self._timeout_s,
+                **request_kwargs,
             )
             parsed = getattr(response, "output_parsed", None)
             if parsed is None:
@@ -184,6 +197,51 @@ class OpenAIVLMService:
             if activity_id is not None:
                 self._observability.fail(activity_id, "VLM_STRUCTURED_OUTPUT_INVALID", response)
             raise VLMServiceError("VLM_STRUCTURED_OUTPUT_INVALID", str(exc)) from exc
+        except AuthenticationError as exc:
+            if activity_id is not None:
+                self._observability.fail(activity_id, "OPENAI_AUTHENTICATION_FAILED", response)
+            raise VLMServiceError(
+                "OPENAI_AUTHENTICATION_FAILED",
+                "OpenAI authentication failed; check OPENAI_API_KEY",
+            ) from exc
+        except PermissionDeniedError as exc:
+            if activity_id is not None:
+                self._observability.fail(activity_id, "OPENAI_PERMISSION_DENIED", response)
+            raise VLMServiceError(
+                "OPENAI_PERMISSION_DENIED",
+                "OpenAI denied access to the configured video analysis model",
+            ) from exc
+        except RateLimitError as exc:
+            if activity_id is not None:
+                self._observability.fail(activity_id, "OPENAI_RATE_LIMITED", response)
+            raise VLMServiceError(
+                "OPENAI_RATE_LIMITED",
+                "OpenAI rate limit or quota was exceeded",
+                retryable=True,
+            ) from exc
+        except APITimeoutError as exc:
+            if activity_id is not None:
+                self._observability.fail(activity_id, "OPENAI_VIDEO_ANALYSIS_TIMEOUT", response)
+            raise VLMServiceError(
+                "OPENAI_VIDEO_ANALYSIS_TIMEOUT",
+                "OpenAI video analysis timed out",
+                retryable=True,
+            ) from exc
+        except APIConnectionError as exc:
+            if activity_id is not None:
+                self._observability.fail(activity_id, "OPENAI_CONNECTION_FAILED", response)
+            raise VLMServiceError(
+                "OPENAI_CONNECTION_FAILED",
+                "Could not connect to OpenAI",
+                retryable=True,
+            ) from exc
+        except (BadRequestError, NotFoundError) as exc:
+            if activity_id is not None:
+                self._observability.fail(activity_id, "OPENAI_VIDEO_ANALYSIS_REQUEST_INVALID", response)
+            raise VLMServiceError(
+                "OPENAI_VIDEO_ANALYSIS_REQUEST_INVALID",
+                "OpenAI rejected the configured video analysis model or structured request",
+            ) from exc
         except Exception as exc:
             if activity_id is not None:
                 self._observability.fail(activity_id, error_code, response)

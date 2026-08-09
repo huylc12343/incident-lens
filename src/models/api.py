@@ -184,3 +184,8 @@ class StoredReport(APIModel):
         if self.status == "approved" and self.decision not in {"approve", "edit"}:
             raise ValueError("approved status requires approve or edit decision")
         return self
+
+
+class StoredReportsResponse(APIModel):
+    reports: list[StoredReport] = Field(default_factory=list)
+    count: int = Field(default=0, ge=0)

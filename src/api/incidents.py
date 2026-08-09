@@ -5,7 +5,13 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
 
 from src.api.errors import incident_http_error
-from src.models.api import IncidentCreateRequest, IncidentSnapshot, IncidentUploadResponse, ReviewDecision
+from src.models.api import (
+    IncidentCreateRequest,
+    IncidentSnapshot,
+    IncidentUploadResponse,
+    ReviewDecision,
+    StoredReportsResponse,
+)
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 
@@ -57,6 +63,17 @@ async def create_incident(
         raise incident_http_error(exc) from exc
     response.status_code = _response_status(snapshot)
     return snapshot
+
+
+@router.get("/reports", response_model=StoredReportsResponse)
+async def list_stored_reports(
+    service: Any = Depends(get_workflow_service),
+) -> StoredReportsResponse:
+    try:
+        reports = await service.list_reports()
+    except Exception as exc:
+        raise incident_http_error(exc) from exc
+    return StoredReportsResponse(reports=reports, count=len(reports))
 
 
 @router.get("/{incident_id}", response_model=IncidentSnapshot)

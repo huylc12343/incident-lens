@@ -94,6 +94,9 @@ class Settings(BaseSettings):
     incident_input_roots: str = "./data_mock"
     incident_upload_dir: str = "./data/uploads"
     incident_max_duration_s: float = Field(default=60.0, gt=0, le=60)
+    incident_clip_min_duration_s: float = Field(default=5.0, gt=0)
+    incident_clip_pre_roll_s: float = Field(default=1.0, ge=0)
+    incident_clip_post_roll_s: float = Field(default=2.0, ge=0)
     log_timestamp_tolerance_s: float = Field(default=0.5, ge=0)
     log_brake_rise_threshold: float = Field(default=0.3, ge=0)
     log_steering_change_threshold: float = Field(default=10.0, ge=0)

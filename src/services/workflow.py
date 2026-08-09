@@ -121,6 +121,9 @@ class WorkflowService:
             raise WorkflowError("INCIDENT_NOT_FOUND", "incident does not exist")
         return _stored_snapshot(stored)
 
+    async def list_reports(self) -> list[StoredReport]:
+        return self._repository.list_reports()
+
     async def review(self, incident_id: str, decision: ReviewDecision) -> IncidentSnapshot:
         lock = self._review_locks.get(incident_id)
         if lock is None:
@@ -301,15 +304,19 @@ def _stored_snapshot(stored: StoredReport) -> IncidentSnapshot:
 def _safe_processing_error(code: str | None) -> str:
     return {
         "OPENAI_AUTHENTICATION_FAILED": "OpenAI từ chối API key. Kiểm tra OPENAI_API_KEY rồi khởi động lại FastAPI.",
-        "OPENAI_PERMISSION_DENIED": "API key không có quyền dùng model verification đã cấu hình.",
+        "OPENAI_PERMISSION_DENIED": "API key không có quyền dùng model OpenAI đã cấu hình.",
         "OPENAI_RATE_LIMITED": (
-            "Phân tích video và cắt clip đã hoàn tất, nhưng bước OpenAI verification hết quota hoặc đang "
-            "rate-limit. Kiểm tra Billing/Usage rồi thử lại với incident ID mới."
+            "OpenAI hết quota hoặc đang rate-limit. Kiểm tra Billing/Usage rồi thử lại với incident ID mới."
         ),
         "OPENAI_VERIFICATION_TIMEOUT": "OpenAI verification quá thời gian chờ. Thử lại hoặc tăng VERIFICATION_TIMEOUT_S.",
+        "OPENAI_VIDEO_ANALYSIS_TIMEOUT": "OpenAI phân tích video quá thời gian chờ. Thử lại hoặc tăng VLM_TIMEOUT_S.",
         "OPENAI_CONNECTION_FAILED": "Backend không kết nối được tới OpenAI. Kiểm tra mạng/proxy của máy chạy FastAPI.",
         "OPENAI_VERIFICATION_REQUEST_INVALID": (
             "OpenAI từ chối model hoặc structured request verification. Kiểm tra VERIFICATION_MODEL_NAME."
+        ),
+        "OPENAI_VIDEO_ANALYSIS_REQUEST_INVALID": (
+            "OpenAI từ chối model phân tích video, ảnh đầu vào hoặc structured request. "
+            "Kiểm tra OPENAI_VLM_MODEL_NAME và cấu hình VLM."
         ),
         "VERIFICATION_STRUCTURED_OUTPUT_INVALID": "OpenAI trả kết quả verification không đúng schema.",
         "VLM_EVIDENCE_REFERENCE_INVALID": (

@@ -2,7 +2,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
+from openai import AuthenticationError
 
 from src.models.incidents import (
     AnalysisMode,
@@ -134,6 +136,19 @@ async def test_openai_sends_all_ordered_frames_in_one_request(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
+async def test_openai_omits_temperature_for_gpt_5_models(tmp_path: Path) -> None:
+    client = SimpleNamespace(
+        responses=SimpleNamespace(
+            parse=AsyncMock(return_value=SimpleNamespace(output_parsed=_memory(AnalysisMode.SINGLE_REQUEST)))
+        )
+    )
+
+    await OpenAIVLMService(model="gpt-5.6-luna", client=client).analyze_video(_openai_request(tmp_path))
+
+    assert "temperature" not in client.responses.parse.await_args.kwargs
+
+
+@pytest.mark.asyncio
 async def test_openai_rejects_frame_overflow_before_sdk_call(tmp_path: Path) -> None:
     client = SimpleNamespace(responses=SimpleNamespace(parse=AsyncMock()))
     service = OpenAIVLMService(model="gpt-test", client=client, max_images_per_request=1)
@@ -188,6 +203,21 @@ async def test_openai_maps_malformed_and_timeout_errors(
         await OpenAIVLMService(model="gpt-test", client=client).analyze_video(_openai_request(tmp_path))
 
     assert exc_info.value.code == expected_code
+
+
+@pytest.mark.asyncio
+async def test_openai_maps_authentication_error_to_safe_code(tmp_path: Path) -> None:
+    response = httpx.Response(401, request=httpx.Request("POST", "https://api.openai.com/v1/responses"))
+    client = SimpleNamespace(
+        responses=SimpleNamespace(
+            parse=AsyncMock(side_effect=AuthenticationError("invalid API key", response=response, body={}))
+        )
+    )
+
+    with pytest.raises(VLMServiceError) as exc_info:
+        await OpenAIVLMService(model="gpt-test", client=client).analyze_video(_openai_request(tmp_path))
+
+    assert exc_info.value.code == "OPENAI_AUTHENTICATION_FAILED"
 
 
 @pytest.mark.asyncio

@@ -51,6 +51,20 @@ async def test_incident_api_create_get_and_approve(client) -> None:
 
 
 @pytest.mark.asyncio
+async def test_incident_api_lists_sqlite_reports(client) -> None:
+    service = SimpleNamespace(list_reports=AsyncMock(return_value=[]))
+    app.state.incident_workflow_service = service
+    try:
+        response = await client.get("/api/v1/incidents/reports")
+    finally:
+        del app.state.incident_workflow_service
+
+    assert response.status_code == 200
+    assert response.json() == {"reports": [], "count": 0}
+    service.list_reports.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_incident_api_maps_safe_domain_errors(client) -> None:
     service = SimpleNamespace(
         create=AsyncMock(),

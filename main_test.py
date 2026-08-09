@@ -72,6 +72,12 @@ def main() -> None:
     if st.button("Refresh status") and active_id:
         _run_and_store("GET", base_url, f"/api/v1/incidents/{active_id}")
 
+    st.sidebar.divider()
+    st.sidebar.subheader("SQLite")
+    if st.sidebar.button("Refresh SQLite data"):
+        _refresh_sqlite_reports(base_url)
+    _render_sqlite_reports()
+
     _render_live_incident(base_url, active_id)
 
 
@@ -217,6 +223,52 @@ def _render_snapshot(snapshot: dict[str, Any]) -> None:
         st.warning(warning)
     if snapshot.get("error_message"):
         st.error(f"{snapshot.get('error_code')}: {snapshot.get('error_message')}")
+
+
+def _refresh_sqlite_reports(base_url: str) -> None:
+    try:
+        payload = api_request("GET", base_url, "/api/v1/incidents/reports")
+        reports = payload.get("reports")
+        if not isinstance(reports, list):
+            raise RuntimeError("API SQLite trả về dữ liệu không hợp lệ.")
+        st.session_state.sqlite_reports = reports
+        st.success(f"Đã tải {len(reports)} record từ SQLite.")
+    except RuntimeError as exc:
+        st.error(str(exc))
+
+
+def _render_sqlite_reports() -> None:
+    st.subheader("Dữ liệu SQLite — incident_reports")
+    reports = st.session_state.get("sqlite_reports", [])
+    if not reports:
+        st.info("Chọn 'Refresh SQLite data' để tải các báo cáo terminal đã lưu.")
+        return
+
+    rows = []
+    for report in reports:
+        if not isinstance(report, dict):
+            continue
+        rows.append(
+            {
+                "incident_id": report.get("incident_id"),
+                "status": report.get("status"),
+                "has_log": report.get("has_log"),
+                "reviewer": report.get("reviewer"),
+                "decision": report.get("decision"),
+                "stored_at": report.get("stored_at"),
+                "evidence_count": len(report.get("evidence_ids", [])),
+                "claims_count": len(report.get("claims", [])),
+                "warnings_count": len(report.get("warnings", [])),
+            }
+        )
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+    for report in reports:
+        if not isinstance(report, dict):
+            continue
+        incident_id = report.get("incident_id", "unknown")
+        status = report.get("status", "unknown")
+        with st.expander(f"{incident_id} — {status}"):
+            st.json(report)
 
 
 def _render_model_activity(activities: Any) -> None:

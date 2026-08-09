@@ -8,10 +8,10 @@
 # Exits 0 silently if no Python is found — hooks must never block the AI tool.
 set -u
 
-if command -v python3 >/dev/null 2>&1; then
-  PY=python3
-elif command -v python >/dev/null 2>&1; then
+if command -v python >/dev/null 2>&1; then
   PY=python
+elif command -v python3 >/dev/null 2>&1; then
+  PY=python3
 elif command -v py >/dev/null 2>&1; then
   PY="py -3"
 else

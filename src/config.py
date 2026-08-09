@@ -26,13 +26,13 @@ class Settings(BaseSettings):
 
     # LLM
     openai_api_key: str = ""
-    model_name: str = "gpt-4o-mini"
+    model_name: str = "gpt-5.6-luna"
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
 
     # Video-language model
     vlm_provider: VLMProvider = VLMProvider.OPENAI
     vlm_input_mode: VLMInputMode = VLMInputMode.TIMESTAMPED_FRAMES
-    openai_vlm_model_name: str = "gpt-4o-mini"
+    openai_vlm_model_name: str = "gpt-5.6-luna"
     gemini_api_key: str = ""
     gemini_vlm_model_name: str = "gemini-2.5-flash"
     vlm_timeout_s: float = Field(default=120.0, gt=0)
@@ -94,9 +94,6 @@ class Settings(BaseSettings):
     incident_input_roots: str = "./data_mock"
     incident_upload_dir: str = "./data/uploads"
     incident_max_duration_s: float = Field(default=60.0, gt=0, le=60)
-    incident_clip_min_duration_s: float = Field(default=5.0, gt=0, le=60)
-    incident_clip_pre_roll_s: float = Field(default=1.0, ge=0, le=60)
-    incident_clip_post_roll_s: float = Field(default=2.0, ge=0, le=60)
     log_timestamp_tolerance_s: float = Field(default=0.5, ge=0)
     log_brake_rise_threshold: float = Field(default=0.3, ge=0)
     log_steering_change_threshold: float = Field(default=10.0, ge=0)

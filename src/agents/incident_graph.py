@@ -40,6 +40,7 @@ class IncidentGraphDependencies:
     artifact_dir: str
     timestamp_tolerance_s: float = 0.5
     reanalysis_prompt_version: str = "v1"
+    auto_reanalysis_enabled: bool = True
     cleanup_remote_resources: bool = True
     observability: ModelActivityRegistry = field(default_factory=ModelActivityRegistry)
 
@@ -113,7 +114,7 @@ def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointe
     async def after_verification(state: IncidentState) -> Literal["auto_reanalyze", "draft_report", "cleanup"]:
         if state.get("status") == "failed":
             return "cleanup"
-        return route_after_verification(state)
+        return route_after_verification({**state, "auto_reanalysis_enabled": dependencies.auto_reanalysis_enabled})
 
     async def after_review(state: IncidentState) -> Literal["review", "manual_reanalyze", "cleanup"]:
         if state.get("status") in {"approved", "not_incident", "failed"}:
@@ -172,6 +173,19 @@ class LangGraphIncidentRunner:
     async def get(self, incident_id: str) -> IncidentState | None:
         snapshot = await self._graph.aget_state(self.thread_config(incident_id))
         return self._public_state(snapshot.values) if snapshot.values else None
+
+    async def list_incident_ids(self) -> list[str]:
+        incident_ids: list[str] = []
+        seen: set[str] = set()
+        async for checkpoint in self._graph.checkpointer.alist(None):
+            incident_id = checkpoint.config.get("configurable", {}).get("thread_id")
+            if isinstance(incident_id, str) and incident_id not in seen:
+                incident_ids.append(incident_id)
+                seen.add(incident_id)
+        return incident_ids
+
+    async def delete(self, incident_id: str) -> None:
+        await self._graph.checkpointer.adelete_thread(incident_id)
 
     @staticmethod
     def thread_config(incident_id: str) -> dict[str, dict[str, str]]:

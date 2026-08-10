@@ -17,7 +17,7 @@ from openai import (
 )
 from pydantic import ValidationError
 
-from src.models.incidents import VerificationRequest, VerificationResult
+from src.models.incidents import VerificationRequest, VerificationResult, VerificationStatus
 from src.prompts.verification import build_verification_prompt
 from src.services.model_observability import ModelActivityRegistry
 
@@ -57,7 +57,7 @@ class OpenAIVerificationService:
     async def verify(self, request: VerificationRequest) -> VerificationResult:
         prompt = build_verification_prompt(
             claims=request.claims,
-            log_evidence_summary=request.log_evidence_summary,
+            claim_log_summaries=request.claim_log_summaries,
             timestamp_tolerance_s=request.timestamp_tolerance_s,
             version=self._prompt_version,
         )
@@ -161,11 +161,44 @@ def _validate_verification_result(request: VerificationRequest, result: Verifica
             "VERIFICATION_RESULT_MISMATCH",
             "verification must return exactly one ordered result for every claim",
         )
-    allowed_evidence = set(request.log_evidence_summary.evidence_ids)
-    normalized_results = [
-        item.model_copy(
-            update={"evidence_ids": list(dict.fromkeys(eid for eid in item.evidence_ids if eid in allowed_evidence))}
+    summaries = {summary.claim_id: summary for summary in request.claim_log_summaries}
+    if list(summaries) != expected_ids:
+        raise VerificationServiceError(
+            "VERIFICATION_SUMMARY_MISMATCH",
+            "verification requires exactly one ordered log summary for every claim",
         )
-        for item in result.results
-    ]
+    normalized_results = []
+    for item in result.results:
+        summary = summaries[item.claim_id]
+        if not summary.within_tolerance:
+            normalized_results.append(
+                item.model_copy(
+                    update={
+                        "status": VerificationStatus.UNVERIFIED,
+                        "reason": "Không có evidence log đủ gần timestamp của claim.",
+                        "evidence_ids": [],
+                    }
+                )
+            )
+            continue
+        allowed_evidence = set(summary.allowed_evidence_ids)
+        evidence_ids = list(dict.fromkeys(eid for eid in item.evidence_ids if eid in allowed_evidence))
+        if item.status == VerificationStatus.UNVERIFIED or not evidence_ids:
+            normalized_results.append(
+                item.model_copy(
+                    update={
+                        "status": VerificationStatus.UNVERIFIED,
+                        "reason": (
+                            item.reason
+                            if item.status == VerificationStatus.UNVERIFIED
+                            else "Không có evidence log trực tiếp hợp lệ để xác nhận hoặc bác bỏ claim."
+                        ),
+                        "evidence_ids": [],
+                    }
+                )
+            )
+            continue
+        normalized_results.append(
+            item.model_copy(update={"evidence_ids": evidence_ids})
+        )
     return result.model_copy(update={"results": normalized_results})

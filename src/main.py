@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -7,6 +8,8 @@ from src.api.routes import router
 from src.config import get_settings
 from src.services.incident_runtime import incident_workflow_service
 from src.services.uploads import IncidentUploadService
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -22,6 +25,7 @@ async def lifespan(app: FastAPI):
         runtime = incident_workflow_service(settings)
         service = await runtime.__aenter__()
     except Exception:
+        logger.exception("Incident workflow startup failed")
         app.state.incident_workflow_startup_error = "Incident workflow configuration is unavailable."
         try:
             yield

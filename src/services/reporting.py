@@ -92,7 +92,9 @@ class OpenAIReportService:
                 "OpenAI report generation failed",
                 retryable=True,
             ) from exc
-        allowed_evidence = {item.evidence_id for item in request.video_memory.evidence}
+        allowed_evidence = {
+            evidence.evidence_id for claim in request.video_memory.claims for evidence in claim.evidence
+        }
         if request.log_evidence_summary is not None:
             allowed_evidence.update(request.log_evidence_summary.evidence_ids)
         if not set(narrative.evidence_ids).issubset(allowed_evidence):

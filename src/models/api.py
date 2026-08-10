@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from src.models.incidents import Claim, DraftReport
+from src.models.incidents import Claim, ClaimLogSummary, DraftReport
 
 IncidentStatus = Literal[
     "queued",
@@ -144,6 +144,7 @@ class IncidentSnapshot(APIModel):
     video_summary: str = ""
     artifact_uris: dict[str, str] = Field(default_factory=dict)
     claims: list[Claim] = Field(default_factory=list)
+    claim_log_summaries: list[ClaimLogSummary] = Field(default_factory=list)
     conflict_claim_ids: list[str] = Field(default_factory=list)
     auto_reanalysis_count: int = Field(default=0, ge=0)
     manual_reanalysis_count: int = Field(default=0, ge=0)
@@ -189,3 +190,13 @@ class StoredReport(APIModel):
 class StoredReportsResponse(APIModel):
     reports: list[StoredReport] = Field(default_factory=list)
     count: int = Field(default=0, ge=0)
+
+
+class IncidentHistoryResponse(APIModel):
+    incident_ids: list[str] = Field(default_factory=list)
+    count: int = Field(default=0, ge=0)
+
+
+class IncidentDeleteResponse(APIModel):
+    incident_id: str
+    deleted: bool

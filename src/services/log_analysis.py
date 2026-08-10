@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import csv
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from src.models.incidents import IncidentWindow, LogAnalysisResult, LogEvent, LogEvidenceSummary
+from src.models.incidents import (
+    Claim,
+    ClaimLogEvidence,
+    ClaimLogSummary,
+    IncidentWindow,
+    LogAnalysisResult,
+    LogEvent,
+    LogEvidenceSummary,
+)
 
 TIMESTAMP_ALIASES = ("timestamp_s", "timestamp", "time_s", "time")
 SPEED_ALIASES = ("speed_kmh", "vehicle_speed_kmh", "speed")
@@ -15,6 +24,18 @@ ACCELERATION_ALIASES = ("acceleration_mps2", "accel_mps2", "acceleration")
 BRAKE_ALIASES = ("brake", "brake_pedal", "brake_pressure")
 THROTTLE_ALIASES = ("throttle", "throttle_pedal")
 STEERING_ALIASES = ("steering_angle", "steer", "steering")
+CAMERA_FRAME_ALIASES = ("camera_frame",)
+CLAIM_SPEED_ALIASES = ("speed_kmh",)
+CLAIM_THROTTLE_ALIASES = ("throttle",)
+CLAIM_BRAKE_ALIASES = ("brake",)
+CLAIM_STEER_ALIASES = ("steer",)
+ACCELERATION_X_ALIASES = ("acceleration_x",)
+ACCELERATION_Y_ALIASES = ("acceleration_y",)
+ACCELERATION_Z_ALIASES = ("acceleration_z",)
+YAW_ALIASES = ("yaw",)
+PITCH_ALIASES = ("pitch",)
+ROLL_ALIASES = ("roll",)
+Z_ALIASES = ("z",)
 AUTONOMY_ALIASES = ("autonomous_state", "autonomy_state", "autopilot", "automated_driving")
 DISENGAGEMENT_ALIASES = ("disengagement", "driver_takeover", "manual_takeover")
 WARNING_ALIASES = ("warning_code", "warning", "warnings")
@@ -231,6 +252,311 @@ def acceleration_series(records: list[LogRecord]) -> list[float | None]:
 
 def numeric_series(records: list[LogRecord], aliases: tuple[str, ...]) -> list[float | None]:
     return [record.number(aliases) for record in records]
+
+
+def build_claim_log_summaries(
+    log_uri: str,
+    claims: list[Claim],
+    *,
+    timestamp_tolerance_s: float,
+    sample_radius: int = 3,
+) -> list[ClaimLogSummary]:
+    """Compute one deterministic, narrow log summary around each claim timestamp."""
+    if timestamp_tolerance_s < 0 or sample_radius < 0:
+        raise ValueError("timestamp_tolerance_s and sample_radius must be non-negative")
+    _, records = load_log_records(log_uri)
+    return [
+        _claim_log_summary(
+            records,
+            claim,
+            timestamp_tolerance_s=timestamp_tolerance_s,
+            sample_radius=sample_radius,
+        )
+        for claim in claims
+    ]
+
+
+def _claim_log_summary(
+    records: list[LogRecord],
+    claim: Claim,
+    *,
+    timestamp_tolerance_s: float,
+    sample_radius: int,
+) -> ClaimLogSummary:
+    if claim.timestamp_s is None:
+        return ClaimLogSummary(
+            claim_id=claim.claim_id,
+            summary="Claim không có timestamp nên không thể ghép với evidence log.",
+        )
+    nearest_index = min(range(len(records)), key=lambda index: abs(records[index].timestamp_s - claim.timestamp_s))
+    nearest = records[nearest_index]
+    distance = abs(nearest.timestamp_s - claim.timestamp_s)
+    start = max(0, nearest_index - sample_radius)
+    end = min(len(records), nearest_index + sample_radius + 1)
+    samples = records[start:end]
+    within_tolerance = distance <= timestamp_tolerance_s
+    metrics, available_signals = _claim_metrics(samples)
+    evidence = [
+        ClaimLogEvidence(
+            evidence_id=_row_evidence_id(record.timestamp_s),
+            timestamp_s=record.timestamp_s,
+            camera_frame=record.text(CAMERA_FRAME_ALIASES),
+        )
+        for record in samples
+    ]
+    return ClaimLogSummary(
+        claim_id=claim.claim_id,
+        claim_timestamp_s=claim.timestamp_s,
+        nearest_timestamp_s=nearest.timestamp_s,
+        timestamp_distance_s=distance,
+        within_tolerance=within_tolerance,
+        sample_start_s=samples[0].timestamp_s,
+        sample_end_s=samples[-1].timestamp_s,
+        sample_count=len(samples),
+        available_signals=available_signals,
+        metrics=metrics,
+        evidence=evidence,
+        allowed_evidence_ids=[
+            item.evidence_id
+            for item in evidence
+            if abs(item.timestamp_s - claim.timestamp_s) <= timestamp_tolerance_s
+        ],
+        summary=_build_claim_summary(
+            claim.timestamp_s,
+            nearest.timestamp_s,
+            distance,
+            within_tolerance,
+            samples,
+            metrics,
+        ),
+    )
+
+
+def _claim_metrics(
+    records: list[LogRecord],
+) -> tuple[dict[str, dict[str, float | int | str | bool | None]], list[str]]:
+    signals = {
+        "speed_kmh": numeric_series(records, CLAIM_SPEED_ALIASES),
+        "throttle": numeric_series(records, CLAIM_THROTTLE_ALIASES),
+        "brake": numeric_series(records, CLAIM_BRAKE_ALIASES),
+        "steer": numeric_series(records, CLAIM_STEER_ALIASES),
+        "acceleration_x": numeric_series(records, ACCELERATION_X_ALIASES),
+        "acceleration_y": numeric_series(records, ACCELERATION_Y_ALIASES),
+        "acceleration_z": numeric_series(records, ACCELERATION_Z_ALIASES),
+        "yaw": numeric_series(records, YAW_ALIASES),
+        "pitch": numeric_series(records, PITCH_ALIASES),
+        "roll": numeric_series(records, ROLL_ALIASES),
+        "z": numeric_series(records, Z_ALIASES),
+    }
+    metrics: dict[str, dict[str, float | int | str | bool | None]] = {}
+    speed = _transition_metrics(records, signals["speed_kmh"], include_extrema=True)
+    if speed:
+        speed.update(_max_deceleration(records, signals["speed_kmh"]))
+        metrics["speed_kmh"] = speed
+    brake = _transition_metrics(records, signals["brake"], include_extrema=True)
+    if brake:
+        brake.update(_largest_change(records, signals["brake"], positive_only=True, label="strongest_increase"))
+        metrics["brake"] = brake
+    throttle = _transition_metrics(records, signals["throttle"])
+    if throttle:
+        metrics["throttle"] = throttle
+    steer = _transition_metrics(records, signals["steer"], include_extrema=True)
+    if steer:
+        steer.update(_largest_change(records, signals["steer"], label="max_change"))
+        metrics["steer"] = steer
+    acceleration = _acceleration_magnitude_metrics(records, signals)
+    if acceleration:
+        metrics["acceleration_magnitude"] = acceleration
+    yaw = _angle_metrics(records, signals["yaw"])
+    if yaw:
+        metrics["yaw"] = yaw
+    for name in ("pitch", "roll"):
+        angle = _transition_metrics(records, signals[name], include_extrema=True)
+        if angle:
+            angle["range"] = float(angle["max"]) - float(angle["min"])
+            angle.update(_largest_change(records, signals[name], label="max_change"))
+            metrics[name] = angle
+    z_metrics = _transition_metrics(records, signals["z"], include_extrema=True)
+    if z_metrics:
+        metrics["z"] = z_metrics
+    available = ["timestamp"]
+    if any(record.text(CAMERA_FRAME_ALIASES) is not None for record in records):
+        available.append("camera_frame")
+    available.extend(name for name, values in signals.items() if any(value is not None for value in values))
+    return metrics, available
+
+
+def _transition_metrics(
+    records: list[LogRecord],
+    values: list[float | None],
+    *,
+    include_extrema: bool = False,
+) -> dict[str, float | int | str | bool | None]:
+    present = [(index, value) for index, value in enumerate(values) if value is not None]
+    if not present:
+        return {}
+    first_index, first = present[0]
+    last_index, last = present[-1]
+    output: dict[str, float | int | str | bool | None] = {
+        "start": first,
+        "start_timestamp_s": records[first_index].timestamp_s,
+        "end": last,
+        "end_timestamp_s": records[last_index].timestamp_s,
+        "delta": last - first,
+    }
+    if include_extrema:
+        min_index, minimum = min(present, key=lambda item: item[1])
+        max_index, maximum = max(present, key=lambda item: item[1])
+        output.update(
+            {
+                "min": minimum,
+                "min_timestamp_s": records[min_index].timestamp_s,
+                "max": maximum,
+                "max_timestamp_s": records[max_index].timestamp_s,
+            }
+        )
+    return output
+
+
+def _max_deceleration(
+    records: list[LogRecord],
+    values: list[float | None],
+) -> dict[str, float | int | str | bool | None]:
+    candidates = []
+    for index in range(1, len(records)):
+        previous, current = values[index - 1], values[index]
+        delta_t = records[index].timestamp_s - records[index - 1].timestamp_s
+        if previous is not None and current is not None and delta_t > 0:
+            candidates.append(( ((current - previous) / 3.6) / delta_t, records[index].timestamp_s))
+    if not candidates:
+        return {"max_deceleration": None, "max_deceleration_timestamp_s": None}
+    value, timestamp_s = min(candidates)
+    if value >= 0:
+        return {"max_deceleration": 0.0, "max_deceleration_timestamp_s": None}
+    return {"max_deceleration": value, "max_deceleration_timestamp_s": timestamp_s}
+
+
+def _largest_change(
+    records: list[LogRecord],
+    values: list[float | None],
+    *,
+    label: str,
+    positive_only: bool = False,
+) -> dict[str, float | int | str | bool | None]:
+    candidates = []
+    for index in range(1, len(records)):
+        previous, current = values[index - 1], values[index]
+        if previous is None or current is None:
+            continue
+        change = current - previous
+        score = change if positive_only else abs(change)
+        candidates.append((score, change, records[index].timestamp_s))
+    if not candidates:
+        return {label: None, f"{label}_timestamp_s": None}
+    score, change, timestamp_s = max(candidates, key=lambda item: item[0])
+    if positive_only and score <= 0:
+        return {label: 0.0, f"{label}_timestamp_s": None}
+    return {label: change if positive_only else abs(change), f"{label}_timestamp_s": timestamp_s}
+
+
+def _acceleration_magnitude_metrics(
+    records: list[LogRecord],
+    signals: dict[str, list[float | None]],
+) -> dict[str, float | int | str | bool | None]:
+    magnitudes = []
+    for index, values in enumerate(
+        zip(
+            signals["acceleration_x"],
+            signals["acceleration_y"],
+            signals["acceleration_z"],
+            strict=True,
+        )
+    ):
+        if all(value is not None for value in values):
+            magnitude = math.sqrt(sum(float(value) ** 2 for value in values))
+            magnitudes.append((index, magnitude))
+    if not magnitudes:
+        return {}
+    peak_index, peak = max(magnitudes, key=lambda item: item[1])
+    return {"peak": peak, "peak_timestamp_s": records[peak_index].timestamp_s}
+
+
+def _angle_metrics(
+    records: list[LogRecord],
+    values: list[float | None],
+) -> dict[str, float | int | str | bool | None]:
+    output = _transition_metrics(records, values)
+    present = [(index, value) for index, value in enumerate(values) if value is not None]
+    if not present:
+        return {}
+    output["delta_wrapped"] = _wrapped_angle_delta(present[-1][1] - present[0][1])
+    changes = [
+        (abs(_wrapped_angle_delta(current - previous)), records[index].timestamp_s)
+        for index, (previous, current) in enumerate(zip(values, values[1:], strict=False), start=1)
+        if previous is not None and current is not None
+    ]
+    if changes:
+        output["max_change"] = max(changes, key=lambda item: item[0])[0]
+        output["max_change_timestamp_s"] = max(changes, key=lambda item: item[0])[1]
+    else:
+        output.update({"max_change": None, "max_change_timestamp_s": None})
+    return output
+
+
+def _wrapped_angle_delta(delta: float) -> float:
+    return (delta + 180.0) % 360.0 - 180.0
+
+
+def _row_evidence_id(timestamp_s: float) -> str:
+    timestamp_key = f"{timestamp_s:.6f}".rstrip("0").rstrip(".")
+    return f"log-row:{timestamp_key}"
+
+
+def _build_claim_summary(
+    claim_timestamp_s: float,
+    nearest_timestamp_s: float,
+    distance_s: float,
+    within_tolerance: bool,
+    records: list[LogRecord],
+    metrics: dict[str, dict[str, float | int | str | bool | None]],
+) -> str:
+    statements = [
+        f"Claim tại {claim_timestamp_s:g}s được ghép với mẫu gần nhất {nearest_timestamp_s:g}s "
+        f"(lệch {distance_s:g}s), dùng {len(records)} mẫu trong [{records[0].timestamp_s:g}, "
+        f"{records[-1].timestamp_s:g}]s."
+    ]
+    speed = metrics.get("speed_kmh")
+    if speed:
+        statements.append(
+            f"Speed {float(speed['start']):g}→{float(speed['end']):g} km/h, "
+            f"delta {float(speed['delta']):g}, min {float(speed['min']):g}, max {float(speed['max']):g}."
+        )
+    brake = metrics.get("brake")
+    if brake:
+        statements.append(
+            f"Brake {float(brake['start']):g}→{float(brake['end']):g}, max {float(brake['max']):g}."
+        )
+    throttle = metrics.get("throttle")
+    if throttle:
+        statements.append(
+            f"Throttle {float(throttle['start']):g}→{float(throttle['end']):g}, "
+            f"delta {float(throttle['delta']):g}."
+        )
+    steer = metrics.get("steer")
+    if steer:
+        statements.append(
+            f"Steer chuẩn hóa {float(steer['start']):g}→{float(steer['end']):g}, "
+            f"biến động lớn nhất {float(steer.get('max_change') or 0):g}."
+        )
+    acceleration = metrics.get("acceleration_magnitude")
+    if acceleration:
+        statements.append(f"Độ lớn gia tốc peak {float(acceleration['peak']):g}.")
+    yaw = metrics.get("yaw")
+    if yaw:
+        statements.append(f"Yaw thay đổi có wrap {float(yaw['delta_wrapped']):g}°.")
+    if not within_tolerance:
+        statements.append("Mẫu gần nhất nằm ngoài timestamp_tolerance_s nên không có evidence log đủ gần.")
+    return " ".join(statements)
 
 
 def _acceleration_series(

@@ -65,6 +65,24 @@ async def test_incident_api_lists_sqlite_reports(client) -> None:
 
 
 @pytest.mark.asyncio
+async def test_incident_api_lists_and_deletes_history(client) -> None:
+    service = SimpleNamespace(
+        list_incident_ids=AsyncMock(return_value=["INC-NEWEST", "INC-OLDER"]),
+        delete=AsyncMock(return_value=None),
+    )
+    app.state.incident_workflow_service = service
+    try:
+        listed = await client.get("/api/v1/incidents")
+        deleted = await client.delete("/api/v1/incidents/INC-OLDER")
+    finally:
+        del app.state.incident_workflow_service
+
+    assert listed.json() == {"incident_ids": ["INC-NEWEST", "INC-OLDER"], "count": 2}
+    assert deleted.json() == {"incident_id": "INC-OLDER", "deleted": True}
+    service.delete.assert_awaited_once_with("INC-OLDER")
+
+
+@pytest.mark.asyncio
 async def test_incident_api_maps_safe_domain_errors(client) -> None:
     service = SimpleNamespace(
         create=AsyncMock(),

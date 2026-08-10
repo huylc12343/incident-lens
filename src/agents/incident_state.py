@@ -7,6 +7,7 @@ from typing import Any, Literal, TypedDict
 from src.models.api import ModelActivity, ReviewAuditEntry
 from src.models.incidents import (
     Claim,
+    ClaimLogSummary,
     DraftReport,
     LogAnalysisResult,
     LogEvent,
@@ -36,6 +37,7 @@ class IncidentState(TypedDict, total=False):
     video_memory: VideoMemory
     claims: list[Claim]
     log_evidence_summary: LogEvidenceSummary
+    claim_log_summaries: list[ClaimLogSummary]
     log_analysis: LogAnalysisResult
     log_events: list[LogEvent]
     chart_uris: list[str]

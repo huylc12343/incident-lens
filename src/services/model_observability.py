@@ -96,8 +96,8 @@ def extract_token_usage(response: Any) -> TokenUsage | None:
         input_details = _value(usage, "input_tokens_details")
         output_details = _value(usage, "output_tokens_details")
         return _usage(
-            input_tokens=_integer(usage, "input_tokens"),
-            output_tokens=_integer(usage, "output_tokens"),
+            input_tokens=_integer(usage, "input_tokens") or _integer(usage, "prompt_tokens"),
+            output_tokens=_integer(usage, "output_tokens") or _integer(usage, "completion_tokens"),
             total_tokens=_integer(usage, "total_tokens"),
             cached_tokens=_integer(input_details, "cached_tokens"),
             reasoning_tokens=_integer(output_details, "reasoning_tokens"),

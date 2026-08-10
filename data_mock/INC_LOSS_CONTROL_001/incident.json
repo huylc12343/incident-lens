@@ -1,0 +1,90 @@
+{
+  "schema_version": "1.0",
+  "incident_id": "INC_LOSS_CONTROL_001",
+  "scenario": "front_vehicle_loss_of_control",
+  "incident_type": "vehicle_loss_of_control_collision",
+  "seed": 2,
+  "severity": "high",
+  "timeline": {
+    "recording_start": 0.0,
+    "t_start": 20.0,
+    "t0": 2.75,
+    "t_end": 26.3,
+    "recording_end": 60.0
+  },
+  "actors": {
+    "ego": {
+      "actor_id": "ego",
+      "type": "vehicle.tesla.model3",
+      "role": "ego_vehicle"
+    },
+    "others": [
+      {
+        "actor_id": "vehicle_001",
+        "type": "vehicle.audi.tt",
+        "role": "lead_vehicle"
+      }
+    ]
+  },
+  "ground_truth": {
+    "is_incident": true,
+    "primary_event": "collision",
+    "collision": {
+      "occurred": true,
+      "timestamp": 2.75,
+      "frame": 71898,
+      "target": "vehicle_001",
+      "target_type": "vehicle.audi.tt",
+      "collision_type": "front_vehicle_loss_of_control",
+      "impulse_magnitude": 5663.53
+    },
+    "lane_invasion": {
+      "occurred": false,
+      "events": []
+    },
+    "ego_state": {
+      "speed_before_incident_kmh": 55.69,
+      "speed_at_brake_kmh": 61.68,
+      "speed_at_collision_kmh": 17.118,
+      "maximum_brake": 1.0
+    }
+  },
+  "event_sequence": [
+    {
+      "timestamp": 2.75,
+      "event": "collision"
+    },
+    {
+      "timestamp": 20.0,
+      "event": "lead_vehicle_loss_of_control"
+    },
+    {
+      "timestamp": 20.0,
+      "event": "closing_distance"
+    },
+    {
+      "timestamp": 20.6,
+      "event": "lead_vehicle_swerve"
+    },
+    {
+      "timestamp": 21.35,
+      "event": "lead_vehicle_rotation"
+    },
+    {
+      "timestamp": 23.5,
+      "event": "ego_emergency_brake"
+    },
+    {
+      "timestamp": 23.6,
+      "event": "rapid_deceleration"
+    },
+    {
+      "timestamp": 25.25,
+      "event": "vehicle_near_stop"
+    },
+    {
+      "timestamp": 25.3,
+      "event": "vehicle_stopped"
+    }
+  ]
+}

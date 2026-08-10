@@ -25,6 +25,8 @@ class ReportRepository(Protocol):
 
     def list_reports(self) -> list[StoredReport]: ...
 
+    def delete(self, incident_id: str) -> bool: ...
+
 
 class InMemoryReportRepository:
     def __init__(self) -> None:
@@ -42,6 +44,9 @@ class InMemoryReportRepository:
 
     def list_reports(self) -> list[StoredReport]:
         return list(self._reports.values())
+
+    def delete(self, incident_id: str) -> bool:
+        return self._reports.pop(incident_id, None) is not None
 
 
 class SQLiteReportRepository:
@@ -126,6 +131,14 @@ class SQLiteReportRepository:
         except sqlite3.Error as exc:
             raise ReportRepositoryError("REPORT_STORAGE_FAILED", "could not list terminal outcomes") from exc
         return [_stored_report_from_row(row) for row in rows]
+
+    def delete(self, incident_id: str) -> bool:
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute("DELETE FROM incident_reports WHERE incident_id = ?", (incident_id,))
+        except sqlite3.Error as exc:
+            raise ReportRepositoryError("REPORT_STORAGE_FAILED", "could not delete terminal outcome") from exc
+        return cursor.rowcount > 0
 
     def _initialize(self) -> None:
         try:

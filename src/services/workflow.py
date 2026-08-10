@@ -32,6 +32,10 @@ class IncidentGraphRunner(Protocol):
 
     async def get(self, incident_id: str) -> IncidentState | None: ...
 
+    async def list_incident_ids(self) -> list[str]: ...
+
+    async def delete(self, incident_id: str) -> None: ...
+
 
 class IncidentInputValidator(Protocol):
     async def validate(self, request: IncidentCreateRequest) -> None: ...
@@ -124,6 +128,27 @@ class WorkflowService:
     async def list_reports(self) -> list[StoredReport]:
         return self._repository.list_reports()
 
+    async def list_incident_ids(self) -> list[str]:
+        checkpoint_ids = await self._runner.list_incident_ids()
+        report_ids = [report.incident_id for report in self._repository.list_reports()]
+        return list(dict.fromkeys([*checkpoint_ids, *report_ids]))
+
+    async def delete(self, incident_id: str) -> None:
+        state = self._states.get(incident_id) or await self._checkpoint_state(incident_id)
+        stored = self._repository.get(incident_id)
+        if state is None and stored is None:
+            raise WorkflowError("INCIDENT_NOT_FOUND", "incident does not exist")
+        if state is not None and state.get("status") in {"queued", "running"}:
+            raise WorkflowError("INCIDENT_DELETE_ACTIVE", "running incident cannot be deleted")
+        await self._runner.delete(incident_id)
+        self._repository.delete(incident_id)
+        async with self._registry_lock:
+            self._states.pop(incident_id, None)
+            self._review_locks.pop(incident_id, None)
+            self._audit.pop(incident_id, None)
+            self._stored_at.pop(incident_id, None)
+            self._pending_terminal.pop(incident_id, None)
+
     async def review(self, incident_id: str, decision: ReviewDecision) -> IncidentSnapshot:
         lock = self._review_locks.get(incident_id)
         if lock is None:
@@ -214,10 +239,15 @@ class WorkflowService:
         evidence_ids = []
         memory = state.get("video_memory")
         if memory is not None:
-            evidence_ids.extend(item.evidence_id for item in memory.evidence)
+            evidence_ids.extend(evidence.evidence_id for claim in memory.claims for evidence in claim.evidence)
         log_summary = state.get("log_evidence_summary")
         if log_summary is not None:
             evidence_ids.extend(log_summary.evidence_ids)
+        verification = state.get("verification")
+        if verification is not None:
+            evidence_ids.extend(
+                evidence_id for result in verification.results for evidence_id in result.evidence_ids
+            )
         report = state.get("report_narrative")
         if report is not None:
             evidence_ids.extend(report.evidence_ids)
@@ -248,7 +278,11 @@ class WorkflowService:
     def _snapshot(self, state: IncidentState) -> IncidentSnapshot:
         incident_id = state["incident_id"]
         claims = state.get("claims") or (state["video_memory"].claims if state.get("video_memory") else [])
-        conflicts = [claim.claim_id for claim in claims if claim.verification_status == VerificationStatus.CONTRADICTED]
+        verification = state.get("verification")
+        conflicts = [
+            item.claim_id for item in (verification.results if verification else [])
+            if item.status == VerificationStatus.CONTRADICTED
+        ]
         status = state.get("status", "failed")
         report = state.get("draft_report")
         memory = state.get("video_memory")
@@ -267,6 +301,7 @@ class WorkflowService:
             video_summary=video_summary,
             artifact_uris=state.get("artifact_uris", {}),
             claims=claims,
+            claim_log_summaries=state.get("claim_log_summaries", []),
             conflict_claim_ids=conflicts,
             auto_reanalysis_count=state.get("auto_reanalysis_count", 0),
             manual_reanalysis_count=state.get("manual_reanalysis_count", 0),
@@ -289,9 +324,8 @@ def _stored_snapshot(stored: StoredReport) -> IncidentSnapshot:
         video_summary=stored.final_report.summary if stored.final_report is not None else "",
         artifact_uris=stored.artifact_uris,
         claims=stored.claims,
-        conflict_claim_ids=[
-            claim.claim_id for claim in stored.claims if claim.verification_status == VerificationStatus.CONTRADICTED
-        ],
+        claim_log_summaries=(stored.final_report.log_findings.claim_summaries if stored.final_report else []),
+        conflict_claim_ids=[],
         warnings=stored.warnings,
         model_activities=stored.model_activities,
         final_report=stored.final_report,

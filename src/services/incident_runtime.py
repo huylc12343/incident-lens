@@ -23,7 +23,7 @@ from src.services.report_repository import SQLiteReportRepository
 from src.services.reporting import OpenAIReportService
 from src.services.verification import OpenAIVerificationService
 from src.services.video_memory import VideoMemoryLimits, VideoMemoryWorkflow, VideoMemoryWorkflowConfig
-from src.services.vlm import GeminiNativeVideoVLMService, OpenAIVLMService
+from src.services.vlm import GeminiNativeVideoVLMService, OpenAIVLMService, QwenNativeVideoVLMService
 from src.services.workflow import WorkflowError, WorkflowService
 
 
@@ -33,6 +33,7 @@ class ProviderClients:
     openai_verification: Any | None = None
     openai_report: Any | None = None
     gemini: Any | None = None
+    qwen: Any | None = None
 
 
 class DirectAsyncSqliteSaver(SqliteSaver):
@@ -131,7 +132,7 @@ async def incident_workflow_service(
             prompt_version=settings.video_analysis_prompt_version,
             limits=VideoMemoryLimits(
                 max_entities=settings.video_memory_max_entities,
-                max_timeline_events=settings.video_memory_max_timeline_events,
+                max_timeline_events=min(settings.video_memory_max_timeline_events, 6),
                 max_claims=settings.video_memory_max_claims,
             ),
         ),
@@ -167,6 +168,7 @@ async def incident_workflow_service(
         artifact_dir=settings.artifact_dir,
         timestamp_tolerance_s=settings.log_timestamp_tolerance_s,
         reanalysis_prompt_version=settings.reanalysis_prompt_version,
+        auto_reanalysis_enabled=settings.auto_reanalysis_enabled,
         cleanup_remote_resources=settings.gemini_delete_remote_file_on_terminal,
         observability=observability,
     )
@@ -192,7 +194,7 @@ def _build_vlm(
     settings: Settings,
     clients: ProviderClients,
     observability: ModelActivityRegistry | None = None,
-) -> OpenAIVLMService | GeminiNativeVideoVLMService:
+) -> OpenAIVLMService | GeminiNativeVideoVLMService | QwenNativeVideoVLMService:
     if settings.vlm_provider == VLMProvider.OPENAI:
         return OpenAIVLMService(
             model=settings.openai_vlm_model_name,
@@ -201,6 +203,24 @@ def _build_vlm(
             timeout_s=settings.vlm_timeout_s,
             temperature=settings.vlm_temperature,
             max_images_per_request=settings.vlm_max_frames_per_request,
+            observability=observability,
+        )
+    if settings.vlm_provider == VLMProvider.QWEN:
+        if clients.qwen is None and not settings.dashscope_api_key.strip():
+            raise ValueError("DASHSCOPE_API_KEY is required for the configured Qwen VLM provider")
+        return QwenNativeVideoVLMService(
+            model=settings.qwen_vlm_model_name,
+            client=clients.qwen,
+            api_key=settings.dashscope_api_key or None,
+            base_url=settings.qwen_base_url,
+            artifact_dir=settings.artifact_dir,
+            artifact_url_base=settings.qwen_artifact_url_base,
+            base64_max_video_bytes=settings.qwen_base64_max_video_bytes,
+            timeout_s=settings.vlm_timeout_s,
+            temperature=settings.vlm_temperature,
+            video_fps=settings.qwen_video_fps,
+            enable_thinking=settings.qwen_enable_thinking,
+            thinking_budget=settings.qwen_thinking_budget,
             observability=observability,
         )
     if clients.gemini is None and not settings.gemini_api_key.strip():

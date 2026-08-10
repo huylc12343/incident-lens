@@ -44,7 +44,7 @@ INCIDENT_CHECKPOINT_PATH=./data/incident_checkpoints.sqlite3
 
 Incident clip mặc định có tối thiểu 5 giây, thêm 1 giây trước và 2 giây sau window do VLM xác định. Có thể điều chỉnh bằng `INCIDENT_CLIP_MIN_DURATION_S`, `INCIDENT_CLIP_PRE_ROLL_S` và `INCIDENT_CLIP_POST_ROLL_S`. Ảnh `representative_frame` được chọn gần `t0` thay vì lấy frame đầu tiên.
 
-Gemini native video dùng cặp cấu hình `VLM_PROVIDER=gemini`, `VLM_INPUT_MODE=native_video` và `GEMINI_API_KEY`. Hai tổ hợp provider/input mode ngược lại bị Settings từ chối.
+Qwen native video dùng `VLM_PROVIDER=qwen`, `VLM_INPUT_MODE=native_video` và `DASHSCOPE_API_KEY`. Video local nhỏ hơn `QWEN_BASE64_MAX_VIDEO_BYTES` (mặc định 7 MB) được gửi bằng Base64 Data URL. Video lớn hơn ngưỡng cần `QWEN_ARTIFACT_URL_BASE` công khai `ARTIFACT_DIR`. Qwen gọi `qwen3-vl-flash` qua DashScope chat completions. Gemini được giữ lại chỉ để tương thích cấu hình cũ.
 
 Streamlit upload file vào `INCIDENT_UPLOAD_DIR`; backend kiểm tra phần mở rộng, dung lượng, path root, file tồn tại và video không quá 60 giây. URL từ xa và external object storage không thuộc baseline.
 
@@ -68,7 +68,7 @@ Trong Streamlit, chọn video bằng nút **Browse files** và chọn log CSV n�
 
 Workflow chạy đồng bộ đến Human Review nên VLM + verification + report có thể mất vài phút. Streamlit chờ tối đa 900 giây và hiển thị riêng lỗi kết nối, timeout hoặc response backend không phải JSON; xem terminal Uvicorn nếu backend báo HTTP 500.
 
-Nếu OpenAI verification thất bại, workflow không còn kết thúc bằng lỗi: claims giữ trạng thái `unverified`, snapshot ghi warning và backend tạo báo cáo fallback từ `video_summary`, timeline và evidence mà VLM đã trả. Khi verification của incident có log không khả dụng, lần gọi report model được bỏ qua. Sau khi sửa `.env` hoặc cập nhật code, phải khởi động lại FastAPI và dùng incident ID mới vì incident cũ vẫn có checkpoint.
+Nếu OpenAI verification thất bại, workflow không còn kết thúc bằng lỗi: snapshot ghi warning và backend tạo báo cáo fallback từ `video_summary`, timeline và evidence trong claims mà VLM đã trả. Khi verification của incident có log không khả dụng, lần gọi report model được bỏ qua. Sau khi sửa `.env` hoặc cập nhật code, phải khởi động lại FastAPI và dùng incident ID mới vì incident cũ vẫn có checkpoint.
 
 ## Incident API
 
@@ -143,13 +143,13 @@ Create/review trả `202` khi đang chờ review, `200` khi terminal; `404` cho 
 9. Evidence/artifact/warnings.
 10. Review status.
 
-LLM chỉ sinh sáu narrative fields. Backend sở hữu timestamps, metrics, verification status, evidence/artifact URI, warning và review status. Video-only luôn ghi `Không có dữ liệu log.`.
+LLM chỉ sinh sáu narrative fields. Backend sở hữu timestamps, metrics, kết quả verification, evidence/artifact URI, warning và review status. Video-only luôn ghi `Không có dữ liệu log.`.
 
 ## Persistence
 
 - `INCIDENT_CHECKPOINT_PATH`: SQLite LangGraph checkpoint để GET/resume incident `awaiting_review` sau process restart.
 - `INCIDENT_DATABASE_PATH`: SQLite repository cho terminal `approved | not_incident`.
-- Gemini remote handle được giữ trong pending checkpoint để reuse/re-upload; terminal/failure thực hiện cleanup best-effort.
+- Qwen không tạo remote handle; DashScope đọc native video từ URL công khai của artifact.
 
 ## Kiểm thử
 
@@ -161,7 +161,7 @@ pytest tests -v --tb=short
 pip check
 ```
 
-E2E tests chạy graph, API, SQLite restart, FFmpeg, log và chart thật với asset trong `data_mock/`; OpenAI/Gemini chỉ được mock tại SDK boundary nên không phát sinh chi phí model.
+E2E tests chạy graph, API, SQLite restart, FFmpeg, log và chart thật với asset trong `data_mock/`; provider SDK chỉ được mock tại SDK boundary nên không phát sinh chi phí model.
 
 ## Giới hạn hiện tại
 

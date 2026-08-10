@@ -7,8 +7,8 @@ from openai import APIConnectionError, APITimeoutError, AuthenticationError, Rat
 
 from src.models.incidents import (
     Claim,
+    ClaimLogSummary,
     ClaimVerification,
-    LogEvidenceSummary,
     VerificationRequest,
     VerificationResult,
     VerificationStatus,
@@ -20,10 +20,17 @@ def _request() -> VerificationRequest:
     return VerificationRequest(
         incident_id="INC-VERIFY",
         claims=[Claim(claim_id="claim-1", text="Vehicle brakes at 7.5 seconds", timestamp_s=7.5)],
-        log_evidence_summary=LogEvidenceSummary(
-            metrics={"brake_rise_time": 7.5},
-            evidence_ids=["log-evidence:7.5:brake_rise"],
-        ),
+        claim_log_summaries=[
+            ClaimLogSummary(
+                claim_id="claim-1",
+                claim_timestamp_s=7.5,
+                nearest_timestamp_s=7.5,
+                timestamp_distance_s=0,
+                within_tolerance=True,
+                allowed_evidence_ids=["log-row:7.5"],
+                summary="Brake tăng gần timestamp của claim.",
+            )
+        ],
         timestamp_tolerance_s=0.5,
     )
 
@@ -36,7 +43,7 @@ async def test_openai_verification_uses_structured_output() -> None:
                 claim_id="claim-1",
                 status=VerificationStatus.SUPPORTED,
                 reason="Brake rise matches the claim timestamp.",
-                evidence_ids=["log-evidence:7.5:brake_rise"],
+                evidence_ids=["log-row:7.5"],
             )
         ]
     )
@@ -84,7 +91,42 @@ async def test_verification_removes_invented_log_evidence_without_discarding_res
 
     result = await OpenAIVerificationService(model="gpt-test", client=client).verify(_request())
 
-    assert result.results[0].status == VerificationStatus.SUPPORTED
+    assert result.results[0].status == VerificationStatus.UNVERIFIED
+    assert result.results[0].evidence_ids == []
+
+
+@pytest.mark.asyncio
+async def test_verification_forces_unverified_when_log_is_outside_tolerance() -> None:
+    request = _request().model_copy(
+        update={
+            "claim_log_summaries": [
+                ClaimLogSummary(
+                    claim_id="claim-1",
+                    claim_timestamp_s=7.5,
+                    nearest_timestamp_s=6,
+                    timestamp_distance_s=1.5,
+                    within_tolerance=False,
+                    summary="Không có mẫu đủ gần.",
+                )
+            ]
+        }
+    )
+    model_result = VerificationResult(
+        results=[
+            ClaimVerification(
+                claim_id="claim-1",
+                status=VerificationStatus.CONTRADICTED,
+                reason="Không thấy brake.",
+            )
+        ]
+    )
+    client = SimpleNamespace(
+        responses=SimpleNamespace(parse=AsyncMock(return_value=SimpleNamespace(output_parsed=model_result)))
+    )
+
+    result = await OpenAIVerificationService(model="gpt-test", client=client).verify(request)
+
+    assert result.results[0].status == VerificationStatus.UNVERIFIED
     assert result.results[0].evidence_ids == []
 
 

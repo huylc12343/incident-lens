@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     vlm_provider: VLMProvider = VLMProvider.OPENAI
     vlm_input_mode: VLMInputMode = VLMInputMode.TIMESTAMPED_FRAMES
     openai_vlm_model_name: str = "gpt-5.6-luna"
+    dashscope_api_key: str = ""
+    qwen_vlm_model_name: str = "qwen3-vl-flash"
+    qwen_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    qwen_artifact_url_base: str = ""
+    qwen_base64_max_video_bytes: int = Field(default=7_000_000, gt=0)
+    qwen_video_fps: float = Field(default=2.0, gt=0, le=10)
+    qwen_enable_thinking: bool = False
+    qwen_thinking_budget: int = Field(default=500, gt=0)
     gemini_api_key: str = ""
     gemini_vlm_model_name: str = "gemini-2.5-flash"
     vlm_timeout_s: float = Field(default=120.0, gt=0)
@@ -72,7 +80,7 @@ class Settings(BaseSettings):
     vlm_frame_batch_overlap: int = Field(default=5, ge=0)
     vlm_frame_max_batches: int = Field(default=8, gt=0)
     video_memory_max_entities: int = Field(default=50, gt=0)
-    video_memory_max_timeline_events: int = Field(default=100, gt=0)
+    video_memory_max_timeline_events: int = Field(default=6, gt=0)
     video_memory_max_claims: int = Field(default=100, gt=0)
 
     # Prompt and downstream service settings
@@ -86,6 +94,7 @@ class Settings(BaseSettings):
     report_model_name: str = "gpt-4o-mini"
     report_timeout_s: float = Field(default=60.0, gt=0)
     report_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    auto_reanalysis_enabled: bool = True
 
     # Workflow and incident inputs
     human_prompt_max_length: int = Field(default=5000, gt=0)
@@ -116,6 +125,7 @@ class Settings(BaseSettings):
         supported_mode = {
             VLMProvider.OPENAI: VLMInputMode.TIMESTAMPED_FRAMES,
             VLMProvider.GEMINI: VLMInputMode.NATIVE_VIDEO,
+            VLMProvider.QWEN: VLMInputMode.NATIVE_VIDEO,
         }[self.vlm_provider]
         if self.vlm_input_mode != supported_mode:
             raise ValueError(

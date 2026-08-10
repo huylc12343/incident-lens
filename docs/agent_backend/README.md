@@ -23,7 +23,7 @@ Cắt incident clip, lấy representative frame và artifacts
         ▼
 Đối chiếu claims video với evidence từ log
         │
-        ├── Có conflict: tự động re-analysis tối đa một lần
+        ├── Có conflict và `AUTO_REANALYSIS_ENABLED=true`: tự động re-analysis tối đa một lần
         │
         ▼
 Dựng báo cáo 10 mục
@@ -39,7 +39,7 @@ Các thành phần chính:
 
 - FastAPI cung cấp HTTP API và khởi tạo runtime trong lifespan.
 - LangGraph điều phối workflow phân tích video/log và dừng tại human review.
-- VLM xử lý video qua một trong hai mode: OpenAI timestamped frames hoặc Gemini native video.
+- VLM xử lý video qua OpenAI timestamped frames hoặc Qwen3-VL-Flash native video qua DashScope OpenAI-compatible API.
 - Các service deterministic xử lý media, log, metrics, charts và validation.
 - OpenAI verification/report service thực hiện đối chiếu claims và sinh narrative báo cáo.
 - SQLite lưu checkpoint LangGraph và kết quả terminal sau review.
@@ -56,7 +56,7 @@ flowchart LR
     API[FastAPI\nsrc/main.py]
     WF[WorkflowService]
     GRAPH[LangGraph\nIncidentGraph]
-    VLM[VLM service\nOpenAI frames / Gemini video]
+    VLM[VLM service\nOpenAI frames / Qwen video]
     MEDIA[MediaService\nffmpeg / ffprobe]
     LOG[LogAnalysisService]
     VERIFY[VerificationService]
@@ -129,12 +129,13 @@ flowchart TD
 1. `analyze_video`: tạo frame manifest hoặc normalize video, gọi VLM và lưu `VideoMemory`.
 2. `cut_incident_video`: cắt clip theo `t_start`, `t0`, `t_end`; lấy incident frames và frame đại diện gần `t0`.
 3. `analyze_log`: cắt log theo incident window, tính metrics/events và sinh chart. Node này chỉ chạy khi có `log_uri`.
-4. `verify`: gửi claims cùng log evidence summary cho verification service; không gửi toàn bộ raw log cho model.
-5. `auto_reanalyze`: khi có claim bị contradicted, gọi VLM tập trung vào claim conflict. Mỗi incident tối đa một auto re-analysis.
+4. `verify`: code tạo `claim_log_summary` riêng từ 3 mẫu trước/sau mẫu gần timestamp claim nhất, rồi chỉ gửi
+   claim, summary đã tính, allowed evidence IDs và timestamp tolerance cho verification service.
+5. `auto_reanalyze`: khi có claim bị `contradicted` và `AUTO_REANALYSIS_ENABLED=true`, gọi VLM tập trung vào claim conflict. Mỗi incident tối đa một auto re-analysis.
 6. `draft_report`: dựng báo cáo cố định 10 mục từ structured facts và narrative do report service sinh.
 7. `review`: dùng LangGraph `interrupt` để chờ quyết định kỹ thuật viên.
 8. `manual_reanalyze`: xử lý re-analysis do reviewer yêu cầu, có feedback và target claim IDs.
-9. `cleanup`: giải phóng remote media handle của Gemini theo chính sách best-effort.
+9. `cleanup`: dọn remote media handle của provider cũ theo chính sách best-effort; Qwen không tạo remote handle.
 
 ### 3.2. Lifecycle và review action
 
@@ -189,7 +190,7 @@ flowchart TD
 │   └── services/
 │       ├── incident_runtime.py         # Factory ghép dependency và SQLite checkpointer
 │       ├── workflow.py                 # Application service của incident
-│       ├── vlm.py                      # OpenAI frames / Gemini native video
+│       ├── vlm.py                      # OpenAI frames / Qwen native video
 │       ├── video_memory.py             # Giới hạn, batch và merge video memory
 │       ├── media.py                    # Probe/normalize/cut/sample bằng FFmpeg
 │       ├── log_analysis.py             # CSV slice, metrics và log events
@@ -221,12 +222,30 @@ flowchart TD
 - Input: `incident_id`, `video_uri`, `log_uri`, `analysis_prompt`, `metadata`.
 - Video: `video_memory`, `claims`, `remote_media_handles`.
 - Log: `log_analysis`, `log_evidence_summary`, `log_events`, `chart_uris`.
-- Verification: `verification`, warning và conflict claim IDs.
+- Verification: `claim_log_summaries`, `verification`, warning và conflict claim IDs.
 - Report: `report_narrative`, `draft_report`, `artifact_uris`.
 - Review: `review_target_claim_ids`, `review_feedback`, `last_review_action`, `review_audit`.
 - Observability/error: `model_activities`, `error_code`, `error_message`, counters re-analysis.
 
 State chỉ nên giữ structured data và URI cần cho workflow. Không đưa API key, raw video bytes, toàn bộ DataFrame hoặc chain-of-thought vào state/API response.
+
+### VideoMemory và evidence
+
+`VideoMemory` chỉ gồm `global_scene`, `video_summary`, `tracked_entities`, `incident_window`,
+`representative_timestamp_s`, `timeline`, `claims` và metadata kỹ thuật. Không còn các field VLM
+`observations`, `uncertainties`, `source_frame_ids` hoặc danh sách `evidence` toàn cục.
+
+- `timeline` có từ 3 đến 6 mốc quan trọng và chỉ giữ `evidence_ids` là frame ID thật.
+- Mỗi `Claim` sở hữu `evidence` của chính nó; mỗi evidence chỉ có `evidence_id` và `timestamp_s`.
+- Backend canonicalize evidence về frame đã gửi vào VLM, tự gắn evidence còn thiếu của timeline vào claim gần
+  nhất, rồi reject output nếu timeline vẫn tham chiếu ID không tồn tại, evidence trùng ID, hay claim không có evidence.
+- `verification_status` không nằm trong claim. `VerificationResult` là nguồn duy nhất cho đối chiếu log:
+  `supported` cần evidence trực tiếp hỗ trợ, `contradicted` cần evidence trực tiếp trái claim, và `unverified`
+  dùng khi log không đủ tín hiệu hoặc nằm ngoài timestamp tolerance. Chỉ `contradicted` trigger re-analysis.
+- Mỗi `claim_log_summary` tính sẵn speed, brake, throttle, steer chuẩn hóa, vector acceleration, yaw có angle
+  wrap, pitch/roll và Z. LLM không nhận toàn bộ raw log và không tự tính metric.
+
+Đặt `AUTO_REANALYSIS_ENABLED=false` để giữ các claim `contradicted` trong báo cáo mà không gọi lại VLM tự động.
 
 ### Báo cáo 10 mục
 
@@ -243,7 +262,7 @@ State chỉ nên giữ structured data và URI cần cho workflow. Không đưa 
 9. `evidence_and_warnings`
 10. `review_status`
 
-LLM chỉ viết các narrative cần thiết. Backend sở hữu timestamp, evidence, metrics, verification status, artifacts, warnings và review status.
+LLM chỉ viết các narrative cần thiết. Backend sở hữu timestamp, evidence, metrics, kết quả verification, artifacts, warnings và review status.
 
 ## 6. Persistence và artifacts
 
@@ -277,7 +296,8 @@ Repository `SQLiteReportRepository` tạo bảng `incident_reports` và chỉ l�
 | `audit_json`                         | Review audit                        |
 | `model_activities_json`              | Model steps/token usage             |
 
-API `GET /api/v1/incidents/reports` đọc danh sách từ repository. Streamlit hiển thị bảng tóm tắt và JSON chi tiết trong phần **Dữ liệu SQLite — incident_reports**.
+API `GET /api/v1/incidents/reports` đọc danh sách terminal report từ repository. Sidebar Streamlit dùng
+`GET /api/v1/incidents` để hợp nhất Incident ID từ checkpoint và terminal report.
 
 ### 6.3. File artifacts
 
@@ -297,7 +317,9 @@ Base URL local: `http://localhost:8000`.
 | `POST` | `/api/v1/chat`                           | Chat agent demo                         |
 | `POST` | `/api/v1/incidents/uploads`              | Upload video và CSV log                |
 | `POST` | `/api/v1/incidents`                      | Tạo và chạy incident                 |
+| `GET`  | `/api/v1/incidents`                      | Liệt kê lịch sử Incident trong SQLite |
 | `GET`  | `/api/v1/incidents/{incident_id}`        | Lấy snapshot hiện tại                |
+| `DELETE` | `/api/v1/incidents/{incident_id}`     | Xóa một lịch sử Incident             |
 | `GET`  | `/api/v1/incidents/reports`              | Liệt kê terminal reports trong SQLite |
 | `POST` | `/api/v1/incidents/{incident_id}/review` | Gửi quyết định human review         |
 
@@ -385,14 +407,15 @@ Không commit `.env`. Điền tối thiểu `OPENAI_API_KEY` nếu dùng OpenAI.
 
 ### 8.2. Provider matrix
 
-Chỉ hai tổ hợp sau được chấp nhận:
+Các tổ hợp provider/input mode sau được chấp nhận:
 
 | `VLM_PROVIDER` | `VLM_INPUT_MODE`     | Ý nghĩa                                         |
 | ---------------- | ---------------------- | ------------------------------------------------- |
 | `openai`       | `timestamped_frames` | Lấy frame theo timestamp và gửi cho OpenAI VLM |
-| `gemini`       | `native_video`       | Normalize/upload video qua Gemini Files API       |
+| `qwen`         | `native_video`       | Gửi video public URL tới Qwen3-VL-Flash qua DashScope |
+| `gemini`       | `native_video`       | Provider cũ, chỉ giữ tương thích cấu hình        |
 
-OpenAI + `native_video` và Gemini + `timestamped_frames` bị từ chối khi bootstrap Settings.
+OpenAI + `native_video`, Qwen + `timestamped_frames` và Gemini + `timestamped_frames` bị từ chối khi bootstrap Settings.
 
 ### 8.3. Nhóm biến quan trọng
 
@@ -400,13 +423,13 @@ OpenAI + `native_video` và Gemini + `timestamped_frames` bị từ chối khi b
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | App              | `APP_ENV`, `APP_HOST`, `APP_PORT`, `LOG_LEVEL`, `CORS_ORIGINS`                                                                 |
 | LLM              | `OPENAI_API_KEY`, `MODEL_NAME`, `LLM_TEMPERATURE`                                                                                  |
-| VLM              | `VLM_PROVIDER`, `VLM_INPUT_MODE`, `OPENAI_VLM_MODEL_NAME`, `GEMINI_API_KEY`, `GEMINI_VLM_MODEL_NAME`                           |
+| VLM              | `VLM_PROVIDER`, `VLM_INPUT_MODE`, `OPENAI_VLM_MODEL_NAME`, `DASHSCOPE_API_KEY`, `QWEN_VLM_MODEL_NAME`, `QWEN_BASE64_MAX_VIDEO_BYTES`, `QWEN_ARTIFACT_URL_BASE` |
 | VLM limits       | `VLM_TIMEOUT_S`, `VLM_MAX_RETRIES`, `VLM_FRAME_FPS`, `VLM_MAX_FRAMES`, `VLM_FRAME_OVERFLOW_STRATEGY`                           |
 | Model downstream | `VERIFICATION_MODEL_NAME`, `REPORT_MODEL_NAME`, timeout/temperature tương ứng                                                     |
 | Input            | `INCIDENT_INPUT_ROOTS`, `INCIDENT_UPLOAD_DIR`, `INCIDENT_MAX_VIDEO_BYTES`, `INCIDENT_MAX_LOG_BYTES`, `INCIDENT_MAX_DURATION_S` |
 | Log              | `LOG_TIMESTAMP_TOLERANCE_S`, `LOG_BRAKE_RISE_THRESHOLD`, `LOG_STEERING_CHANGE_THRESHOLD`                                           |
 | Storage          | `ARTIFACT_DIR`, `INCIDENT_DATABASE_PATH`, `INCIDENT_CHECKPOINT_PATH`                                                               |
-| Gemini cleanup   | `GEMINI_DELETE_REMOTE_FILE_ON_TERMINAL`, `GEMINI_REUPLOAD_MISSING_FILE`                                                              |
+| Qwen video       | `QWEN_BASE_URL`, `QWEN_VIDEO_FPS`, `QWEN_ENABLE_THINKING`, `QWEN_THINKING_BUDGET`                                                     |
 
 `DATABASE_URL`, Chroma và một số biến frontend vẫn có trong `.env.example` để dành cho hướng mở rộng; incident workflow hiện tại sử dụng trực tiếp hai SQLite path nói trên.
 
@@ -454,11 +477,11 @@ streamlit run main_test.py
 Trong giao diện:
 
 1. Nhập FastAPI base URL nếu backend không chạy ở `http://localhost:8000`.
-2. Chọn video và log CSV tùy chọn.
-3. Nhập `Incident ID` và analysis prompt.
+2. Chọn một Incident cũ ở sidebar để mở lại, hoặc bấm **Cuộc trò chuyện mới**.
+3. Incident ID được giao diện sinh tự động; chọn video, log CSV tùy chọn và nhập analysis prompt.
 4. Bấm **Start incident**.
 5. Theo dõi model activity, report, claims, artifacts và review form.
-6. Sau khi approve/not-incident, bấm **Refresh SQLite data** ở sidebar để xem các terminal record.
+6. Nút thùng rác cạnh mỗi Incident cho phép xóa riêng lịch sử đó sau bước xác nhận.
 
 Workflow có thể mất vài phút vì VLM, verification và report model chạy tuần tự. UI có timeout request dài cho thao tác start và polling ngắn cho refresh status.
 

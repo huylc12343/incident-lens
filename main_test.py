@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any
+from uuid import uuid4
 
 import httpx
 import streamlit as st
@@ -55,9 +56,18 @@ def main() -> None:
     st.set_page_config(page_title="Incident Agent Test Client", layout="wide")
     st.title("Incident Agent — End-to-end test client")
     base_url = st.sidebar.text_input("FastAPI base URL", "http://localhost:8000")
+    if st.session_state.get("history_base_url") != base_url:
+        st.session_state.history_base_url = base_url
+        _refresh_incident_history(base_url, show_success=False)
+    _render_incident_sidebar(base_url)
+
+    incident_id = st.session_state.get("draft_incident_id")
+    if not isinstance(incident_id, str):
+        incident_id = _new_incident_id()
+        st.session_state.draft_incident_id = incident_id
 
     with st.form("start-incident"):
-        incident_id = st.text_input("Incident ID", value=st.session_state.get("incident_id", "INC-DEMO-001"))
+        st.caption(f"Incident ID tự động: `{incident_id}`")
         video_file = st.file_uploader("Video", type=["mp4", "mov", "avi", "mkv", "webm"])
         log_file = st.file_uploader("Log CSV (tùy chọn)", type=["csv"])
         analysis_prompt = st.text_area("Analysis prompt", "Phân tích sự cố giao thông trong video.")
@@ -68,17 +78,87 @@ def main() -> None:
         else:
             _upload_and_start_async(base_url, incident_id, analysis_prompt, video_file, log_file)
 
-    active_id = st.session_state.get("incident_id", incident_id)
+    active_id = st.session_state.get("incident_id", "")
     if st.button("Refresh status") and active_id:
         _run_and_store("GET", base_url, f"/api/v1/incidents/{active_id}")
 
-    st.sidebar.divider()
-    st.sidebar.subheader("SQLite")
-    if st.sidebar.button("Refresh SQLite data"):
-        _refresh_sqlite_reports(base_url)
-    _render_sqlite_reports()
-
     _render_live_incident(base_url, active_id)
+
+
+def _render_incident_sidebar(base_url: str) -> None:
+    st.sidebar.divider()
+    st.sidebar.subheader("Cuộc trò chuyện")
+    if st.sidebar.button("＋ Cuộc trò chuyện mới", use_container_width=True):
+        st.session_state.pop("snapshot", None)
+        st.session_state.pop("incident_id", None)
+        st.session_state.draft_incident_id = _new_incident_id()
+        st.session_state.pop("pending_delete_incident_id", None)
+    if st.sidebar.button("↻ Làm mới lịch sử", use_container_width=True):
+        _refresh_incident_history(base_url)
+
+    incident_ids = st.session_state.get("incident_history", [])
+    if not incident_ids:
+        st.sidebar.caption("Chưa có Incident nào trong SQLite.")
+    for incident_id in incident_ids:
+        columns = st.sidebar.columns([5, 1])
+        if columns[0].button(
+            incident_id,
+            key=f"open-incident-{incident_id}",
+            use_container_width=True,
+        ):
+            _open_incident(base_url, incident_id)
+        if columns[1].button("🗑", key=f"delete-incident-{incident_id}"):
+            st.session_state.pending_delete_incident_id = incident_id
+
+    pending = st.session_state.get("pending_delete_incident_id")
+    if isinstance(pending, str):
+        st.sidebar.warning(f"Xóa lịch sử `{pending}`?")
+        confirm, cancel = st.sidebar.columns(2)
+        if confirm.button("Xóa", key="confirm-delete-incident", use_container_width=True):
+            _delete_incident(base_url, pending)
+        if cancel.button("Hủy", key="cancel-delete-incident", use_container_width=True):
+            st.session_state.pop("pending_delete_incident_id", None)
+
+
+def _refresh_incident_history(base_url: str, *, show_success: bool = True) -> None:
+    try:
+        payload = api_request("GET", base_url, "/api/v1/incidents")
+        incident_ids = payload.get("incident_ids")
+        if not isinstance(incident_ids, list) or not all(isinstance(item, str) for item in incident_ids):
+            raise RuntimeError("API lịch sử Incident trả về dữ liệu không hợp lệ.")
+        st.session_state.incident_history = incident_ids
+        if show_success:
+            st.sidebar.success(f"Đã tải {len(incident_ids)} cuộc trò chuyện.")
+    except RuntimeError as exc:
+        st.sidebar.error(str(exc))
+
+
+def _open_incident(base_url: str, incident_id: str) -> None:
+    try:
+        st.session_state.snapshot = api_request("GET", base_url, f"/api/v1/incidents/{incident_id}")
+        st.session_state.incident_id = incident_id
+    except RuntimeError as exc:
+        st.sidebar.error(str(exc))
+
+
+def _delete_incident(base_url: str, incident_id: str) -> None:
+    try:
+        api_request("DELETE", base_url, f"/api/v1/incidents/{incident_id}")
+        st.session_state.incident_history = [
+            item for item in st.session_state.get("incident_history", []) if item != incident_id
+        ]
+        if st.session_state.get("incident_id") == incident_id:
+            st.session_state.pop("snapshot", None)
+            st.session_state.pop("incident_id", None)
+            st.session_state.draft_incident_id = _new_incident_id()
+        st.session_state.pop("pending_delete_incident_id", None)
+        st.sidebar.success("Đã xóa cuộc trò chuyện.")
+    except RuntimeError as exc:
+        st.sidebar.error(str(exc))
+
+
+def _new_incident_id() -> str:
+    return f"INC-{uuid4().hex[:12].upper()}"
 
 
 def _run_and_store(
@@ -117,6 +197,8 @@ def _upload_and_start(
             payload["log_uri"] = uploaded["log_uri"]
         st.session_state.snapshot = api_request("POST", base_url, "/api/v1/incidents", payload)
         st.session_state.incident_id = incident_id
+        _remember_incident(incident_id)
+        st.session_state.draft_incident_id = _new_incident_id()
         st.success("Upload và tạo incident thành công.")
     except (KeyError, RuntimeError) as exc:
         st.error(str(exc) if isinstance(exc, RuntimeError) else "API upload trả về dữ liệu không hợp lệ.")
@@ -142,12 +224,20 @@ def _upload_and_start_async(
         if uploaded.get("log_uri"):
             payload["log_uri"] = uploaded["log_uri"]
         st.session_state.incident_id = incident_id
+        _remember_incident(incident_id)
+        st.session_state.draft_incident_id = _new_incident_id()
         st.session_state.incident_future = _REQUEST_EXECUTOR.submit(
             api_request, "POST", base_url, "/api/v1/incidents", payload
         )
         st.success("Upload thành công. Workflow đang chạy và giao diện sẽ cập nhật theo thời gian thực.")
     except (KeyError, RuntimeError) as exc:
         st.error(str(exc) if isinstance(exc, RuntimeError) else "API upload trả về dữ liệu không hợp lệ.")
+
+
+def _remember_incident(incident_id: str) -> None:
+    getter = getattr(st.session_state, "get", None)
+    incident_ids = getter("incident_history", []) if callable(getter) else getattr(st.session_state, "incident_history", [])
+    st.session_state.incident_history = [incident_id, *(item for item in incident_ids if item != incident_id)]
 
 
 @st.fragment(run_every=1)
@@ -223,52 +313,6 @@ def _render_snapshot(snapshot: dict[str, Any]) -> None:
         st.warning(warning)
     if snapshot.get("error_message"):
         st.error(f"{snapshot.get('error_code')}: {snapshot.get('error_message')}")
-
-
-def _refresh_sqlite_reports(base_url: str) -> None:
-    try:
-        payload = api_request("GET", base_url, "/api/v1/incidents/reports")
-        reports = payload.get("reports")
-        if not isinstance(reports, list):
-            raise RuntimeError("API SQLite trả về dữ liệu không hợp lệ.")
-        st.session_state.sqlite_reports = reports
-        st.success(f"Đã tải {len(reports)} record từ SQLite.")
-    except RuntimeError as exc:
-        st.error(str(exc))
-
-
-def _render_sqlite_reports() -> None:
-    st.subheader("Dữ liệu SQLite — incident_reports")
-    reports = st.session_state.get("sqlite_reports", [])
-    if not reports:
-        st.info("Chọn 'Refresh SQLite data' để tải các báo cáo terminal đã lưu.")
-        return
-
-    rows = []
-    for report in reports:
-        if not isinstance(report, dict):
-            continue
-        rows.append(
-            {
-                "incident_id": report.get("incident_id"),
-                "status": report.get("status"),
-                "has_log": report.get("has_log"),
-                "reviewer": report.get("reviewer"),
-                "decision": report.get("decision"),
-                "stored_at": report.get("stored_at"),
-                "evidence_count": len(report.get("evidence_ids", [])),
-                "claims_count": len(report.get("claims", [])),
-                "warnings_count": len(report.get("warnings", [])),
-            }
-        )
-    st.dataframe(rows, use_container_width=True, hide_index=True)
-    for report in reports:
-        if not isinstance(report, dict):
-            continue
-        incident_id = report.get("incident_id", "unknown")
-        status = report.get("status", "unknown")
-        with st.expander(f"{incident_id} — {status}"):
-            st.json(report)
 
 
 def _render_model_activity(activities: Any) -> None:

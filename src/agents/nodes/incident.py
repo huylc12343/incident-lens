@@ -36,6 +36,7 @@ from src.models.incidents import (
 )
 from src.prompts.reanalysis import build_auto_reanalysis_prompt_for_conflicts, build_human_reanalysis_prompt
 from src.prompts.video_analysis import build_video_analysis_prompt
+from src.services.log_analysis import build_claim_log_summaries
 from src.services.media import NormalizedVideoArtifact
 from src.services.video_memory import (
     VideoMemoryWorkflow,
@@ -307,43 +308,44 @@ async def align_and_verify_claims_node(
     incident_id = state.get("incident_id", "").strip()
     memory = state.get("video_memory")
     log_summary = state.get("log_evidence_summary")
-    if not incident_id or memory is None or log_summary is None:
+    log_uri = (state.get("log_uri") or "").strip()
+    if not incident_id or memory is None or log_summary is None or not log_uri:
         return {
             "status": "failed",
             "error_code": "VERIFICATION_INPUT_INVALID",
-            "error_message": "incident_id, video_memory, and log_evidence_summary are required",
+            "error_message": "incident_id, video_memory, log_uri, and log_evidence_summary are required",
         }
     try:
+        claim_log_summaries = build_claim_log_summaries(
+            log_uri,
+            memory.claims,
+            timestamp_tolerance_s=timestamp_tolerance_s,
+        )
         result = await verification.verify(
             VerificationRequest(
                 incident_id=incident_id,
                 claims=memory.claims,
-                log_evidence_summary=log_summary,
+                claim_log_summaries=claim_log_summaries,
                 timestamp_tolerance_s=timestamp_tolerance_s,
             )
         )
-        statuses = {item.claim_id: item.status for item in result.results}
-        claims = [claim.model_copy(update={"verification_status": statuses[claim.claim_id]}) for claim in memory.claims]
-        updated_memory = memory.model_copy(update={"claims": claims})
         return {
             "status": "running",
             "verification": result,
-            "video_memory": updated_memory,
-            "claims": claims,
+            "claim_log_summaries": claim_log_summaries,
+            "video_memory": memory,
+            "claims": memory.claims,
         }
     except Exception as exc:
-        claims = [
-            claim.model_copy(update={"verification_status": VerificationStatus.UNVERIFIED}) for claim in memory.claims
-        ]
         warning = (
             f"{getattr(exc, 'code', 'CLAIM_VERIFICATION_FAILED')}: verification unavailable; "
-            "claims remain unverified and processing continued."
+            "processing continued without a verification result."
         )
         return {
             "status": "running",
             "verification": None,
-            "video_memory": memory.model_copy(update={"claims": claims}),
-            "claims": claims,
+            "video_memory": memory,
+            "claims": memory.claims,
             "warnings": list(dict.fromkeys([*state.get("warnings", []), warning])),
         }
 
@@ -413,7 +415,6 @@ async def manual_reanalyze_node(
             target_claim_ids=target_ids,
             feedback=feedback,
             current_claims=memory.claims,
-            current_evidence=memory.evidence,
             version=prompt_version,
         )
         merged, artifact_uris = await _reanalyze(
@@ -489,7 +490,9 @@ async def build_draft_report_node(
             }
         )
     conflict_ids = [
-        claim.claim_id for claim in memory.claims if claim.verification_status == VerificationStatus.CONTRADICTED
+        item.claim_id
+        for item in (state.get("verification").results if state.get("verification") else [])
+        if item.status == VerificationStatus.CONTRADICTED
     ]
     warnings.extend(f"Unresolved contradicted claim: {claim_id}" for claim_id in conflict_ids)
     warnings = list(dict.fromkeys(warnings))
@@ -508,11 +511,11 @@ async def build_draft_report_node(
         ),
         video_observations=ReportVideoObservationsSection(
             narrative=narrative.video_observations,
-            observations=memory.observations,
         ),
         log_findings=ReportLogSection(
             narrative=narrative.log_findings,
             summary=state.get("log_evidence_summary"),
+            claim_summaries=state.get("claim_log_summaries", []),
         ),
         alignment=ReportAlignmentSection(
             narrative=narrative.alignment,
@@ -520,7 +523,7 @@ async def build_draft_report_node(
         ),
         hypothesized_causes=narrative.hypothesized_causes,
         evidence_and_warnings=ReportEvidenceAndWarnings(
-            evidence=memory.evidence,
+            evidence=[evidence for claim in memory.claims for evidence in claim.evidence],
             artifact_uris=state.get("artifact_uris", {}),
             warnings=warnings,
         ),
@@ -588,7 +591,11 @@ async def _reanalyze(
             frame_manifest.frames,
             fallback_timestamp_s=memory.incident_window.t0,
         )
-    return merge_video_memory_patch(memory, patch), artifacts
+    return merge_video_memory_patch(
+        memory,
+        patch,
+        reconcile_native_evidence=workflow.vlm.capabilities.input_mode == VLMInputMode.NATIVE_VIDEO,
+    ), artifacts
 
 
 def _failure(code: str, message: str) -> dict[str, object]:
@@ -606,8 +613,6 @@ def _representative_timestamp(memory: VideoMemory) -> float:
     text_and_timestamps = [
         *((item.text, item.timestamp_s) for item in memory.claims),
         *((item.description, item.timestamp_s) for item in memory.timeline),
-        *((item.text, item.timestamp_s) for item in memory.observations),
-        *((item.description, item.timestamp_s) for item in memory.evidence),
     ]
     for text, timestamp_s in text_and_timestamps:
         if timestamp_s is not None and collision_pattern.search(text) and not aftermath_pattern.search(text):
@@ -624,22 +629,21 @@ def _representative_timestamp(memory: VideoMemory) -> float:
 
 def _fallback_report_narrative(memory: VideoMemory, *, has_log: bool) -> ReportNarrative:
     timeline = " ".join(f"Tại {item.timestamp_s:g} giây: {item.description}" for item in memory.timeline)
-    observations = " ".join(item.text for item in memory.observations)
+    claims = " ".join(item.text for item in memory.claims)
     return ReportNarrative(
         summary=memory.video_summary or memory.global_scene,
         timeline=timeline or "Phân tích video không trả về sự kiện timeline có timestamp.",
-        video_observations=observations or memory.global_scene,
+        video_observations=claims or memory.global_scene,
         log_findings=(
             "Bằng chứng log phương tiện có cấu trúc được cung cấp trong phần kết quả log."
             if has_log
             else "Không có dữ liệu log."
         ),
-        alignment="Không thể thực hiện bước kiểm chứng claim; tất cả claim vẫn ở trạng thái unverified.",
+        alignment="Không thể thực hiện bước kiểm chứng claim vì verification không trả về kết quả.",
         hypothesized_causes=(
-            " ".join(memory.uncertainties)
-            or "Chưa thể xác định nguyên nhân từ bằng chứng hiện có nếu chưa được chuyên viên xem xét thêm."
+            "Chưa thể xác định nguyên nhân từ bằng chứng hiện có nếu chưa được chuyên viên xem xét thêm."
         ),
-        evidence_ids=[item.evidence_id for item in memory.evidence],
+        evidence_ids=[evidence.evidence_id for claim in memory.claims for evidence in claim.evidence],
     )
 
 
@@ -648,7 +652,11 @@ def _verification_alignment(verification: VerificationResult | None) -> str:
         return "Không thể đối chiếu claim vì bước verification không trả về kết quả."
     statements = []
     for item in verification.results:
-        conclusion = "được log hỗ trợ" if item.status == VerificationStatus.SUPPORTED else "mâu thuẫn với log"
+        conclusion = {
+            VerificationStatus.SUPPORTED: "được log hỗ trợ",
+            VerificationStatus.CONTRADICTED: "mâu thuẫn với log",
+            VerificationStatus.UNVERIFIED: "chưa thể xác minh từ log",
+        }[item.status]
         evidence = f" Bằng chứng: {', '.join(item.evidence_ids)}." if item.evidence_ids else ""
         statements.append(f"{item.claim_id} {conclusion}: {item.reason.rstrip('.')}.{evidence}")
     return " ".join(statements) or "Không có claim để đối chiếu với log."

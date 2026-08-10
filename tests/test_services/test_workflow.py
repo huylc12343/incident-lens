@@ -357,3 +357,27 @@ async def test_invalid_runner_output_does_not_reserve_incident_id() -> None:
 
     assert exc_info.value.code == "WORKFLOW_OUTPUT_INVALID"
     assert recovered.status == "awaiting_review"
+
+
+@pytest.mark.asyncio
+async def test_workflow_lists_and_deletes_one_incident_history() -> None:
+    runner = SimpleNamespace(
+        start=AsyncMock(return_value=_review_state("INC-HISTORY")),
+        resume=AsyncMock(),
+        get=AsyncMock(return_value=None),
+        list_incident_ids=AsyncMock(return_value=["INC-HISTORY"]),
+        delete=AsyncMock(return_value=None),
+    )
+    repository = InMemoryReportRepository()
+    service = WorkflowService(runner=runner, repository=repository)
+    await service.create(
+        IncidentCreateRequest(incident_id="INC-HISTORY", video_uri="video.mp4", analysis_prompt="Analyze")
+    )
+
+    assert await service.list_incident_ids() == ["INC-HISTORY"]
+    await service.delete("INC-HISTORY")
+
+    runner.delete.assert_awaited_once_with("INC-HISTORY")
+    with pytest.raises(WorkflowError) as exc_info:
+        await service.get("INC-HISTORY")
+    assert exc_info.value.code == "INCIDENT_NOT_FOUND"

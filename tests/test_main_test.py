@@ -84,3 +84,12 @@ def test_report_renderer_does_not_parse_plain_text_as_json() -> None:
 
     streamlit.write.assert_called_once_with("Video bắt đầu trên cầu.")
     streamlit.json.assert_not_called()
+
+
+def test_generated_incident_ids_are_unique() -> None:
+    first = main_test._new_incident_id()
+    second = main_test._new_incident_id()
+
+    assert first.startswith("INC-")
+    assert second.startswith("INC-")
+    assert first != second

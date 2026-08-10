@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, 
 from src.api.errors import incident_http_error
 from src.models.api import (
     IncidentCreateRequest,
+    IncidentDeleteResponse,
+    IncidentHistoryResponse,
     IncidentSnapshot,
     IncidentUploadResponse,
     ReviewDecision,
@@ -65,6 +67,17 @@ async def create_incident(
     return snapshot
 
 
+@router.get("", response_model=IncidentHistoryResponse)
+async def list_incident_history(
+    service: Any = Depends(get_workflow_service),
+) -> IncidentHistoryResponse:
+    try:
+        incident_ids = await service.list_incident_ids()
+    except Exception as exc:
+        raise incident_http_error(exc) from exc
+    return IncidentHistoryResponse(incident_ids=incident_ids, count=len(incident_ids))
+
+
 @router.get("/reports", response_model=StoredReportsResponse)
 async def list_stored_reports(
     service: Any = Depends(get_workflow_service),
@@ -85,6 +98,18 @@ async def get_incident(
         return await service.get(incident_id)
     except Exception as exc:
         raise incident_http_error(exc) from exc
+
+
+@router.delete("/{incident_id}", response_model=IncidentDeleteResponse)
+async def delete_incident(
+    incident_id: str,
+    service: Any = Depends(get_workflow_service),
+) -> IncidentDeleteResponse:
+    try:
+        await service.delete(incident_id)
+    except Exception as exc:
+        raise incident_http_error(exc) from exc
+    return IncidentDeleteResponse(incident_id=incident_id, deleted=True)
 
 
 @router.post("/{incident_id}/review", response_model=IncidentSnapshot)

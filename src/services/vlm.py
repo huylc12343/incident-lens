@@ -10,6 +10,7 @@ import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, TypeVar
+from urllib.parse import quote, urlparse
 
 from google import genai
 from google.genai import types
@@ -480,6 +481,207 @@ class GeminiNativeVideoVLMService:
             raise VLMServiceError("GEMINI_GENERATION_FAILED", str(exc), retryable=True) from exc
 
 
+class QwenNativeVideoVLMService:
+    """DashScope OpenAI-compatible adapter for Qwen3-VL-Flash native video."""
+
+    def __init__(
+        self,
+        *,
+        model: str,
+        client: Any | None = None,
+        api_key: str | None = None,
+        base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        artifact_dir: str = "./data/artifacts",
+        artifact_url_base: str = "",
+        base64_max_video_bytes: int = 7_000_000,
+        timeout_s: float = 120.0,
+        temperature: float = 0.0,
+        video_fps: float = 2.0,
+        enable_thinking: bool = False,
+        thinking_budget: int = 500,
+        observability: ModelActivityRegistry | None = None,
+    ) -> None:
+        if not model.strip() or not base_url.strip():
+            raise ValueError("model and base_url must not be blank")
+        if timeout_s <= 0 or not 0 < video_fps <= 10 or min(thinking_budget, base64_max_video_bytes) <= 0:
+            raise ValueError("timeout, video_fps, and thinking_budget must be positive")
+        self._client = client if client is not None else AsyncOpenAI(api_key=api_key, base_url=base_url)
+        self._model = model
+        self._artifact_dir = Path(artifact_dir).resolve()
+        self._artifact_url_base = artifact_url_base.rstrip("/")
+        self._base64_max_video_bytes = base64_max_video_bytes
+        self._timeout_s = timeout_s
+        self._temperature = temperature
+        self._video_fps = video_fps
+        self._enable_thinking = enable_thinking
+        self._thinking_budget = thinking_budget
+        self._observability = observability
+        self._capabilities = VLMCapabilities(provider=VLMProvider.QWEN, input_mode=VLMInputMode.NATIVE_VIDEO)
+
+    @property
+    def capabilities(self) -> VLMCapabilities:
+        return self._capabilities
+
+    async def analyze_video(self, request: VideoAnalysisRequest) -> VideoMemory:
+        if not isinstance(request, NativeVideoAnalysisRequest):
+            raise VLMServiceError("QWEN_UNSUPPORTED_INPUT_MODE", "Qwen native VLM accepts normalized video only")
+        memory = await self._generate(
+            incident_id=request.incident_id,
+            operation="video_analysis",
+            description="Phân tích native video bằng Qwen3-VL-Flash và tạo VideoMemory có cấu trúc.",
+            video_uri=request.normalized_video_uri,
+            prompt=request.prompt.text,
+            output_model=VideoMemory,
+            model_defaults={"analysis_mode": AnalysisMode.NATIVE_VIDEO.value},
+        )
+        return memory
+
+    async def reanalyze_claims(self, request: ReanalysisRequest) -> VideoMemoryPatch:
+        if not request.normalized_video_uri:
+            raise VLMServiceError("QWEN_REANALYSIS_VIDEO_REQUIRED", "Qwen re-analysis requires normalized_video_uri")
+        patch = await self._generate(
+            incident_id=request.incident_id,
+            operation="claim_reanalysis",
+            description="Phân tích lại các claim được chọn bằng Qwen3-VL-Flash.",
+            video_uri=request.normalized_video_uri,
+            prompt=request.prompt.text,
+            output_model=VideoMemoryPatch,
+            model_defaults={
+                "target_claim_ids": request.target_claim_ids,
+                "base_revision": request.current_memory.revision,
+            },
+        )
+        _validate_patch_targets(patch, request.target_claim_ids)
+        return patch
+
+    async def release_remote_resources(self, handles: list[RemoteMediaHandle]) -> None:
+        return None
+
+    async def _generate(
+        self,
+        *,
+        incident_id: str,
+        operation: str,
+        description: str,
+        video_uri: str,
+        prompt: str,
+        output_model: type[StructuredModel],
+        model_defaults: dict[str, Any] | None = None,
+    ) -> StructuredModel:
+        activity_id = None
+        response = None
+        if self._observability is not None:
+            activity_id = self._observability.start(
+                incident_id=incident_id,
+                step="vlm",
+                operation=operation,
+                description=description,
+                provider="qwen",
+                model=self._model,
+                metadata={"input_mode": "native_video", "video_fps": self._video_fps},
+            )
+        try:
+            output_schema = json.dumps(
+                output_model.model_json_schema(),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            structured_prompt = (
+                f"{prompt}\n"
+                "Trả về đúng một JSON object, không kèm Markdown. "
+                "JSON phải tuân thủ chính xác JSON Schema sau; không thêm trường ngoài schema:\n"
+                f"<json_schema>{output_schema}</json_schema>"
+            )
+            request_kwargs: dict[str, Any] = {
+                "model": self._model,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "video_url",
+                                "video_url": {"url": self._public_video_url(video_uri)},
+                                "fps": self._video_fps,
+                            },
+                            {"type": "text", "text": structured_prompt},
+                        ],
+                    }
+                ],
+                "temperature": self._temperature,
+                "timeout": self._timeout_s,
+                "response_format": {"type": "json_object"},
+            }
+            if self._enable_thinking:
+                request_kwargs["extra_body"] = {
+                    "enable_thinking": True,
+                    "thinking_budget": self._thinking_budget,
+                    "result_format": "message",
+                }
+            response = await self._client.chat.completions.create(**request_kwargs)
+            content = response.choices[0].message.content
+            payload = _parse_json_content(content)
+            if not isinstance(payload, dict):
+                raise TypeError("Qwen structured output must be a JSON object")
+            payload = {**payload, **(model_defaults or {})}
+            result = output_model.model_validate(payload)
+            if activity_id is not None:
+                self._observability.complete(activity_id, response)
+            return result
+        except VLMServiceError:
+            raise
+        except (ValidationError, ValueError, TypeError, json.JSONDecodeError, IndexError, AttributeError) as exc:
+            if isinstance(exc, ValidationError):
+                validation_details: object = [
+                    {"location": ".".join(map(str, error["loc"])), "type": error["type"], "message": error["msg"]}
+                    for error in exc.errors(include_input=False, include_url=False)
+                ]
+            else:
+                validation_details = str(exc)
+            logger.warning("Qwen structured output is invalid: %s", validation_details)
+            if activity_id is not None:
+                self._observability.fail(activity_id, "VLM_STRUCTURED_OUTPUT_INVALID", response)
+            raise VLMServiceError("VLM_STRUCTURED_OUTPUT_INVALID", str(exc)) from exc
+        except AuthenticationError as exc:
+            if activity_id is not None:
+                self._observability.fail(activity_id, "DASHSCOPE_AUTHENTICATION_FAILED", response)
+            raise VLMServiceError("DASHSCOPE_AUTHENTICATION_FAILED", "DashScope authentication failed") from exc
+        except (APITimeoutError, APIConnectionError, RateLimitError) as exc:
+            if activity_id is not None:
+                self._observability.fail(activity_id, "QWEN_VIDEO_ANALYSIS_RETRYABLE", response)
+            raise VLMServiceError("QWEN_VIDEO_ANALYSIS_RETRYABLE", str(exc), retryable=True) from exc
+        except (BadRequestError, NotFoundError, PermissionDeniedError) as exc:
+            if activity_id is not None:
+                self._observability.fail(activity_id, "QWEN_VIDEO_ANALYSIS_REQUEST_INVALID", response)
+            raise VLMServiceError("QWEN_VIDEO_ANALYSIS_REQUEST_INVALID", str(exc)) from exc
+        except Exception as exc:
+            if activity_id is not None:
+                self._observability.fail(activity_id, "QWEN_VIDEO_ANALYSIS_FAILED", response)
+            raise VLMServiceError("QWEN_VIDEO_ANALYSIS_FAILED", str(exc), retryable=True) from exc
+
+    def _public_video_url(self, video_uri: str) -> str:
+        if urlparse(video_uri).scheme in {"http", "https"}:
+            return video_uri
+        local_path = Path(video_uri).resolve()
+        if not local_path.is_file():
+            raise VLMServiceError("QWEN_LOCAL_VIDEO_MISSING", f"video does not exist: {video_uri}")
+        try:
+            relative_path = local_path.relative_to(self._artifact_dir)
+        except ValueError as exc:
+            raise VLMServiceError(
+                "QWEN_VIDEO_OUTSIDE_ARTIFACT_DIR",
+                "normalized video must be inside ARTIFACT_DIR or be a public HTTPS URL",
+            ) from exc
+        if self._artifact_url_base:
+            return f"{self._artifact_url_base}/{quote(relative_path.as_posix())}"
+        if local_path.stat().st_size > self._base64_max_video_bytes:
+            raise VLMServiceError(
+                "QWEN_PUBLIC_VIDEO_URL_REQUIRED",
+                "normalized video is too large for Base64; configure QWEN_ARTIFACT_URL_BASE",
+            )
+        encoded = base64.b64encode(local_path.read_bytes()).decode("ascii")
+        return f"data:video/mp4;base64,{encoded}"
+
+
 async def _image_data_url(uri: str, mime_type: str) -> str:
     if uri.startswith("data:"):
         return uri
@@ -488,6 +690,15 @@ async def _image_data_url(uri: str, mime_type: str) -> str:
         raise VLMServiceError("OPENAI_FRAME_MISSING", f"frame does not exist: {uri}")
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
     return f"data:{mime_type};base64,{encoded}"
+
+
+def _parse_json_content(content: str | None) -> object:
+    if not content:
+        raise ValueError("Qwen returned empty content")
+    normalized = content.strip()
+    if normalized.startswith("```"):
+        normalized = normalized.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    return json.loads(normalized)
 
 
 def _file_state_name(remote_file: Any) -> str:

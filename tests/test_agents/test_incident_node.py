@@ -265,8 +265,16 @@ def test_representative_timestamp_avoids_late_aftermath() -> None:
 
 
 @pytest.mark.asyncio
-async def test_align_and_verify_claims_updates_claim_status() -> None:
+async def test_align_and_verify_claims_builds_per_claim_log_summary(tmp_path: Path) -> None:
     memory = _claim_memory(AnalysisMode.SINGLE_REQUEST)
+    log = tmp_path / "vehicle.csv"
+    log.write_text(
+        "timestamp,camera_frame,speed_kmh,brake,steer\n"
+        "1.5,10,30,0,0\n"
+        "2.0,11,20,1,0.5\n"
+        "2.5,12,10,1,0.2\n",
+        encoding="utf-8",
+    )
     verification = VerificationResult(
         results=[
             ClaimVerification(
@@ -282,6 +290,7 @@ async def test_align_and_verify_claims_updates_claim_status() -> None:
         {
             "incident_id": "INC-VERIFY",
             "video_memory": memory,
+            "log_uri": str(log),
             "log_evidence_summary": LogEvidenceSummary(),
         },
         verification=verifier,
@@ -289,13 +298,17 @@ async def test_align_and_verify_claims_updates_claim_status() -> None:
     )
 
     assert result["status"] == "running"
-    assert result["claims"][0].verification_status == VerificationStatus.CONTRADICTED
-    assert result["video_memory"].claims[0].verification_status == VerificationStatus.CONTRADICTED
+    assert result["verification"] == verification
+    assert result["claim_log_summaries"][0].claim_id == "claim-1"
+    request = verifier.verify.await_args.args[0]
+    assert request.claim_log_summaries[0].metrics["brake"]["max"] == 1
 
 
 @pytest.mark.asyncio
-async def test_verification_failure_keeps_claims_unverified_and_continues() -> None:
+async def test_verification_failure_continues_without_result(tmp_path: Path) -> None:
     memory = _claim_memory(AnalysisMode.SINGLE_REQUEST)
+    log = tmp_path / "vehicle.csv"
+    log.write_text("timestamp,brake\n2.0,1\n", encoding="utf-8")
 
     class RateLimitedError(RuntimeError):
         code = "OPENAI_RATE_LIMITED"
@@ -306,6 +319,7 @@ async def test_verification_failure_keeps_claims_unverified_and_continues() -> N
         {
             "incident_id": "INC-VERIFY-FALLBACK",
             "video_memory": memory,
+            "log_uri": str(log),
             "log_evidence_summary": LogEvidenceSummary(),
         },
         verification=verifier,
@@ -314,7 +328,6 @@ async def test_verification_failure_keeps_claims_unverified_and_continues() -> N
 
     assert result["status"] == "running"
     assert result["verification"] is None
-    assert result["claims"][0].verification_status == VerificationStatus.UNVERIFIED
     assert "OPENAI_RATE_LIMITED" in result["warnings"][0]
 
 

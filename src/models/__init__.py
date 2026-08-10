@@ -2,6 +2,7 @@ from src.models.api import IncidentCreateRequest, IncidentSnapshot, IncidentUplo
 from src.models.incidents import (
     AnalysisMode,
     Claim,
+    ClaimLogSummary,
     ClaimVerification,
     DraftReport,
     IncidentWindow,
@@ -35,6 +36,7 @@ from src.models.incidents import (
 __all__ = [
     "AnalysisMode",
     "Claim",
+    "ClaimLogSummary",
     "ClaimVerification",
     "DraftReport",
     "IncidentWindow",

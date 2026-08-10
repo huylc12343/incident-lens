@@ -69,3 +69,12 @@ def test_sqlite_repository_rejects_duplicate_terminal_outcome(tmp_path: Path) ->
         repository.store(_stored_report())
 
     assert exc_info.value.code == "REPORT_ALREADY_STORED"
+
+
+def test_sqlite_repository_deletes_one_terminal_outcome(tmp_path: Path) -> None:
+    repository = SQLiteReportRepository(str(tmp_path / "reports.sqlite3"))
+    repository.store(_stored_report())
+
+    assert repository.delete("INC-STORED") is True
+    assert repository.delete("INC-STORED") is False
+    assert repository.get("INC-STORED") is None

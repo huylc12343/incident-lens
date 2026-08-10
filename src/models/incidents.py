@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class VLMProvider(StrEnum):
     OPENAI = "openai"
     GEMINI = "gemini"
+    QWEN = "qwen"
 
 
 class VLMInputMode(StrEnum):
@@ -126,16 +127,12 @@ class Claim(ContractModel):
     claim_id: str = Field(min_length=1)
     text: str = Field(min_length=1)
     timestamp_s: float | None = Field(default=None, ge=0)
-    evidence_ids: list[str] = Field(default_factory=list)
-    verification_status: VerificationStatus = VerificationStatus.UNVERIFIED
+    evidence: list[EvidenceReference] = Field(default_factory=list)
 
 
 class EvidenceReference(ContractModel):
     evidence_id: str = Field(min_length=1)
-    kind: Literal["frame", "video", "log", "chart"]
-    artifact_uri: str = Field(min_length=1)
-    timestamp_s: float | None = Field(default=None, ge=0)
-    description: str = ""
+    timestamp_s: float = Field(ge=0)
 
 
 class SamplingMetadata(ContractModel):
@@ -152,11 +149,7 @@ class VideoMemory(ContractModel):
     incident_window: IncidentWindow
     representative_timestamp_s: float | None = Field(default=None, ge=0)
     timeline: list[TimelineEvent] = Field(default_factory=list)
-    observations: list[Observation] = Field(default_factory=list)
     claims: list[Claim] = Field(default_factory=list)
-    uncertainties: list[str] = Field(default_factory=list)
-    evidence: list[EvidenceReference] = Field(default_factory=list)
-    source_frame_ids: list[str] = Field(default_factory=list)
     revision: int = Field(default=1, ge=1)
     analysis_mode: AnalysisMode
     sampling_metadata: SamplingMetadata | None = None
@@ -166,9 +159,6 @@ class VideoMemory(ContractModel):
 class VideoMemoryPatch(ContractModel):
     target_claim_ids: list[str] = Field(min_length=1)
     claims: list[Claim] = Field(default_factory=list)
-    observations: list[Observation] = Field(default_factory=list)
-    evidence: list[EvidenceReference] = Field(default_factory=list)
-    uncertainties: list[str] = Field(default_factory=list)
     remote_media_handles: list[RemoteMediaHandle] = Field(default_factory=list)
     base_revision: int = Field(ge=1)
 
@@ -244,16 +234,42 @@ class LogAnalysisResult(ContractModel):
     signal_names: list[str] = Field(default_factory=list)
 
 
+class ClaimLogEvidence(ContractModel):
+    evidence_id: str = Field(min_length=1)
+    timestamp_s: float = Field(ge=0)
+    camera_frame: str | int | float | None = None
+
+
+class ClaimLogSummary(ContractModel):
+    claim_id: str = Field(min_length=1)
+    claim_timestamp_s: float | None = Field(default=None, ge=0)
+    nearest_timestamp_s: float | None = Field(default=None, ge=0)
+    timestamp_distance_s: float | None = Field(default=None, ge=0)
+    within_tolerance: bool = False
+    sample_start_s: float | None = Field(default=None, ge=0)
+    sample_end_s: float | None = Field(default=None, ge=0)
+    sample_count: int = Field(default=0, ge=0)
+    available_signals: list[str] = Field(default_factory=list)
+    metrics: dict[str, dict[str, float | int | str | bool | None]] = Field(default_factory=dict)
+    evidence: list[ClaimLogEvidence] = Field(default_factory=list)
+    allowed_evidence_ids: list[str] = Field(default_factory=list)
+    summary: str = Field(min_length=1)
+
+
 class VerificationRequest(ContractModel):
     incident_id: str = Field(min_length=1)
     claims: list[Claim]
-    log_evidence_summary: LogEvidenceSummary
+    claim_log_summaries: list[ClaimLogSummary]
     timestamp_tolerance_s: float = Field(ge=0)
 
 
 class ClaimVerification(ContractModel):
     claim_id: str = Field(min_length=1)
-    status: Literal[VerificationStatus.SUPPORTED, VerificationStatus.CONTRADICTED]
+    status: Literal[
+        VerificationStatus.SUPPORTED,
+        VerificationStatus.CONTRADICTED,
+        VerificationStatus.UNVERIFIED,
+    ]
     reason: str = Field(min_length=1)
     evidence_ids: list[str] = Field(default_factory=list)
 
@@ -305,6 +321,7 @@ class ReportVideoObservationsSection(ContractModel):
 class ReportLogSection(ContractModel):
     narrative: str = Field(min_length=1)
     summary: LogEvidenceSummary | None = None
+    claim_summaries: list[ClaimLogSummary] = Field(default_factory=list)
 
 
 class ReportAlignmentSection(ContractModel):

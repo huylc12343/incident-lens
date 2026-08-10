@@ -36,5 +36,14 @@ def test_routes_supported_claims_to_report() -> None:
     )
 
 
+def test_routes_unverified_claims_to_report_without_reanalysis() -> None:
+    assert (
+        route_after_verification(
+            {"verification": _verification(VerificationStatus.UNVERIFIED), "auto_reanalysis_count": 0}
+        )
+        == "draft_report"
+    )
+
+
 def test_missing_verification_degrades_to_report() -> None:
     assert route_after_verification({}) == "draft_report"

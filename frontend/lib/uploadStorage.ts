@@ -26,12 +26,12 @@ export async function saveUploadedVideo(file: File): Promise<void> {
   database.close();
 }
 
-export async function loadUploadedVideo(): Promise<File | null> {
+export async function loadUploadedVideo(): Promise<Blob | null> {
   const database = await openDatabase();
-  const file = await new Promise<File | null>((resolve, reject) => {
+  const file = await new Promise<Blob | null>((resolve, reject) => {
     const transaction = database.transaction(STORE_NAME, "readonly");
     const request = transaction.objectStore(STORE_NAME).get(VIDEO_KEY);
-    request.onsuccess = () => resolve(request.result instanceof File ? request.result : null);
+    request.onsuccess = () => resolve(request.result instanceof Blob ? request.result : null);
     request.onerror = () => reject(request.error);
   });
   database.close();

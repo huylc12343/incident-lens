@@ -21,7 +21,6 @@ export function ProcessingContent() {
         if (file) {
           objectUrl = URL.createObjectURL(file);
           setVideoUrl(objectUrl);
-          setVideoName(file.name);
         } else {
           setVideoUrl(sessionStorage.getItem("vlens:video-url") ?? "");
         }

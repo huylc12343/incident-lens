@@ -14,13 +14,13 @@ export function AnalysisForm() {
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!ready || !video || !telemetry.length) return;
+    const previousUrl = sessionStorage.getItem("vlens:video-url");
+    if (previousUrl) URL.revokeObjectURL(previousUrl);
+    sessionStorage.setItem("vlens:video-url", URL.createObjectURL(video));
     try {
       await saveUploadedVideo(video);
-      sessionStorage.removeItem("vlens:video-url");
     } catch {
-      const previousUrl = sessionStorage.getItem("vlens:video-url");
-      if (previousUrl) URL.revokeObjectURL(previousUrl);
-      sessionStorage.setItem("vlens:video-url", URL.createObjectURL(video));
+      // The session object URL above remains available as the playback fallback.
     }
     sessionStorage.setItem("vlens:video-name", video.name);
     sessionStorage.removeItem("vlens:event-timestamp");

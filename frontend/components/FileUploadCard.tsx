@@ -103,7 +103,9 @@ export function FileUploadCard({ kind, files, onChange }: Props) {
               </button>
             </div>
           ))}
-          {!isVideo && <button className="add-more-files" type="button" onClick={() => input.current?.click()}>+ Add more files</button>}
+          <button className="add-more-files" type="button" onClick={() => input.current?.click()}>
+            {isVideo ? "Change video" : "+ Add more files"}
+          </button>
           <input ref={input} type="file" hidden multiple accept={accept} onChange={selectFile} aria-label={`Add more ${label} files`} />
         </div>
       ) : (

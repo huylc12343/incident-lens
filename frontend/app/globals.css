@@ -1208,8 +1208,22 @@ td strong {
     display: grid;
     grid-template-columns: 125px 1fr;
     gap: 6px 15px;
+    width: 100%;
     padding: 16px 21px;
+    border: 0;
     border-top: 1px solid #edf0f4;
+    background: #fff;
+    color: inherit;
+    text-align: left;
+}
+
+.observation:hover,
+.observation.selected {
+    background: #f7f6ff;
+}
+
+.observation.selected {
+    box-shadow: inset 3px 0 var(--indigo);
 }
 
 .observation-key strong,

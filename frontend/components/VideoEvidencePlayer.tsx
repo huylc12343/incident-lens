@@ -1,12 +1,16 @@
 "use client";
-import { useState } from "react";
+import { RefObject, useState } from "react";
 const markers = [
   { at: "36%", label: "OBS-01", time: "00:03:42.800" },
   { at: "45%", label: "OBS-02", time: "00:03:44.100" },
   { at: "55%", label: "DISENGAGEMENT", time: "00:03:45.200" },
 ];
-type Props = { videoUrl: string; videoName: string };
-export function VideoEvidencePlayer({ videoUrl, videoName }: Props) {
+type Props = {
+  videoUrl: string;
+  videoName: string;
+  videoRef: RefObject<HTMLVideoElement | null>;
+};
+export function VideoEvidencePlayer({ videoUrl, videoName, videoRef }: Props) {
   const [selected, setSelected] = useState("DISENGAGEMENT");
   return (
     <section className="video-panel">
@@ -20,6 +24,7 @@ export function VideoEvidencePlayer({ videoUrl, videoName }: Props) {
       {videoUrl ? (
         <div className="video-placeholder uploaded-video">
           <video
+            ref={videoRef}
             key={videoUrl}
             src={videoUrl}
             controls

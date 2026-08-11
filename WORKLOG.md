@@ -14,8 +14,9 @@
 | huylc12343 | Đơn giản hóa luồng Analyze Disengagement | ✅ Done | Loại bỏ timestamp input; phân tích được bắt đầu sau khi chọn video và telemetry | - |
 | huylc12343 | Hỗ trợ upload nhiều file Vehicle Telemetry | ✅ Done | Multi-select, multi-file drag-and-drop, thêm/xóa từng file và tự loại file trùng | - |
 | huylc12343 | Sửa lỗi không tải được video playback | ✅ Done | Lưu video bằng IndexedDB, tạo lại object URL tại trang Processing và fallback về session URL | - |
+| huylc12343 | Liên kết Visual observations với video playback | ✅ Done | Click observation để cuộn tới video, tua đúng timestamp và bắt đầu phát; hiển thị trạng thái observation đang chọn | - |
 
-**Tổng kết ngày:** Hoàn thiện luồng Analyze không cần timestamp, hỗ trợ nhiều file telemetry và tăng độ ổn định của video playback bằng IndexedDB. Global stylesheet được xác nhận tải qua root layout; frontend đã vượt qua ESLint và TypeScript type-check.
+**Tổng kết ngày:** Hoàn thiện luồng Analyze không cần timestamp, hỗ trợ nhiều file telemetry, tăng độ ổn định video playback và liên kết observations trực tiếp tới timestamp trong video. Frontend đã vượt qua ESLint và TypeScript type-check.
 
 ---
 

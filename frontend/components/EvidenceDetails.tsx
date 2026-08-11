@@ -35,8 +35,11 @@ const telemetry: TelemetryPoint[] = [
   },
   { timestamp: "00:03:46.0", speed: 24, brake: "61%", steering: "2.7°" },
 ];
-export function EvidenceDetails() {
+type Props = { onSeek: (timestamp: string) => void };
+
+export function EvidenceDetails({ onSeek }: Props) {
   const [selected, setSelected] = useState("F12");
+  const [selectedObservation, setSelectedObservation] = useState("");
   return (
     <>
       <section className="processing-panel observations-panel">
@@ -47,7 +50,16 @@ export function EvidenceDetails() {
         </div>
         <div className="observation-list">
           {observations.map((item) => (
-            <article className="observation" key={item.id}>
+            <button
+              type="button"
+              className={`observation ${selectedObservation === item.id ? "selected" : ""}`}
+              key={item.id}
+              onClick={() => {
+                setSelectedObservation(item.id);
+                onSeek(item.timestamp);
+              }}
+              aria-label={`Play video at ${item.timestamp} for ${item.id}`}
+            >
               <div className="observation-key">
                 <strong>{item.id}</strong>
                 <span>{item.timestamp}</span>
@@ -56,7 +68,7 @@ export function EvidenceDetails() {
               <small>
                 Evidence: <b>{item.evidence}</b>
               </small>
-            </article>
+            </button>
           ))}
         </div>
       </section>

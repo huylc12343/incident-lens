@@ -3,45 +3,30 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileUploadCard } from "./FileUploadCard";
-import { TimestampInput } from "./TimestampInput";
-
-const isTimestamp = (value: string) => {
-  const match = /^(\d{2}):(\d{2}):(\d{2})\.(\d{3})$/.exec(value);
-  return Boolean(
-    match &&
-    Number(match[1]) <= 23 &&
-    Number(match[2]) <= 59 &&
-    Number(match[3]) <= 59,
-  );
-};
+import { saveUploadedVideo } from "../lib/uploadStorage";
 
 export function AnalysisForm() {
   const router = useRouter();
   const [video, setVideo] = useState<File | null>(null);
-  const [telemetry, setTelemetry] = useState<File | null>(null);
-  const [timestamp, setTimestamp] = useState("");
-  const [touched, setTouched] = useState(false);
+  const [telemetry, setTelemetry] = useState<File[]>([]);
   const [toast, setToast] = useState(false);
-  const timestampError =
-    touched && !isTimestamp(timestamp)
-      ? timestamp
-        ? "Use a valid timestamp in HH:MM:SS.mmm format."
-        : "Event timestamp is required."
-      : "";
-  const ready = Boolean(video && telemetry && isTimestamp(timestamp));
-  function submit(event: FormEvent) {
+  const ready = Boolean(video && telemetry.length);
+  async function submit(event: FormEvent) {
     event.preventDefault();
-    setTouched(true);
-    if (!ready || !video || !telemetry) return;
-    const previousUrl = sessionStorage.getItem("vlens:video-url");
-    if (previousUrl) URL.revokeObjectURL(previousUrl);
-    sessionStorage.setItem("vlens:video-url", URL.createObjectURL(video));
+    if (!ready || !video || !telemetry.length) return;
+    try {
+      await saveUploadedVideo(video);
+      sessionStorage.removeItem("vlens:video-url");
+    } catch {
+      const previousUrl = sessionStorage.getItem("vlens:video-url");
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
+      sessionStorage.setItem("vlens:video-url", URL.createObjectURL(video));
+    }
     sessionStorage.setItem("vlens:video-name", video.name);
-    sessionStorage.setItem("vlens:event-timestamp", timestamp);
+    sessionStorage.removeItem("vlens:event-timestamp");
     const request = {
       videoFile: video.name,
-      telemetryFile: telemetry.name,
-      disengagementTimestamp: timestamp,
+      telemetryFiles: telemetry.map((file) => file.name),
     };
     console.log(request);
     setToast(true);
@@ -59,21 +44,17 @@ export function AnalysisForm() {
       </div>
       <form onSubmit={submit}>
         <div className="upload-grid">
-          <FileUploadCard kind="video" file={video} onChange={setVideo} />
+          <FileUploadCard
+            kind="video"
+            files={video ? [video] : []}
+            onChange={(files) => setVideo(files[0] ?? null)}
+          />
           <FileUploadCard
             kind="telemetry"
-            file={telemetry}
+            files={telemetry}
             onChange={setTelemetry}
           />
         </div>
-        <TimestampInput
-          value={timestamp}
-          error={timestampError}
-          onChange={(value) => {
-            setTimestamp(value);
-            setTouched(true);
-          }}
-        />
         <div className="form-footer">
           <p>Files are used to review this recorded disengagement only.</p>
           <button className="primary-button" type="submit" disabled={!ready}>

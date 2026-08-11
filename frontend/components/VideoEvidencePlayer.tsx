@@ -5,12 +5,8 @@ const markers = [
   { at: "45%", label: "OBS-02", time: "00:03:44.100" },
   { at: "55%", label: "DISENGAGEMENT", time: "00:03:45.200" },
 ];
-type Props = { videoUrl: string; videoName: string; eventTimestamp: string };
-export function VideoEvidencePlayer({
-  videoUrl,
-  videoName,
-  eventTimestamp,
-}: Props) {
+type Props = { videoUrl: string; videoName: string };
+export function VideoEvidencePlayer({ videoUrl, videoName }: Props) {
   const [selected, setSelected] = useState("DISENGAGEMENT");
   return (
     <section className="video-panel">
@@ -30,7 +26,7 @@ export function VideoEvidencePlayer({
             preload="metadata"
             aria-label={`Playback of ${videoName}`}
           />
-          <div className="window-label">Analysis Window · ±10 seconds</div>
+          <div className="window-label">Full recording</div>
         </div>
       ) : (
         <div
@@ -40,7 +36,6 @@ export function VideoEvidencePlayer({
           <div className="road-lines" />
           <div className="video-overlay">
             <span>FRONT CAMERA</span>
-            <span>{eventTimestamp}</span>
           </div>
         </div>
       )}
@@ -63,13 +58,6 @@ export function VideoEvidencePlayer({
           <span>Window start</span>
           <b>{markers.find((marker) => marker.label === selected)?.time}</b>
           <span>Window end</span>
-        </div>
-      </div>
-      <div className="recorded-marker">
-        <span>◆</span>
-        <div>
-          <strong>Recorded Disengagement</strong>
-          <small>{eventTimestamp} · Provided event timestamp</small>
         </div>
       </div>
     </section>

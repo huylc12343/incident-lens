@@ -804,7 +804,7 @@ td strong {
 
 .context-bar {
     display: grid;
-    grid-template-columns: 1.05fr 1fr 1.3fr;
+    grid-template-columns: 1.05fr 1fr;
     gap: 20px;
     padding: 17px 20px;
     border: 1px solid var(--line);
@@ -817,8 +817,29 @@ td strong {
     border-right: 1px solid var(--line);
 }
 
-.context-bar>div:nth-child(3) {
+.context-bar>div:nth-child(2) {
     border: 0;
+}
+
+.selected-files {
+    display: grid;
+    gap: 8px;
+    margin-top: 22px;
+}
+
+.selected-files .selected-file {
+    min-height: 64px;
+    margin-top: 0;
+}
+
+.add-more-files {
+    min-height: 36px;
+    border: 1px dashed #9d96e8;
+    border-radius: 7px;
+    background: #f7f6ff;
+    color: var(--indigo);
+    font-size: 12px;
+    font-weight: 600;
 }
 
 .context-bar span,

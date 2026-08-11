@@ -4,19 +4,35 @@ import { useEffect, useState } from "react";
 import { EvidenceDetails } from "./EvidenceDetails";
 import { ProcessingPipeline } from "./ProcessingPipeline";
 import { VideoEvidencePlayer } from "./VideoEvidencePlayer";
+import { loadUploadedVideo } from "../lib/uploadStorage";
 
 export function ProcessingContent() {
   const [videoUrl, setVideoUrl] = useState("");
   const [videoName, setVideoName] = useState("front_camera.mp4");
-  const [eventTimestamp, setEventTimestamp] = useState("00:03:45.200");
   useEffect(() => {
-    setVideoUrl(sessionStorage.getItem("vlens:video-url") ?? "");
     setVideoName(
       sessionStorage.getItem("vlens:video-name") ?? "front_camera.mp4",
     );
-    setEventTimestamp(
-      sessionStorage.getItem("vlens:event-timestamp") ?? "00:03:45.200",
-    );
+    let active = true;
+    let objectUrl = "";
+    loadUploadedVideo()
+      .then((file) => {
+        if (!active) return;
+        if (file) {
+          objectUrl = URL.createObjectURL(file);
+          setVideoUrl(objectUrl);
+          setVideoName(file.name);
+        } else {
+          setVideoUrl(sessionStorage.getItem("vlens:video-url") ?? "");
+        }
+      })
+      .catch(() => {
+        if (active) setVideoUrl(sessionStorage.getItem("vlens:video-url") ?? "");
+      });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
   }, []);
   return (
     <>
@@ -26,19 +42,12 @@ export function ProcessingContent() {
           <strong>{videoName}</strong>
         </div>
         <div>
-          <span>Recorded Disengagement</span>
-          <strong>{eventTimestamp}</strong>
-          <small>Provided event timestamp</small>
-        </div>
-        <div>
           <span>Analysis Window</span>
-          <strong>
-            Event timestamp <i>→</i> ±10 seconds
-          </strong>
+          <strong>Full uploaded recording</strong>
         </div>
         <p>
-          Analysis is limited to the evidence window around the provided
-          disengagement timestamp.
+          The uploaded video and telemetry are analyzed without requiring a
+          manually entered event timestamp.
         </p>
       </section>
       <div className="processing-layout">
@@ -46,7 +55,6 @@ export function ProcessingContent() {
           <VideoEvidencePlayer
             videoUrl={videoUrl}
             videoName={videoName}
-            eventTimestamp={eventTimestamp}
           />
           <EvidenceDetails />
         </div>
@@ -60,9 +68,6 @@ export function ProcessingContent() {
               </li>
               <li>
                 ✓ <span>Telemetry loaded</span>
-              </li>
-              <li>
-                ✓ <span>Timestamp anchor available</span>
               </li>
             </ul>
           </section>

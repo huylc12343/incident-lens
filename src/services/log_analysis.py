@@ -42,6 +42,11 @@ WARNING_ALIASES = ("warning_code", "warning", "warnings")
 ERROR_ALIASES = ("error_code", "error", "errors")
 LogEventType = Literal["brake_rise", "steering_change", "disengagement", "warning", "error"]
 
+NEAR_STOPPED_SPEED_KMH = 1.0
+STRONG_SPEED_DROP_KMH = 10.0
+CONTROL_ZERO_THRESHOLD = 0.01
+CONTROL_CHANGE_THRESHOLD = 0.1
+
 
 class LogAnalysisError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
@@ -287,7 +292,13 @@ def _claim_log_summary(
     if claim.timestamp_s is None:
         return ClaimLogSummary(
             claim_id=claim.claim_id,
-            summary="Claim không có timestamp nên không thể ghép với evidence log.",
+            summary=(
+                "Đối chiếu thời gian\n"
+                "Claim timestamp: Không có\n"
+                "Trong tolerance: **Không**\n\n"
+                "Log có thể kiểm tra\n"
+                "Không thể chọn cửa sổ log vì claim không có timestamp."
+            ),
         )
     nearest_index = min(range(len(records)), key=lambda index: abs(records[index].timestamp_s - claim.timestamp_s))
     nearest = records[nearest_index]
@@ -296,7 +307,7 @@ def _claim_log_summary(
     end = min(len(records), nearest_index + sample_radius + 1)
     samples = records[start:end]
     within_tolerance = distance <= timestamp_tolerance_s
-    metrics, available_signals = _claim_metrics(samples)
+    metrics, available_signals = _claim_metrics(samples, claim.timestamp_s)
     evidence = [
         ClaimLogEvidence(
             evidence_id=_row_evidence_id(record.timestamp_s),
@@ -304,6 +315,11 @@ def _claim_log_summary(
             camera_frame=record.text(CAMERA_FRAME_ALIASES),
         )
         for record in samples
+    ]
+    allowed_evidence_ids = [
+        item.evidence_id
+        for item in evidence
+        if abs(item.timestamp_s - claim.timestamp_s) <= timestamp_tolerance_s
     ]
     return ClaimLogSummary(
         claim_id=claim.claim_id,
@@ -317,11 +333,7 @@ def _claim_log_summary(
         available_signals=available_signals,
         metrics=metrics,
         evidence=evidence,
-        allowed_evidence_ids=[
-            item.evidence_id
-            for item in evidence
-            if abs(item.timestamp_s - claim.timestamp_s) <= timestamp_tolerance_s
-        ],
+        allowed_evidence_ids=allowed_evidence_ids,
         summary=_build_claim_summary(
             claim.timestamp_s,
             nearest.timestamp_s,
@@ -329,12 +341,14 @@ def _claim_log_summary(
             within_tolerance,
             samples,
             metrics,
+            available_signals,
         ),
     )
 
 
 def _claim_metrics(
     records: list[LogRecord],
+    claim_timestamp_s: float,
 ) -> tuple[dict[str, dict[str, float | int | str | bool | None]], list[str]]:
     signals = {
         "speed_kmh": numeric_series(records, CLAIM_SPEED_ALIASES),
@@ -353,6 +367,7 @@ def _claim_metrics(
     speed = _transition_metrics(records, signals["speed_kmh"], include_extrema=True)
     if speed:
         speed.update(_max_deceleration(records, signals["speed_kmh"]))
+        speed.update(_acceleration_at_timestamp(records, signals["speed_kmh"], claim_timestamp_s))
         metrics["speed_kmh"] = speed
     brake = _transition_metrics(records, signals["brake"], include_extrema=True)
     if brake:
@@ -441,6 +456,23 @@ def _max_deceleration(
     return {"max_deceleration": value, "max_deceleration_timestamp_s": timestamp_s}
 
 
+def _acceleration_at_timestamp(
+    records: list[LogRecord],
+    speed_values: list[float | None],
+    claim_timestamp_s: float,
+) -> dict[str, float | int | str | bool | None]:
+    acceleration = _acceleration_series(records, speed_values)
+    candidates = [
+        (abs(record.timestamp_s - claim_timestamp_s), record.timestamp_s, value)
+        for record, value in zip(records, acceleration, strict=True)
+        if value is not None
+    ]
+    if not candidates:
+        return {"acceleration_at_claim": None, "acceleration_timestamp_s": None}
+    _, timestamp_s, value = min(candidates, key=lambda item: item[0])
+    return {"acceleration_at_claim": value, "acceleration_timestamp_s": timestamp_s}
+
+
 def _largest_change(
     records: list[LogRecord],
     values: list[float | None],
@@ -524,49 +556,240 @@ def _build_claim_summary(
     within_tolerance: bool,
     records: list[LogRecord],
     metrics: dict[str, dict[str, float | int | str | bool | None]],
+    available_signals: list[str],
 ) -> str:
-    statements = [
-        f"Claim tại {claim_timestamp_s:g}s được ghép với mẫu gần nhất {nearest_timestamp_s:g}s "
-        f"(lệch {distance_s:g}s), dùng {len(records)} mẫu trong [{records[0].timestamp_s:g}, "
-        f"{records[-1].timestamp_s:g}]s."
+    sections = [
+        "\n".join(
+            [
+                "Đối chiếu thời gian",
+                f"Claim timestamp: {_format_timestamp_s(claim_timestamp_s)}s",
+                f"Mẫu log gần nhất: {_format_timestamp_s(nearest_timestamp_s)}s",
+                f"Log window: {_format_timestamp_s(records[0].timestamp_s)}s → "
+                f"{_format_timestamp_s(records[-1].timestamp_s)}s",
+                f"Số mẫu: {len(records)}",
+                f"Sai lệch timestamp: {_format_timestamp_s(distance_s)}s",
+                f"Trong tolerance: **{'Có' if within_tolerance else 'Không'}**",
+            ]
+        ),
+        "\n".join(
+            [
+                "Log có thể kiểm tra",
+                *_available_signal_statements(available_signals, records),
+            ]
+        ),
     ]
+
     speed = metrics.get("speed_kmh")
     if speed:
-        statements.append(
-            f"Speed {float(speed['start']):g}→{float(speed['end']):g} km/h, "
-            f"delta {float(speed['delta']):g}, min {float(speed['min']):g}, max {float(speed['max']):g}."
-        )
-        if speed.get("max_deceleration") is not None and speed.get("max_deceleration_timestamp_s") is not None:
-            statements.append(
-                f"Giảm tốc cực đại {abs(float(speed['max_deceleration'])):g} m/s²"
-                f" tại {float(speed['max_deceleration_timestamp_s']):g}s."
-            )
+        speed_lines = [
+            "Chuyển động",
+            f"Tốc độ tại giây thứ {_second_label(records[0].timestamp_s)}: {float(speed['start']):g} km/h",
+            f"Tốc độ tại giây thứ {_second_label(records[-1].timestamp_s)}: {float(speed['end']):g} km/h",
+            f"Tốc độ nhỏ nhất: {float(speed['min']):g} km/h",
+            f"Tốc độ lớn nhất: {float(speed['max']):g} km/h",
+            "Tốc độ theo từng giây như sau:",
+            *_per_second_signal_lines(records, CLAIM_SPEED_ALIASES, unit=" km/h"),
+        ]
+        speed_lines.extend(_derived_speed_states(speed))
+        sections.append("\n".join(speed_lines))
+
     brake = metrics.get("brake")
-    if brake:
-        statements.append(
-            f"Brake {float(brake['start']):g}→{float(brake['end']):g}, max {float(brake['max']):g}."
-        )
     throttle = metrics.get("throttle")
-    if throttle:
-        statements.append(
-            f"Throttle {float(throttle['start']):g}→{float(throttle['end']):g}, "
-            f"delta {float(throttle['delta']):g}."
-        )
+    if brake or throttle or (speed and speed.get("max_deceleration") is not None):
+        control_lines = ["Điều khiển"]
+        if brake:
+            control_lines.extend(
+                [
+                    _brake_statement(brake),
+                    "Brake theo từng giây như sau:",
+                    *_per_second_signal_lines(records, CLAIM_BRAKE_ALIASES),
+                ]
+            )
+        if throttle:
+            control_lines.extend(
+                [
+                    _throttle_statement(throttle),
+                    "Ga theo từng giây như sau:",
+                    *_per_second_signal_lines(records, CLAIM_THROTTLE_ALIASES),
+                ]
+            )
+        if speed and speed.get("acceleration_at_claim") is not None:
+            acceleration_timestamp = float(speed["acceleration_timestamp_s"])
+            control_lines.append(
+                f"Gia tốc tại {_format_timestamp_s(acceleration_timestamp)}s: "
+                f"{float(speed['acceleration_at_claim']):g} m/s²"
+            )
+        if speed and speed.get("max_deceleration_timestamp_s") is not None:
+            control_lines.append(
+                f"Giảm tốc cực đại trong cửa sổ: {float(speed['max_deceleration']):g} m/s² "
+                f"tại {_format_timestamp_s(float(speed['max_deceleration_timestamp_s']))}s"
+            )
+        sections.append("\n".join(control_lines))
+
     steer = metrics.get("steer")
-    if steer:
-        statements.append(
-            f"Steer chuẩn hóa {float(steer['start']):g}→{float(steer['end']):g}, "
-            f"biến động lớn nhất {float(steer.get('max_change') or 0):g}."
-        )
-    acceleration = metrics.get("acceleration_magnitude")
-    if acceleration:
-        statements.append(f"Độ lớn gia tốc peak {float(acceleration['peak']):g}.")
     yaw = metrics.get("yaw")
-    if yaw:
-        statements.append(f"Yaw thay đổi có wrap {float(yaw['delta_wrapped']):g}°.")
+    if steer or yaw:
+        direction_lines = ["Hướng xe"]
+        if yaw:
+            yaw_change = abs(float(yaw["delta_wrapped"]))
+            direction_lines.append(f"Yaw thay đổi: {yaw_change:g}°")
+        if steer:
+            steer_change = abs(float(steer.get("max_change", 0)))
+            direction_lines.extend(
+                [
+                    f"Steering thay đổi lớn nhất: {steer_change:g}",
+                    _steering_direction_statement(records, claim_timestamp_s),
+                    "Steering theo từng giây như sau:",
+                    *_per_second_signal_lines(records, CLAIM_STEER_ALIASES),
+                ]
+            )
+        sections.append("\n".join(direction_lines))
+
     if not within_tolerance:
-        statements.append("Mẫu gần nhất nằm ngoài timestamp_tolerance_s nên không có evidence log đủ gần.")
-    return " ".join(statements)
+        sections.append(
+            "Kết luận ghép thời gian\n"
+            "Mẫu gần nhất nằm ngoài tolerance; không dùng log để xác nhận hoặc bác bỏ claim."
+        )
+    return "\n\n".join(sections)
+
+
+def _format_timestamp_s(value: float) -> str:
+    formatted = f"{value:.6f}".rstrip("0").rstrip(".")
+    return formatted if "." in formatted else f"{formatted}.0"
+
+
+def _second_label(value: float) -> str:
+    return f"{value:g}"
+
+
+def _per_second_signal_lines(
+    records: list[LogRecord],
+    aliases: tuple[str, ...],
+    *,
+    unit: str = "",
+) -> list[str]:
+    start_second = math.ceil(records[0].timestamp_s)
+    end_second = math.floor(records[-1].timestamp_s)
+    lines = []
+    for second in range(start_second, end_second + 1):
+        record = min(records, key=lambda item: abs(item.timestamp_s - second))
+        value = record.number(aliases)
+        if value is not None and abs(record.timestamp_s - second) <= 0.5:
+            lines.append(f"{second}s: {value:g}{unit}")
+    if lines:
+        return lines
+    present = [(record.timestamp_s, record.number(aliases)) for record in records]
+    return [
+        f"{_format_timestamp_s(timestamp_s)}s: {value:g}{unit}"
+        for timestamp_s, value in present
+        if value is not None
+    ]
+
+
+def _available_signal_statements(
+    available_signals: list[str],
+    records: list[LogRecord],
+) -> list[str]:
+    signal_set = set(available_signals)
+    statements = [
+        f"timestamp [{_format_timestamp_s(records[0].timestamp_s)}s, "
+        f"{_format_timestamp_s(records[-1].timestamp_s)}s]: mốc thời gian dùng để ghép claim;"
+    ]
+    if "speed_kmh" in signal_set:
+        statements.extend(
+            [
+                "trạng thái chuyển động: được code suy ra từ tốc độ;",
+                "tốc độ [0, +∞) km/h: 0 là đứng yên, giá trị lớn hơn 0 là xe đang di chuyển;",
+                "gia tốc (-∞, +∞) m/s²: âm là giảm tốc, dương là tăng tốc;",
+            ]
+        )
+    if "brake" in signal_set:
+        statements.append("brake [0, 1]: 0 là không phanh, 1 là đạp phanh hết cỡ;")
+    if "throttle" in signal_set:
+        statements.append("throttle [0, 1]: 0 là không ga, 1 là đạp ga hết cỡ;")
+    if "steer" in signal_set:
+        statements.extend(
+            [
+                "steering [-1, 1]: steering < 0 rẽ trái, steering = 0 đi thẳng, steering > 0 rẽ phải;",
+                "hướng xe: được code suy ra từ dấu của steering tại timestamp claim.",
+            ]
+        )
+    if "yaw" in signal_set:
+        statements.append("hướng xe: yaw được đo bằng độ và so sánh theo góc có wrap.")
+    if len(statements) == 1:
+        statements.append("không có tín hiệu chuyển động hoặc điều khiển được hỗ trợ.")
+    return statements
+
+
+def _derived_speed_states(
+    speed: dict[str, float | int | str | bool | None],
+) -> list[str]:
+    start = float(speed["start"])
+    end = float(speed["end"])
+    delta = float(speed["delta"])
+    statements = []
+    if end <= NEAR_STOPPED_SPEED_KMH:
+        statements.append("Trạng thái cuối cửa sổ: gần như đứng yên.")
+    else:
+        statements.append("Trạng thái cuối cửa sổ: xe vẫn đang di chuyển.")
+    if delta <= -STRONG_SPEED_DROP_KMH:
+        statements.extend(
+            [
+                f"Xe giảm từ {start:g} km/h xuống {end:g} km/h.",
+                "Xe đã **giảm tốc mạnh** trong cửa sổ.",
+            ]
+        )
+    elif delta < 0:
+        statements.append("Xe đã giảm tốc trong cửa sổ.")
+    elif delta > 0:
+        statements.append("Xe đã tăng tốc trong cửa sổ.")
+    else:
+        statements.append("Tốc độ không đổi trong cửa sổ.")
+    return statements
+
+
+def _brake_statement(
+    metric: dict[str, float | int | str | bool | None],
+) -> str:
+    start = float(metric["start"])
+    end = float(metric["end"])
+    maximum = float(metric["max"])
+    state = "có sự ấn phanh trong cửa sổ" if maximum > CONTROL_ZERO_THRESHOLD else "không ghi nhận ấn phanh"
+    return f"Brake: {start:g} → {end:g} => {state}."
+
+
+def _throttle_statement(metric: dict[str, float | int | str | bool | None]) -> str:
+    start = float(metric["start"])
+    end = float(metric["end"])
+    delta = float(metric["delta"])
+    if delta < 0:
+        state = "có sự nhả ga"
+    elif delta > 0:
+        state = "có sự tăng ga"
+    else:
+        state = "ga không thay đổi"
+    if abs(delta) < CONTROL_CHANGE_THRESHOLD and delta != 0:
+        state += ", mức thay đổi nhỏ"
+    return f"Throttle: {start:g} → {end:g} => {state}."
+
+
+def _steering_direction_statement(records: list[LogRecord], claim_timestamp_s: float) -> str:
+    candidates = [
+        (abs(record.timestamp_s - claim_timestamp_s), record.timestamp_s, record.number(CLAIM_STEER_ALIASES))
+        for record in records
+    ]
+    _, timestamp_s, value = min(
+        (item for item in candidates if item[2] is not None),
+        key=lambda item: item[0],
+    )
+    steering = float(value)
+    if steering > 0:
+        state = "xe có xu hướng rẽ phải"
+    elif steering < 0:
+        state = "xe có xu hướng rẽ trái"
+    else:
+        state = "steering gần trung tâm"
+    return f"Steering tại {_format_timestamp_s(timestamp_s)}s: {steering:g} => {state}."
 
 
 def _acceleration_series(

@@ -29,9 +29,12 @@ def test_verification_prompt_requires_one_result_per_claim() -> None:
     assert "Không suy ra va chạm" in prompt.text
     assert "reason phải ngắn gọn bằng tiếng Việt" in prompt.text
     item = prompt.context["verification_items"][0]
-    assert item["timestamp_tolerance_s"] == 0.5
     assert item["allowed_evidence_ids"] == ["log-row:12.5"]
-    assert set(item) == {"claim", "claim_log_summary", "allowed_evidence_ids", "timestamp_tolerance_s"}
+    assert item["within_tolerance"] is True
+    assert item["claim"]["log_summary"] == "Brake tăng mạnh tại 12.5 giây."
+    assert set(item) == {"claim", "within_tolerance", "allowed_evidence_ids"}
+    assert "claim_log_summary" not in prompt.text
+    assert '"metrics"' not in prompt.text
     assert "log_evidence_summary" not in prompt.context
     assert "raw" not in prompt.context
 

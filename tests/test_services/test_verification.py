@@ -61,16 +61,66 @@ async def test_openai_verification_uses_structured_output() -> None:
 
 
 @pytest.mark.asyncio
-async def test_verification_rejects_missing_or_reordered_claim_results() -> None:
+async def test_verification_marks_missing_claim_result_unverified() -> None:
     invalid = VerificationResult(results=[])
     client = SimpleNamespace(
         responses=SimpleNamespace(parse=AsyncMock(return_value=SimpleNamespace(output_parsed=invalid)))
     )
 
-    with pytest.raises(VerificationServiceError) as exc_info:
-        await OpenAIVerificationService(model="gpt-test", client=client).verify(_request())
+    result = await OpenAIVerificationService(model="gpt-test", client=client).verify(_request())
 
-    assert exc_info.value.code == "VERIFICATION_RESULT_MISMATCH"
+    assert [item.claim_id for item in result.results] == ["claim-1"]
+    assert result.results[0].status == VerificationStatus.UNVERIFIED
+    assert result.results[0].evidence_ids == []
+    assert "không trả về duy nhất một kết quả" in result.results[0].reason
+
+
+@pytest.mark.asyncio
+async def test_verification_restores_claim_order() -> None:
+    request = _request().model_copy(
+        update={
+            "claims": [
+                Claim(claim_id="claim-1", text="Xe phanh", timestamp_s=7.5),
+                Claim(claim_id="claim-2", text="Xe dừng", timestamp_s=8.0),
+            ],
+            "claim_log_summaries": [
+                _request().claim_log_summaries[0],
+                ClaimLogSummary(
+                    claim_id="claim-2",
+                    claim_timestamp_s=8.0,
+                    nearest_timestamp_s=8.0,
+                    timestamp_distance_s=0,
+                    within_tolerance=True,
+                    allowed_evidence_ids=["log-row:8"],
+                    summary="Xe gần như đứng yên.",
+                ),
+            ],
+        }
+    )
+    reordered = VerificationResult(
+        results=[
+            ClaimVerification(
+                claim_id="claim-2",
+                status=VerificationStatus.SUPPORTED,
+                reason="Tốc độ gần 0 km/h.",
+                evidence_ids=["log-row:8"],
+            ),
+            ClaimVerification(
+                claim_id="claim-1",
+                status=VerificationStatus.SUPPORTED,
+                reason="Brake tăng.",
+                evidence_ids=["log-row:7.5"],
+            ),
+        ]
+    )
+    client = SimpleNamespace(
+        responses=SimpleNamespace(parse=AsyncMock(return_value=SimpleNamespace(output_parsed=reordered)))
+    )
+
+    result = await OpenAIVerificationService(model="gpt-test", client=client).verify(request)
+
+    assert [item.claim_id for item in result.results] == ["claim-1", "claim-2"]
+    assert all(item.status == VerificationStatus.SUPPORTED for item in result.results)
 
 
 @pytest.mark.asyncio

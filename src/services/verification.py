@@ -17,7 +17,7 @@ from openai import (
 )
 from pydantic import ValidationError
 
-from src.models.incidents import VerificationRequest, VerificationResult, VerificationStatus
+from src.models.incidents import ClaimVerification, VerificationRequest, VerificationResult, VerificationStatus
 from src.prompts.verification import build_verification_prompt
 from src.services.model_observability import ModelActivityRegistry
 
@@ -155,20 +155,33 @@ class OpenAIVerificationService:
 
 def _validate_verification_result(request: VerificationRequest, result: VerificationResult) -> VerificationResult:
     expected_ids = [claim.claim_id for claim in request.claims]
-    returned_ids = [item.claim_id for item in result.results]
-    if returned_ids != expected_ids:
-        raise VerificationServiceError(
-            "VERIFICATION_RESULT_MISMATCH",
-            "verification must return exactly one ordered result for every claim",
-        )
     summaries = {summary.claim_id: summary for summary in request.claim_log_summaries}
     if list(summaries) != expected_ids:
         raise VerificationServiceError(
             "VERIFICATION_SUMMARY_MISMATCH",
             "verification requires exactly one ordered log summary for every claim",
         )
-    normalized_results = []
+
+    returned_by_id: dict[str, list[ClaimVerification]] = {}
     for item in result.results:
+        returned_by_id.setdefault(item.claim_id, []).append(item)
+    ordered_results = []
+    for claim_id in expected_ids:
+        matches = returned_by_id.get(claim_id, [])
+        if len(matches) == 1:
+            ordered_results.append(matches[0])
+        else:
+            ordered_results.append(
+                ClaimVerification(
+                    claim_id=claim_id,
+                    status=VerificationStatus.UNVERIFIED,
+                    reason="Verifier không trả về duy nhất một kết quả hợp lệ cho claim này.",
+                    evidence_ids=[],
+                )
+            )
+
+    normalized_results = []
+    for item in ordered_results:
         summary = summaries[item.claim_id]
         if not summary.within_tolerance:
             normalized_results.append(

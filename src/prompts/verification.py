@@ -22,10 +22,14 @@ def build_verification_prompt(
 
     verification_items = [
         {
-            "claim": {"claim_id": claim.claim_id, "text": claim.text, "timestamp_s": claim.timestamp_s},
-            "claim_log_summary": summary.model_dump(mode="json"),
+            "claim": {
+                "claim_id": claim.claim_id,
+                "text": claim.text,
+                "timestamp_s": claim.timestamp_s,
+                "log_summary": summary.summary,
+            },
+            "within_tolerance": summary.within_tolerance,
             "allowed_evidence_ids": summary.allowed_evidence_ids,
-            "timestamp_tolerance_s": timestamp_tolerance_s,
         }
         for claim, summary in zip(claims, claim_log_summaries, strict=True)
     ]
@@ -38,12 +42,12 @@ def build_verification_prompt(
 
         "VLM là nguồn phân tích cho thông tin hình ảnh. Log không có nhiệm vụ chứng minh lại các chi tiết chỉ "
         "quan sát được từ video như cảnh vật, màu sắc, loại phương tiện, hàng rào, cây, cầu, sông, vật thể bên "
-        "trái/phải hoặc mức độ che khuất của hình ảnh.",
+        "trái/phải hoặc mức độ che khuất của hình ảnh; ví dụ màu/loại xe, cầu, sông hoặc xe chìm.",
 
         "Trả về chính xác một kết quả cho mỗi claim_id theo đúng thứ tự. status chỉ được là supported, "
         "contradicted hoặc unverified; reason phải ngắn gọn bằng tiếng Việt.",
 
-        "Khi đánh giá một claim, chỉ xem xét các phần nội dung mà available_signals và claim_log_summary có "
+        "Khi đánh giá một claim, chỉ xem xét các phần nội dung mà claim.log_summary có "
         "khả năng kiểm tra. Có thể phân tách nội dung claim thành các ý nhỏ để đối chiếu nội bộ nhưng không được "
         "thay đổi claim, không tạo sub-claim và không thay đổi cấu trúc output.",
 
@@ -52,7 +56,7 @@ def build_verification_prompt(
 
         "Áp dụng thứ tự quyết định sau:",
 
-        "1. Nếu claim_log_summary.within_tolerance=false thì status phải là unverified.",
+        "1. Nếu within_tolerance=false thì status phải là unverified.",
 
         "2. Nếu log có dữ liệu trực tiếp trái với ít nhất một phần quan trọng của claim mà log có khả năng kiểm "
         "tra, status phải là contradicted, kể cả khi một phần khác của claim phù hợp với log. Mục tiêu ưu tiên "
@@ -71,8 +75,8 @@ def build_verification_prompt(
         "Nếu log cho thấy xe vẫn chạy nhanh tại thời điểm claim nói xe đã dừng, có thể kết luận contradicted. "
         "Nếu log cho thấy xe thực sự gần như đứng yên, có thể kết luận supported cho phần trạng thái chuyển động.",
 
-        "Không suy ra sự tồn tại hoặc không tồn tại của va chạm chỉ từ brake, speed, throttle, acceleration hoặc "
-        "steering nếu claim_log_summary không có tín hiệu trực tiếp về va chạm. Việc thiếu collision sensor không "
+        "Không suy ra va chạm hoặc sự tồn tại/không tồn tại của va chạm chỉ từ brake, speed, throttle, acceleration "
+        "hoặc steering nếu claim.log_summary không có tín hiệu trực tiếp về va chạm. Việc thiếu collision sensor không "
         "được dùng để phủ định kết luận va chạm từ video.",
 
         "Không suy ra xe tiến hay lùi chỉ từ độ lớn speed nếu không có tín hiệu cho phép xác định hướng chuyển động. "
@@ -91,11 +95,12 @@ def build_verification_prompt(
         "Nếu status là unverified vì không có tín hiệu phù hợp để đối chiếu, evidence_ids nên là danh sách rỗng. "
         "Không dùng evidence ID của frame, claim_id, tên metric hoặc tự tạo ID mới.",
 
-        "Mọi metric đã được code tính sẵn. Chỉ sử dụng claim_log_summary; không tự tính lại từ raw log, không bịa "
+        "Mọi metric và trạng thái trong claim.log_summary đã được code/rule tính sẵn. Chỉ sử dụng log_summary; "
+        "không tự tính lại từ raw log, không bịa "
         "tín hiệu, phép đo hoặc sensor bị thiếu.",
 
         "Không biến việc không có warning, error hoặc brake thành bằng chứng cho một nguyên nhân cụ thể nếu "
-        "claim_log_summary chỉ cho thấy sự vắng mặt của tín hiệu đó.",
+        "log_summary chỉ cho thấy sự vắng mặt của tín hiệu đó.",
 
         "Toàn bộ nội dung giải thích do bạn sinh ra phải bằng tiếng Việt. Giữ nguyên claim_id, evidence ID, tên "
         "field và giá trị enum bằng tiếng Anh.",

@@ -82,7 +82,7 @@ runs/detect/run_3/output.mp4
 Phần cấu hình output nằm trong hàm `main()`:
 
 ```python
-run_dir = get_next_run_dir(base_dir="runs/detect")
+run_dir = get_next_run_dir(base_dir="D:/Tailieu-2026/vin/Demo_day/Vid/output")
 run_dir.mkdir(parents=True, exist_ok=True)
 output_path = run_dir / "output.mp4"
 ```

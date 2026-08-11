@@ -585,7 +585,6 @@ Lệnh này cài git pre-push hook và tạo thư mục `.ai-log/`. Sau khi ch�
 | **Claude Code** | `.claude/settings.json` hooks | Mỗi prompt + mỗi tool call |
 | **Cursor** | `.cursor/hooks.json` | Mỗi prompt + khi stop |
 | **OpenAI Codex CLI** | `.codex/hooks.json` | Mỗi prompt + khi stop |
-| **Gemini CLI** | `.gemini/settings.json` | BeforeAgent + AfterModel + SessionEnd |
 | **GitHub Copilot** | `.github/hooks/hooks.json` | Mỗi prompt + khi session end |
 | **Antigravity IDE** | Pre-push scan transcript | Tự động quét transcript khi `git push` |
 
@@ -605,7 +604,7 @@ Metadata được log bao gồm: timestamp, tool name, model, repo, branch, comm
 
 ### Log thủ công cho web tools
 
-Nếu dùng ChatGPT, Claude.ai, Gemini Web, hoặc tool không có hook:
+Nếu dùng ChatGPT, Claude.ai hoặc tool không có hook:
 
 ```bash
 # Interactive (script sẽ hỏi tool + prompt)
@@ -613,7 +612,6 @@ bash scripts/_pyrun.sh scripts/log_manual.py
 
 # One-line
 bash scripts/_pyrun.sh scripts/log_manual.py --tool chatgpt --prompt "Brainstorm UI layout"
-bash scripts/_pyrun.sh scripts/log_manual.py --tool gemini-web --prompt "Research scoring algorithms"
 ```
 
 ### Cấu hình `.env`

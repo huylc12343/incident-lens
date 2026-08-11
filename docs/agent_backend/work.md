@@ -16,16 +16,13 @@ Phase 0 — Contract và provider matrix đã hoàn tất theo phạm vi đượ
 
 - Khóa hai tổ hợp production hợp lệ:
   - OpenAI + `timestamped_frames` qua `OpenAIVLMService`.
-  - Gemini + `native_video` qua `GeminiNativeVideoVLMService`.
 - Khóa hai tổ hợp phải bị từ chối khi bootstrap:
   - OpenAI + `native_video`.
-  - Gemini + `timestamped_frames`.
 - Xác nhận nguyên tắc không tạo fake service; test ở các phase sau phải dùng production service và mock tại SDK boundary.
 - Xác nhận graph chỉ phụ thuộc các contract provider-neutral (`VLMService`, `VerificationService`, `ReportService`) và không chọn provider/model.
 - Xác nhận context tái phân tích tự động và do con người yêu cầu được tách biệt:
   - Auto: claim mâu thuẫn, lý do verification, log evidence summary, timestamp window và `source="agent_generated"`.
   - Human: target claim IDs, feedback, claims/evidence hiện tại và `source="human_provided"`.
-- Xác nhận vòng đời Gemini native video: chuẩn hóa local → upload → poll `PROCESSING` đến `ACTIVE` → phân tích/tái sử dụng remote handle → xóa best-effort khi terminal, fail, hủy hoặc shutdown.
 - Xác nhận OpenAI gửi ordered timestamped frames; single request là đường mặc định, rolling batches chỉ là fallback khi vượt giới hạn.
 
 ## Thay đổi mã nguồn
@@ -44,7 +41,6 @@ Môi trường kiểm tra: `.venv`, Python 3.14.4 (runtime mục tiêu trong k�
 | --- | --- |
 | `python3 -m compileall -q src tests` | Pass |
 | `.venv/bin/ruff check src tests` | Pass — `All checks passed!` |
-| Kiểm tra marker trong `phase.md` bằng `rg` | Pass — đủ capability matrix, auto/human context, Gemini polling/cleanup và no-fake rule |
 | Ba API test chạy riêng | Pass — 3/3 |
 | LangGraph test | Assertion pass (hiện dấu `.`), nhưng tiến trình pytest không thoát và bị `timeout` với exit code 124 |
 | Toàn bộ test suite | Chưa kết thúc sạch; dừng sau test LangGraph đầu tiên do cùng hiện tượng treo khi teardown |
@@ -53,15 +49,11 @@ Môi trường kiểm tra: `.venv`, Python 3.14.4 (runtime mục tiêu trong k�
 
 - Baseline có hiện tượng pytest treo sau khi LangGraph test đã chạy xong assertion. Hiện tượng này tồn tại khi không có thay đổi source của Phase 0 và xảy ra trên Python 3.14.4; cần xác minh lại bằng runtime mục tiêu Python 3.11 trước khi kết luận là lỗi code hay lỗi tương thích môi trường.
 - Chưa có assertion nào fail.
-- Phase 0 không gọi OpenAI/Gemini thật và không phát sinh chi phí; live smoke test thuộc Phase 9.
 
 ## Tiêu chí hoàn thành Phase 0
 
-- [x] Có capability matrix cho OpenAI frames và Gemini native video.
 - [x] Có context mẫu/contract cho auto và human re-analysis.
-- [x] Có sequence Gemini upload, poll, reuse và cleanup.
 - [x] Quyết định không-fake được ghi rõ.
-- [x] OpenAI frames và Gemini native video là quyết định chính thức.
 
 **Trạng thái cuối: `complete`.**
 
@@ -73,7 +65,6 @@ Môi trường kiểm tra: `.venv`, Python 3.14.4 (runtime mục tiêu trong k�
 
 `complete`
 
-Phase 1 — Models, interfaces và Settings đã hoàn tất. Phạm vi chỉ gồm contract và cấu hình; chưa gọi SDK OpenAI/Gemini và chưa triển khai media/provider service của Phase 3.
 
 ## Những việc đã thực hiện
 
@@ -108,7 +99,6 @@ Các validation quan trọng:
 Đã mở rộng `src/config.py` và `.env.example` với các nhóm cấu hình:
 
 - Provider/model và timeout/retry/temperature.
-- Gemini Files API.
 - Native video preprocessing.
 - Timestamped frames, rolling batches và memory limits.
 - Prompt versions, verification/report service.
@@ -119,9 +109,7 @@ Validation khi khởi tạo Settings:
 | Provider | Input mode | Kết quả |
 | --- | --- | --- |
 | OpenAI | `timestamped_frames` | Chấp nhận |
-| Gemini | `native_video` | Chấp nhận |
 | OpenAI | `native_video` | Từ chối |
-| Gemini | `timestamped_frames` | Từ chối |
 
 Settings cũ `model_name` và `llm_temperature` được giữ lại để endpoint baseline tiếp tục tương thích.
 
@@ -158,9 +146,7 @@ Hiện không có assertion failure liên quan Phase 1. Hiện tượng teardown
 - [x] Có `VLMService`, `VerificationService`, `ReportService` Protocol.
 - [x] Có serializable `IncidentState`.
 - [x] OpenAI + frames được chấp nhận.
-- [x] Gemini + native video được chấp nhận.
 - [x] Hai tổ hợp ngược bị từ chối.
-- [x] Contract không import OpenAI/Gemini SDK và không có fake implementation.
 - [x] Test Phase 1 và lint đều pass.
 
 **Trạng thái cuối Phase 1: `complete`.**
@@ -216,7 +202,6 @@ Phase 2 — Prompt package đã hoàn tất. Các builder chỉ tạo `PromptEnv
 
 ### Public package
 
-Đã tạo `src/prompts/__init__.py` để export các builder chính thức. Không prompt module nào import OpenAI/Gemini SDK, Settings, API key hoặc graph state.
 
 ## Kiểm thử
 
@@ -240,7 +225,6 @@ Không có assertion failure trong test Phase 2 hoặc regression API/model/conf
 - [x] Auto/human context tách biệt và có đúng `source`.
 - [x] Prompt versioned và deterministic.
 - [x] Prompt không nhận raw graph state, Settings, API key hoặc provider client.
-- [x] Reporting context không lộ remote Gemini handle hoặc artifact location.
 - [x] Structured-output và no-chain-of-thought rules được ghi rõ.
 - [x] Test Phase 2, regression không-LangGraph và lint đều pass.
 
@@ -254,7 +238,6 @@ Không có assertion failure trong test Phase 2 hoặc regression API/model/conf
 
 `complete`
 
-Phase 3 — Media và hai production VLM services đã hoàn tất. Unit/integration tests không gọi OpenAI hoặc Gemini thật; chúng khởi tạo đúng production adapter và mock tại SDK boundary.
 
 ## Những việc đã thực hiện
 
@@ -263,7 +246,6 @@ Phase 3 — Media và hai production VLM services đã hoàn tất. Unit/integra
 Đã bổ sung và kiểm tra:
 
 - `openai>=2.53.0,<3.0.0`.
-- `google-genai[aiohttp]>=2.17.0,<3.0.0`.
 - `imageio-ffmpeg>=0.6.0`.
 
 Môi trường Phase 3 sử dụng Python 3.11.15, OpenAI SDK 2.53.0, Google Gen AI SDK 2.17.0 và imageio-ffmpeg 0.6.0.
@@ -292,21 +274,6 @@ Môi trường Phase 3 sử dụng Python 3.11.15, OpenAI SDK 2.53.0, Google Gen
 - Fail trước SDK call khi vượt image limit.
 - `release_remote_resources()` là no-op.
 
-### GeminiNativeVideoVLMService
-
-Đã tạo production `GeminiNativeVideoVLMService`:
-
-- Chỉ nhận normalized native MP4; từ chối timestamped frames.
-- Upload bằng `client.aio.files.upload()`.
-- Poll bất đồng bộ bằng `client.aio.files.get()` và injected async sleep.
-- Xử lý `PROCESSING`, `ACTIVE`, `FAILED`, max attempts và processing timeout.
-- Gửi video part trước prompt; dùng video metadata/FPS và Pydantic response schema.
-- Initial analysis trả `VideoMemory` cùng remote handle.
-- Re-analysis reuse ACTIVE handle, áp dụng start/end offset của incident window; có thể upload lại local artifact khi handle mất.
-- Cleanup bằng `client.aio.files.delete()`, idempotent và best-effort.
-- Tự cleanup file remote khi processing fail/timeout hoặc generation/semantic validation fail.
-- Mapping lỗi upload, poll, processing, generation và structured output thành domain error codes.
-
 `ReanalysisRequest` và `VideoMemoryPatch` được mở rộng tối thiểu để mang frame manifest hoặc remote handle mới sau re-upload. Không có fake client/service/class.
 
 ## Kiểm thử
@@ -327,10 +294,6 @@ Provider tests xác nhận:
 
 - OpenAI chỉ có một SDK call và giữ đúng thứ tự hai frame.
 - OpenAI overflow dừng trước network boundary.
-- Gemini upload → `PROCESSING` → `ACTIVE` → structured result.
-- Gemini `FAILED`, upload failure và timeout có đúng error code.
-- Gemini re-analysis reuse handle và gửi đúng timestamp window.
-- Gemini cleanup không làm terminal flow fail khi remote file đã mất.
 
 Không có outbound model request trong test. Lỗi teardown LangGraph là vấn đề baseline đã được ghi từ các phase trước và không liên quan adapter Phase 3.
 
@@ -338,9 +301,7 @@ Không có outbound model request trong test. Lỗi teardown LangGraph là vấn
 
 - [x] Có production MediaService.
 - [x] Có production OpenAIVLMService cho timestamped frames.
-- [x] Có production GeminiNativeVideoVLMService cho native video.
 - [x] OpenAI gửi ordered frames trong một request.
-- [x] Gemini upload/poll/generate/delete đầy đủ.
 - [x] Có structured output và semantic Pydantic validation.
 - [x] Có error mapping và cleanup best-effort.
 - [x] Tests mock SDK boundary, không gọi dịch vụ trả phí.
@@ -357,7 +318,6 @@ Không có outbound model request trong test. Lỗi teardown LangGraph là vấn
 
 `complete`
 
-Phase 4 — Video Memory Workflow đã hoàn tất. Workflow và agent node chỉ phụ thuộc provider-neutral `VLMService`/capabilities; không import OpenAI SDK, Gemini SDK hoặc concrete provider adapter.
 
 ## Những việc đã thực hiện
 
@@ -505,7 +465,6 @@ Cả bốn chart đều có marker `t_start`, `t0`, `t_end`. Dependency `matplot
 ### Agent state/output
 
 - `analyze_log_node()` gọi log analysis và chart service, sau đó ghi `log_analysis`, `log_evidence_summary`, `log_events`, `chart_uris` và artifact URIs vào state patch.
-- Node chỉ phụ thuộc các Protocol provider-neutral; không import Settings, OpenAI/Gemini SDK hoặc concrete VLM provider.
 - Các exception có domain code được chuyển thành `error_code`/`error_message` trong state.
 
 ## File thay đổi
@@ -542,7 +501,6 @@ Cả bốn chart đều có marker `t_start`, `t0`, `t_end`. Dependency `matplot
 - Không có assertion failure trong 64 test không-LangGraph.
 - Lần chạy hồi quy đầu phát hiện race timeout FFmpeg nêu trên; đã sửa và lần chạy lại pass 64/64.
 - Hiện tượng pytest không thoát tại test LangGraph vẫn là lỗi baseline đã ghi nhận từ Phase 0–4; không có assertion failure mới do Phase 5.
-- Test không gọi OpenAI/Gemini và không phát sinh chi phí API.
 
 ## Tiêu chí hoàn thành Phase 5
 
@@ -563,7 +521,6 @@ Cả bốn chart đều có marker `t_start`, `t0`, `t_end`. Dependency `matplot
 
 `complete`
 
-Phase 6 — OpenAI verification và shared re-analysis đã hoàn tất. Verification dùng structured output, còn auto/human re-analysis dùng chung `VLMService.reanalyze_claims()` cho cả OpenAI timestamped frames và Gemini native video.
 
 ## Những việc đã thực hiện
 
@@ -613,7 +570,6 @@ Phase 6 — OpenAI verification và shared re-analysis đã hoàn tất. Verific
 ### Hai provider path
 
 - OpenAI: resample frame từ video gốc trong đúng `[t_start, t_end]`, dùng `vlm_reanalysis_frame_fps`/max frames đã được map vào workflow config, sau đó gửi ordered frame manifest cho re-analysis.
-- Gemini: không sample frames; chuyển remote media handles và normalized local artifact cho adapter. Adapter Phase 3 đã được xác nhận reuse ACTIVE handle, áp dụng video start/end metadata và upload lại local artifact khi handle mất.
 
 ## File thay đổi
 
@@ -626,7 +582,6 @@ Phase 6 — OpenAI verification và shared re-analysis đã hoàn tất. Verific
 - Tạo `tests/test_agents/test_incident_routing.py`.
 - Mở rộng `tests/test_agents/test_incident_node.py`.
 
-`src/services/vlm.py` không cần thêm nhánh provider mới: production `reanalyze_claims()` cho OpenAI và Gemini đã được hoàn thành từ Phase 3. Phase 6 kích hoạt và kiểm thử hai nhánh này qua shared node thay vì lặp lại adapter code.
 
 ## Kiểm thử
 
@@ -636,7 +591,6 @@ Phase 6 — OpenAI verification và shared re-analysis đã hoàn tất. Verific
 | OpenAI verification structured output | Pass |
 | Result ordering và evidence allowlist validation | Pass |
 | OpenAI frame-window re-analysis | Pass |
-| Gemini handle reuse và video start/end metadata | Pass |
 | Auto retry limit trước media/SDK call | Pass |
 | Auto/human prompt source separation | Pass |
 | Regression trừ baseline LangGraph | Pass — 77/77 |
@@ -650,7 +604,6 @@ Phase 6 — OpenAI verification và shared re-analysis đã hoàn tất. Verific
 
 - Không có assertion failure trong 77 test không-LangGraph.
 - Full suite vẫn gặp hiện tượng teardown LangGraph baseline đã ghi nhận từ Phase 0–5; không có regression mới từ Phase 6.
-- Test mock đúng SDK boundary; không gọi OpenAI/Gemini thật và không phát sinh chi phí API.
 
 ## Tiêu chí hoàn thành Phase 6
 
@@ -659,7 +612,6 @@ Phase 6 — OpenAI verification và shared re-analysis đã hoàn tất. Verific
 - [x] Có deterministic routing cho conflict và auto retry limit.
 - [x] Auto/human cùng gọi `VLMService.reanalyze_claims()`.
 - [x] OpenAI resample frame incident window.
-- [x] Gemini reuse remote native video và timestamp metadata.
 - [x] Auto re-analysis chạy tối đa một lần.
 - [x] Test Phase 6, regression, lint, compile và dependency check đều pass.
 
@@ -716,7 +668,6 @@ Validation review được thực hiện trước khi resume workflow:
 - Chỉ cho review khi status là `awaiting_review`.
 - Kiểm tra manual re-analysis target tồn tại trước khi tiêu thụ graph interrupt.
 - Khi approve/not-incident, lưu terminal outcome đúng một lần và trả `stored_at`.
-- Snapshot mapping chỉ allowlist public field; không trả raw `IncidentState`, prompt, run metadata hay Gemini remote handles.
 
 Pending graph state vẫn là in-memory theo baseline; terminal outcome lưu SQLite có thể đọc sau restart.
 
@@ -957,7 +908,6 @@ Phase 9 — Hoàn thiện end-to-end theo `AI agent flow.md` và bàn giao — �
 - Video-only không gọi log/chart/verifier/auto re-analysis.
 - Automatic re-analysis gom tất cả contradicted claim vào đúng một focused request thay vì âm thầm chọn claim đầu tiên; counter giới hạn một lần và graph verify lại.
 - Conflict còn lại sau lần retry được giữ trong claim status và report warnings, không tạo loop.
-- Remote Gemini handles được giữ trong pending checkpoint; terminal/failure cleanup best-effort.
 
 ### Human Review interrupt/resume
 
@@ -971,7 +921,6 @@ Phase 9 — Hoàn thiện end-to-end theo `AI agent flow.md` và bàn giao — �
 
 ### Runtime, validation và persistence
 
-- Tạo `src/services/incident_runtime.py` làm concrete dependency factory cho media, OpenAI/Gemini VLM, video-memory workflow, log/chart, verification/report LLM, graph runner, checkpointer và report repository.
 - `src/main.py` khởi tạo `incident_workflow_service` trong FastAPI lifespan; cấu hình không hợp lệ trả service-unavailable an toàn thay vì lộ exception/secret.
 - Input validator giới hạn configured roots, file tồn tại, kích thước, prompt length và video tối đa 60 giây.
 - Bổ sung `langgraph-checkpoint-sqlite` và SQLite checkpoint cho pending workflow.
@@ -1050,7 +999,6 @@ Phase 9 — Hoàn thiện end-to-end theo `AI agent flow.md` và bàn giao — �
 ## Lỗi hoặc giới hạn còn lại
 
 - Không có test failure, lint error, format error, compile error hoặc dependency conflict.
-- Không gọi OpenAI/Gemini thật vì chưa có explicit approval phát sinh chi phí. E2E dùng production adapters và mock đúng SDK boundary.
 - Chưa có authentication/authorization, external object storage, distributed queue hoặc multi-worker production persistence strategy.
 - SQLite baseline phù hợp demo/single-process; chưa tuyên bố production-ready.
 

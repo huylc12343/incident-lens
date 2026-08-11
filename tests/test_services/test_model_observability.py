@@ -26,7 +26,7 @@ def test_extracts_openai_responses_usage() -> None:
     }
 
 
-def test_extracts_gemini_usage_metadata() -> None:
+def test_extracts_provider_usage_metadata() -> None:
     response = SimpleNamespace(
         usage_metadata=SimpleNamespace(
             prompt_token_count=200,

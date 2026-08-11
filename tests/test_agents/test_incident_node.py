@@ -50,7 +50,7 @@ def _memory(mode: AnalysisMode, duration_s: float) -> VideoMemory:
 def _service(mode: VLMInputMode, result: VideoMemory) -> SimpleNamespace:
     return SimpleNamespace(
         capabilities=VLMCapabilities(
-            provider=VLMProvider.OPENAI if mode == VLMInputMode.TIMESTAMPED_FRAMES else VLMProvider.GEMINI,
+            provider=VLMProvider.OPENAI if mode == VLMInputMode.TIMESTAMPED_FRAMES else VLMProvider.QWEN,
             input_mode=mode,
             max_images_per_request=10 if mode == VLMInputMode.TIMESTAMPED_FRAMES else None,
         ),
@@ -124,7 +124,17 @@ async def test_analyze_video_node_builds_native_request(tmp_path: Path) -> None:
     )
 
     assert result["status"] == "running"
-    media.normalize_video.assert_awaited_once()
+    media.normalize_video.assert_awaited_once_with(
+        "video.mp4",
+        str(tmp_path.resolve() / "INC-002" / "normalized.mp4"),
+        width=1280,
+        height=720,
+        fps=15,
+        codec="libx264",
+        pixel_format="yuv420p",
+        max_output_bytes=100_000_000,
+        max_duration_s=60,
+    )
     media.sample_frames.assert_not_awaited()
     assert result["artifact_uris"] == {"normalized_video": normalized.uri}
 
@@ -300,6 +310,8 @@ async def test_align_and_verify_claims_builds_per_claim_log_summary(tmp_path: Pa
     assert result["status"] == "running"
     assert result["verification"] == verification
     assert result["claim_log_summaries"][0].claim_id == "claim-1"
+    assert result["claims"][0].verification_status == VerificationStatus.CONTRADICTED
+    assert result["video_memory"].claims[0].verification_status == VerificationStatus.CONTRADICTED
     request = verifier.verify.await_args.args[0]
     assert request.claim_log_summaries[0].metrics["brake"]["max"] == 1
 
@@ -433,12 +445,12 @@ async def test_auto_reanalysis_stops_after_one_attempt(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_manual_reanalysis_reuses_gemini_handle(tmp_path: Path) -> None:
+async def test_manual_native_reanalysis_reuses_remote_handle(tmp_path: Path) -> None:
     memory = _claim_memory(AnalysisMode.NATIVE_VIDEO)
     handle = RemoteMediaHandle(
-        provider=VLMProvider.GEMINI,
+        provider=VLMProvider.QWEN,
         name="files/one",
-        uri="gemini://one",
+        uri="provider://one",
         mime_type="video/mp4",
         local_artifact_uri=str(tmp_path / "normalized.mp4"),
     )

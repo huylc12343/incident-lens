@@ -86,3 +86,35 @@ def test_claim_log_summary_ignores_non_allowlisted_raw_columns(tmp_path) -> None
 
     assert summary.available_signals == ["timestamp"]
     assert summary.metrics == {}
+
+
+def test_claim_log_summary_supports_ego_signal_column_names(tmp_path) -> None:
+    log = tmp_path / "ego-vehicle.csv"
+    log.write_text(
+        "time_sec,ego_speed_kmh,ego_throttle,ego_brake,ego_steer\n"
+        "0.00,30,1.0,0.0,-0.3\n"
+        "0.05,25,0.8,0.0,-0.2\n"
+        "0.10,20,0.5,0.2,-0.1\n"
+        "0.15,10,0.1,0.7,0.2\n"
+        "0.20,0,0.0,1.0,0.5\n",
+        encoding="utf-8",
+    )
+
+    summary = build_claim_log_summaries(
+        str(log),
+        [Claim(claim_id="claim-impact", text="Xe ego va chạm vật cản", timestamp_s=0.15)],
+        timestamp_tolerance_s=0.01,
+    )[0]
+
+    assert summary.available_signals == ["timestamp", "speed_kmh", "throttle", "brake", "steer"]
+    assert summary.metrics["speed_kmh"]["start"] == 30
+    assert summary.metrics["speed_kmh"]["end"] == 0
+    assert summary.metrics["throttle"]["start"] == 1
+    assert summary.metrics["brake"]["max"] == 1
+    assert summary.metrics["steer"]["max"] == 0.5
+    assert all(
+        value is not None
+        for signal_metrics in summary.metrics.values()
+        for value in signal_metrics.values()
+    )
+    assert "Giảm tốc cực đại" in summary.summary

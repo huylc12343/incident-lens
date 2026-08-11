@@ -90,7 +90,7 @@ class ModelActivityRegistry:
 
 
 def extract_token_usage(response: Any) -> TokenUsage | None:
-    """Normalize OpenAI Responses and Gemini usage metadata without SDK coupling."""
+    """Normalize common provider usage metadata without SDK coupling."""
     usage = _value(response, "usage")
     if usage is not None:
         input_details = _value(usage, "input_tokens_details")

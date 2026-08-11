@@ -42,7 +42,7 @@ def test_conflict_log_has_no_strong_brake_rise_near_incident(tmp_path: Path) -> 
     conflict = service.analyze(str(CONFLICT_LOG), str(tmp_path / "conflict.csv"), window=WINDOW)
 
     assert real.summary.metrics["brake_rise_time"] == 6.5
-    assert conflict.summary.metrics["brake_rise_time"] is None
+    assert "brake_rise_time" not in conflict.summary.metrics
     assert conflict.summary.metrics["speed_end"] == 2.5
     assert not any(event.event_type == "brake_rise" for event in conflict.events)
     assert "Không phát hiện brake tăng mạnh" in conflict.summary.summary
@@ -96,3 +96,26 @@ def test_rejects_log_without_timestamp_column(tmp_path: Path) -> None:
         )
 
     assert exc_info.value.code == "LOG_TIMESTAMP_MISSING"
+
+
+def test_accepts_time_sec_timestamp_column(tmp_path: Path) -> None:
+    source = tmp_path / "vehicle_state.csv"
+    source.write_text(
+        "time_sec,ego_speed_kmh,ego_brake\n"
+        "0.0,3.528,0.0\n"
+        "0.05,5.292,0.0\n"
+        "0.1,7.056,0.0\n",
+        encoding="utf-8",
+    )
+
+    result = LogAnalysisService().analyze(
+        str(source),
+        str(tmp_path / "slice.csv"),
+        window=IncidentWindow(t_start=0, t0=0.05, t_end=0.1),
+    )
+
+    assert result.row_count == 3
+    assert result.summary.metrics["speed_start"] == 3.528
+    assert result.summary.metrics["speed_end"] == 7.056
+    assert result.summary.metrics["max_brake"] == 0
+    assert all(value is not None for value in result.summary.metrics.values())

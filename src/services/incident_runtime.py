@@ -23,7 +23,7 @@ from src.services.report_repository import SQLiteReportRepository
 from src.services.reporting import OpenAIReportService
 from src.services.verification import OpenAIVerificationService
 from src.services.video_memory import VideoMemoryLimits, VideoMemoryWorkflow, VideoMemoryWorkflowConfig
-from src.services.vlm import GeminiNativeVideoVLMService, OpenAIVLMService, QwenNativeVideoVLMService
+from src.services.vlm import OpenAIVLMService, QwenNativeVideoVLMService
 from src.services.workflow import WorkflowError, WorkflowService
 
 
@@ -32,7 +32,6 @@ class ProviderClients:
     openai_vlm: Any | None = None
     openai_verification: Any | None = None
     openai_report: Any | None = None
-    gemini: Any | None = None
     qwen: Any | None = None
 
 
@@ -169,7 +168,7 @@ async def incident_workflow_service(
         timestamp_tolerance_s=settings.log_timestamp_tolerance_s,
         reanalysis_prompt_version=settings.reanalysis_prompt_version,
         auto_reanalysis_enabled=settings.auto_reanalysis_enabled,
-        cleanup_remote_resources=settings.gemini_delete_remote_file_on_terminal,
+        cleanup_remote_resources=False,
         observability=observability,
     )
     checkpoint_path = Path(settings.incident_checkpoint_path).resolve()
@@ -194,7 +193,7 @@ def _build_vlm(
     settings: Settings,
     clients: ProviderClients,
     observability: ModelActivityRegistry | None = None,
-) -> OpenAIVLMService | GeminiNativeVideoVLMService | QwenNativeVideoVLMService:
+) -> OpenAIVLMService | QwenNativeVideoVLMService:
     if settings.vlm_provider == VLMProvider.OPENAI:
         return OpenAIVLMService(
             model=settings.openai_vlm_model_name,
@@ -221,24 +220,10 @@ def _build_vlm(
             video_fps=settings.qwen_video_fps,
             enable_thinking=settings.qwen_enable_thinking,
             thinking_budget=settings.qwen_thinking_budget,
+            max_structured_output_retries=settings.vlm_max_retries,
             observability=observability,
         )
-    if clients.gemini is None and not settings.gemini_api_key.strip():
-        raise ValueError("GEMINI_API_KEY is required for the configured VLM provider")
-    return GeminiNativeVideoVLMService(
-        model=settings.gemini_vlm_model_name,
-        client=clients.gemini,
-        api_key=settings.gemini_api_key or None,
-        poll_interval_s=settings.gemini_file_poll_interval_s,
-        processing_timeout_s=settings.gemini_file_processing_timeout_s,
-        max_poll_attempts=settings.gemini_file_max_poll_attempts,
-        timeout_s=settings.vlm_timeout_s,
-        temperature=settings.vlm_temperature,
-        media_resolution=settings.gemini_media_resolution,
-        video_fps=settings.gemini_video_fps,
-        reupload_missing_file=settings.gemini_reupload_missing_file,
-        observability=observability,
-    )
+    raise ValueError(f"unsupported VLM provider: {settings.vlm_provider.value}")
 
 
 def _openai_key(settings: Settings, client: Any | None) -> str | None:

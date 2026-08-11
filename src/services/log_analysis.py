@@ -18,17 +18,17 @@ from src.models.incidents import (
     LogEvidenceSummary,
 )
 
-TIMESTAMP_ALIASES = ("timestamp_s", "timestamp", "time_s", "time")
-SPEED_ALIASES = ("speed_kmh", "vehicle_speed_kmh", "speed")
+TIMESTAMP_ALIASES = ("timestamp_s", "timestamp", "time_s", "time_sec", "time")
+SPEED_ALIASES = ("speed_kmh", "ego_speed_kmh", "vehicle_speed_kmh", "speed")
 ACCELERATION_ALIASES = ("acceleration_mps2", "accel_mps2", "acceleration")
-BRAKE_ALIASES = ("brake", "brake_pedal", "brake_pressure")
-THROTTLE_ALIASES = ("throttle", "throttle_pedal")
-STEERING_ALIASES = ("steering_angle", "steer", "steering")
+BRAKE_ALIASES = ("brake", "ego_brake", "brake_pedal", "brake_pressure")
+THROTTLE_ALIASES = ("throttle", "ego_throttle", "throttle_pedal")
+STEERING_ALIASES = ("steering_angle", "steer", "ego_steer", "steering")
 CAMERA_FRAME_ALIASES = ("camera_frame",)
-CLAIM_SPEED_ALIASES = ("speed_kmh",)
-CLAIM_THROTTLE_ALIASES = ("throttle",)
-CLAIM_BRAKE_ALIASES = ("brake",)
-CLAIM_STEER_ALIASES = ("steer",)
+CLAIM_SPEED_ALIASES = ("speed_kmh", "ego_speed_kmh")
+CLAIM_THROTTLE_ALIASES = ("throttle", "ego_throttle")
+CLAIM_BRAKE_ALIASES = ("brake", "ego_brake")
+CLAIM_STEER_ALIASES = ("steer", "ego_steer")
 ACCELERATION_X_ALIASES = ("acceleration_x",)
 ACCELERATION_Y_ALIASES = ("acceleration_y",)
 ACCELERATION_Z_ALIASES = ("acceleration_z",)
@@ -131,9 +131,10 @@ class LogAnalysisService:
         metric_evidence_ids = [
             _metric_evidence_id(name) for name, value in metrics.items() if value is not None
         ]
+        available_metrics = {name: value for name, value in metrics.items() if value is not None}
         summary = LogEvidenceSummary(
             summary=_build_summary(window, metrics, warnings, errors),
-            metrics=metrics,
+            metrics=available_metrics,
             events=[event.model_dump(mode="json") for event in events],
             evidence_ids=[*metric_evidence_ids, *(event.evidence_id for event in events)],
             warnings=warnings,
@@ -379,6 +380,10 @@ def _claim_metrics(
     z_metrics = _transition_metrics(records, signals["z"], include_extrema=True)
     if z_metrics:
         metrics["z"] = z_metrics
+    metrics = {
+        name: {metric_name: value for metric_name, value in values.items() if value is not None}
+        for name, values in metrics.items()
+    }
     available = ["timestamp"]
     if any(record.text(CAMERA_FRAME_ALIASES) is not None for record in records):
         available.append("camera_frame")
@@ -531,6 +536,11 @@ def _build_claim_summary(
             f"Speed {float(speed['start']):g}→{float(speed['end']):g} km/h, "
             f"delta {float(speed['delta']):g}, min {float(speed['min']):g}, max {float(speed['max']):g}."
         )
+        if speed.get("max_deceleration") is not None and speed.get("max_deceleration_timestamp_s") is not None:
+            statements.append(
+                f"Giảm tốc cực đại {abs(float(speed['max_deceleration'])):g} m/s²"
+                f" tại {float(speed['max_deceleration_timestamp_s']):g}s."
+            )
     brake = metrics.get("brake")
     if brake:
         statements.append(

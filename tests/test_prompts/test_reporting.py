@@ -29,9 +29,9 @@ def _video_memory_with_private_provider_data() -> VideoMemory:
         sampling_metadata=SamplingMetadata(requested_fps=2, sampled_frame_count=20, source_duration_s=17),
         remote_media_handles=[
             RemoteMediaHandle(
-                provider=VLMProvider.GEMINI,
+                provider=VLMProvider.QWEN,
                 name="files/private-name",
-                uri="private://gemini-remote-uri",
+                uri="private://provider-remote-uri",
                 mime_type="video/mp4",
                 local_artifact_uri="private://normalized-video",
             )

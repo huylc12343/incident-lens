@@ -93,3 +93,26 @@ def test_generated_incident_ids_are_unique() -> None:
     assert first.startswith("INC-")
     assert second.startswith("INC-")
     assert first != second
+
+
+def test_claim_status_rows_hide_raw_evidence() -> None:
+    rows = main_test._claim_status_rows(
+        [
+            {
+                "claim_id": "claim-1",
+                "text": "Xe ego va chạm bụi cây",
+                "timestamp_s": 18.25,
+                "evidence": [{"evidence_id": "frame-1", "timestamp_s": 18.25}],
+                "verification_status": "supported",
+            }
+        ]
+    )
+
+    assert rows == [
+        {
+            "claim_id": "claim-1",
+            "timestamp_s": 18.25,
+            "claim": "Xe ego va chạm bụi cây",
+            "status": "supported",
+        }
+    ]

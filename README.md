@@ -44,7 +44,7 @@ INCIDENT_CHECKPOINT_PATH=./data/incident_checkpoints.sqlite3
 
 Incident clip mặc định có tối thiểu 5 giây, thêm 1 giây trước và 2 giây sau window do VLM xác định. Có thể điều chỉnh bằng `INCIDENT_CLIP_MIN_DURATION_S`, `INCIDENT_CLIP_PRE_ROLL_S` và `INCIDENT_CLIP_POST_ROLL_S`. Ảnh `representative_frame` được chọn gần `t0` thay vì lấy frame đầu tiên.
 
-Qwen native video dùng `VLM_PROVIDER=qwen`, `VLM_INPUT_MODE=native_video` và `DASHSCOPE_API_KEY`. Video local nhỏ hơn `QWEN_BASE64_MAX_VIDEO_BYTES` (mặc định 7 MB) được gửi bằng Base64 Data URL. Video lớn hơn ngưỡng cần `QWEN_ARTIFACT_URL_BASE` công khai `ARTIFACT_DIR`. Qwen gọi `qwen3-vl-flash` qua DashScope chat completions. Gemini được giữ lại chỉ để tương thích cấu hình cũ.
+Qwen native video dùng `VLM_PROVIDER=qwen`, `VLM_INPUT_MODE=native_video` và `DASHSCOPE_API_KEY`. Video được resize/pad theo `VLM_VIDEO_TARGET_WIDTH`, `VLM_VIDEO_TARGET_HEIGHT` và chuẩn hóa FPS trước khi gửi. Video local nhỏ hơn `QWEN_BASE64_MAX_VIDEO_BYTES` (mặc định 7 MB) được gửi bằng Base64 Data URL. Video lớn hơn ngưỡng cần `QWEN_ARTIFACT_URL_BASE` công khai `ARTIFACT_DIR`. Qwen gọi `qwen3-vl-flash` qua DashScope chat completions.
 
 Streamlit upload file vào `INCIDENT_UPLOAD_DIR`; backend kiểm tra phần mở rộng, dung lượng, path root, file tồn tại và video không quá 60 giây. URL từ xa và external object storage không thuộc baseline.
 

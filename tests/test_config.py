@@ -9,7 +9,6 @@ from src.models.incidents import VLMInputMode, VLMProvider
     ("provider", "input_mode"),
     [
         ("openai", "timestamped_frames"),
-        ("gemini", "native_video"),
         ("qwen", "native_video"),
     ],
 )
@@ -24,7 +23,7 @@ def test_supported_provider_mode_pairs(provider: str, input_mode: str) -> None:
     ("provider", "input_mode"),
     [
         ("openai", "native_video"),
-        ("gemini", "timestamped_frames"),
+        ("qwen", "timestamped_frames"),
     ],
 )
 def test_unsupported_provider_mode_pairs_fail_bootstrap(provider: str, input_mode: str) -> None:

@@ -10,7 +10,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class VLMProvider(StrEnum):
     OPENAI = "openai"
-    GEMINI = "gemini"
     QWEN = "qwen"
 
 
@@ -128,6 +127,7 @@ class Claim(ContractModel):
     text: str = Field(min_length=1)
     timestamp_s: float | None = Field(default=None, ge=0)
     evidence: list[EvidenceReference] = Field(default_factory=list)
+    verification_status: VerificationStatus = VerificationStatus.UNVERIFIED
 
 
 class EvidenceReference(ContractModel):

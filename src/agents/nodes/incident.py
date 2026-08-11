@@ -329,12 +329,18 @@ async def align_and_verify_claims_node(
                 timestamp_tolerance_s=timestamp_tolerance_s,
             )
         )
+        status_by_claim_id = {item.claim_id: item.status for item in result.results}
+        verified_claims = [
+            claim.model_copy(update={"verification_status": status_by_claim_id[claim.claim_id]})
+            for claim in memory.claims
+        ]
+        memory = memory.model_copy(update={"claims": verified_claims})
         return {
             "status": "running",
             "verification": result,
             "claim_log_summaries": claim_log_summaries,
             "video_memory": memory,
-            "claims": memory.claims,
+            "claims": verified_claims,
         }
     except Exception as exc:
         warning = (

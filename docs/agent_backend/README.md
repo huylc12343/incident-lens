@@ -413,9 +413,8 @@ Các tổ hợp provider/input mode sau được chấp nhận:
 | ---------------- | ---------------------- | ------------------------------------------------- |
 | `openai`       | `timestamped_frames` | Lấy frame theo timestamp và gửi cho OpenAI VLM |
 | `qwen`         | `native_video`       | Gửi video public URL tới Qwen3-VL-Flash qua DashScope |
-| `gemini`       | `native_video`       | Provider cũ, chỉ giữ tương thích cấu hình        |
 
-OpenAI + `native_video`, Qwen + `timestamped_frames` và Gemini + `timestamped_frames` bị từ chối khi bootstrap Settings.
+OpenAI + `native_video` và Qwen + `timestamped_frames` bị từ chối khi bootstrap Settings.
 
 ### 8.3. Nhóm biến quan trọng
 
@@ -430,6 +429,10 @@ OpenAI + `native_video`, Qwen + `timestamped_frames` và Gemini + `timestamped_f
 | Log              | `LOG_TIMESTAMP_TOLERANCE_S`, `LOG_BRAKE_RISE_THRESHOLD`, `LOG_STEERING_CHANGE_THRESHOLD`                                           |
 | Storage          | `ARTIFACT_DIR`, `INCIDENT_DATABASE_PATH`, `INCIDENT_CHECKPOINT_PATH`                                                               |
 | Qwen video       | `QWEN_BASE_URL`, `QWEN_VIDEO_FPS`, `QWEN_ENABLE_THINKING`, `QWEN_THINKING_BUDGET`                                                     |
+
+Với Qwen, `VLM_MAX_RETRIES` cũng là số lần thử lại khi JSON trả về đúng cú pháp nhưng không đạt schema. Mỗi lần
+thử lại nhận danh sách field validation bị lỗi. Adapter cũng kiểm tra incident window, representative timestamp,
+timeline, claim và evidence không vượt thời lượng video; backend không tự clamp timestamp sai.
 
 `DATABASE_URL`, Chroma và một số biến frontend vẫn có trong `.env.example` để dành cho hướng mở rộng; incident workflow hiện tại sử dụng trực tiếp hai SQLite path nói trên.
 
@@ -535,7 +538,7 @@ Phân nhóm test:
 - `tests/test_api/`: FastAPI endpoint và error mapping.
 - `tests/test_main_test.py`: HTTP helper và hành vi Streamlit client.
 
-Trong test, provider SDK được mock tại boundary để không gọi OpenAI/Gemini thật và không phát sinh chi phí.
+Trong test, provider SDK được mock tại boundary để không gọi OpenAI/Qwen thật và không phát sinh chi phí.
 
 ## 12. Bảo mật và vận hành
 
@@ -546,7 +549,7 @@ Trong test, provider SDK được mock tại boundary để không gọi OpenAI/
 - Upload được kiểm tra extension, file size và file rỗng.
 - Public snapshot không trả raw graph state, API key, remote provider handle hoặc prompt nội bộ.
 - SQLite phù hợp demo/single-process. Nếu chạy nhiều worker hoặc nhiều user concurrent, cần database/checkpointer có concurrency model phù hợp.
-- `scripts/`, `.ai-log/`, `.codex/`, `.cursor/`, `.claude/`, `.gemini/` và các AI tooling folders đã được thêm vào `.gitignore`; file đã track từ trước vẫn cần bỏ tracking riêng nếu muốn loại khỏi Git.
+- `scripts/`, `.ai-log/`, `.codex/`, `.cursor/`, `.claude/` và các AI tooling folders đã được thêm vào `.gitignore`; file đã track từ trước vẫn cần bỏ tracking riêng nếu muốn loại khỏi Git.
 
 ## 13. Troubleshooting
 

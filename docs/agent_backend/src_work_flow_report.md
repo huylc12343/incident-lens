@@ -6,7 +6,7 @@ Dưới đây là báo cáo reverse-engineering trực tiếp từ mã nguồn t
 
 ## 1. Executive Summary
 
-Hệ thống là một pipeline Agentic kết hợp giữa **FastAPI**, **LangGraph**, và các **LLM/VLM (OpenAI & Gemini)** để phân tích tự động video sự cố và đối chiếu với log phương tiện.
+Hệ thống là một pipeline Agentic kết hợp giữa **FastAPI**, **LangGraph**, và các **LLM/VLM (OpenAI & Qwen)** để phân tích tự động video sự cố và đối chiếu với log phương tiện.
 Thay vì gửi toàn bộ video và log cho một model khổng lồ, hệ thống chia nhỏ thành các tác vụ chuyên biệt: VLM trích xuất claims từ video → Code xử lý log bằng rule-based deterministic → LLM đối chiếu (verify) claims với log summary → VLM re-analyze nếu mâu thuẫn → LLM tổng hợp báo cáo nháp → Human Reviewer.
 Tất cả đều được implement thật (không dùng mock/stub), thao tác media qua FFmpeg, và có observability (ghi vết LLM tokens, latency).
 
@@ -94,7 +94,6 @@ stateDiagram-v2
 | `verification`         | `VerificationResult`      | `verify`                                                             | `auto_reanalyze`, `draft_report`             | Kết quả LLM so sánh claims với log.                                  |
 | `draft_report`         | `DraftReport`             | `draft_report`, `review`                                           | API                                              | Báo cáo nháp gửi cho reviewer.                                       |
 | `report_narrative`     | `ReportNarrative`         | `draft_report`                                                       | N/A                                              | Khúc text do LLM viết (được nhúng luôn vào draft_report).        |
-| `remote_media_handles` | `list[RemoteMediaHandle]` | `analyze_video` (Gemini)                                             | `cleanup`                                      | Reference tới file trên Cloud để xóa.                               |
 | `artifact_uris`        | `dict[str, str]`          | `cut_incident_video`, `analyze_log`                                | `review`, API                                  | Đường dẫn file local (frames, clip cắt, CSV).                       |
 
 ### Ví dụ IncidentState thực tế
@@ -132,11 +131,10 @@ Code xử lý tùy thuộc vào config VLM adapter (`src/agents/nodes/incident.p
   - Gọi `media.sample_frames(video_uri, ..., fps=2.0, max_frames=120)` (ffmpeg filter `fps=2.0`).
   - Gửi các frame thành mảng Base64 Images vào prompt.
   - Xử lý mượt `rolling_batches` nếu số frame vượt quá limit.
-- **Trường hợp 2: Mode NATIVE_VIDEO (Gemini)**
+- **Trường hợp 2: Mode NATIVE_VIDEO (Qwen)**
 
-  - Gọi `media.normalize_video` cắt/nén thành MP4 (`max_duration=60s`).
-  - Gọi `GeminiNativeVideoVLMService._upload_and_wait` upload trực tiếp qua Google File API. Đợi trạng thái file thành `ACTIVE`.
-  - Gửi reference (URI) vào API Gemini.
+  - Gọi `media.normalize_video` để resize/pad, chuẩn hóa FPS và mã hóa MP4 (`max_duration=60s`).
+  - Gửi video đã chuẩn hóa bằng Base64 Data URL hoặc public artifact URL tới Qwen qua DashScope.
 
 ### 4.3 Prompt VLM (`src/prompts/video_analysis.py`)
 
@@ -393,4 +391,4 @@ Có 4 action API hỗ trợ:
 - **Node auto_reanalyze:** Báo lỗi lại cho VLM: "Log nói không phanh". VLM đính chính: "Nhìn nhầm bóng râm thành đèn phanh, xe không phanh". Sửa Claim C1 thành "Xe không giảm tốc".
 - **Node verify (lần 2):** LLM duyệt lại, C1 giờ là `SUPPORTED`.
 - **Node draft_report:** Tạo báo cáo. Graph treo ở `interrupt`.
-- **Human Review:** Chuyên gia duyệt, API gửi `{"action": "approve"}` -> Graph nhảy sang `cleanup` xóa file Gemini. END.
+- **Human Review:** Chuyên gia duyệt, API gửi `{"action": "approve"}` -> Graph nhảy sang `cleanup`. END.

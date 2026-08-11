@@ -41,20 +41,9 @@ class Settings(BaseSettings):
     qwen_video_fps: float = Field(default=2.0, gt=0, le=10)
     qwen_enable_thinking: bool = False
     qwen_thinking_budget: int = Field(default=500, gt=0)
-    gemini_api_key: str = ""
-    gemini_vlm_model_name: str = "gemini-2.5-flash"
     vlm_timeout_s: float = Field(default=120.0, gt=0)
     vlm_max_retries: int = Field(default=2, ge=0)
     vlm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
-
-    # Gemini Files API
-    gemini_file_poll_interval_s: float = Field(default=2.0, gt=0)
-    gemini_file_processing_timeout_s: float = Field(default=300.0, gt=0)
-    gemini_file_max_poll_attempts: int = Field(default=150, gt=0)
-    gemini_delete_remote_file_on_terminal: bool = True
-    gemini_reupload_missing_file: bool = True
-    gemini_media_resolution: Literal["low", "medium", "high"] = "medium"
-    gemini_video_fps: float = Field(default=2.0, gt=0)
 
     # Native video preprocessing
     vlm_video_target_width: int = Field(default=1280, gt=0)
@@ -124,7 +113,6 @@ class Settings(BaseSettings):
     def validate_provider_mode(self) -> Settings:
         supported_mode = {
             VLMProvider.OPENAI: VLMInputMode.TIMESTAMPED_FRAMES,
-            VLMProvider.GEMINI: VLMInputMode.NATIVE_VIDEO,
             VLMProvider.QWEN: VLMInputMode.NATIVE_VIDEO,
         }[self.vlm_provider]
         if self.vlm_input_mode != supported_mode:

@@ -708,7 +708,7 @@ START
 - Tạo concrete implementation cho `IncidentGraphRunner`.
 - Tạo dependency factory từ `Settings` cho:
   - `MediaService`.
-  - OpenAI frames hoặc Gemini native-video `VLMService`.
+  - OpenAI frames hoặc Qwen native-video `VLMService`.
   - `VideoMemoryWorkflow`.
   - `LogAnalysisService` và `ChartService`.
   - Verification LLM và reporting LLM.
@@ -730,7 +730,7 @@ START
 - Bổ sung `langgraph-checkpoint-sqlite` và dùng SQLite checkpointer cho incident đang chờ review.
 - Tiếp tục dùng SQLite repository cho terminal outcome `approved | not_incident`.
 - Đảm bảo duplicate incident, terminal write và concurrent review có kết quả xác định.
-- Cleanup remote Gemini resource khi approved, not-incident hoặc failed; giữ/reuse handle khi incident còn chờ review và re-upload khi handle mất theo cấu hình.
+- Dọn artifact local khi incident đã kết thúc theo chính sách lưu trữ.
 - API snapshot phải đọc được pending incident sau process restart và terminal incident từ repository.
 
 #### Kiểm chứng

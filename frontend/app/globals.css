@@ -804,7 +804,7 @@ td strong {
 
 .context-bar {
     display: grid;
-    grid-template-columns: 1.05fr 1fr;
+    grid-template-columns: 1.05fr 1fr 1.3fr;
     gap: 20px;
     padding: 17px 20px;
     border: 1px solid var(--line);
@@ -817,9 +817,41 @@ td strong {
     border-right: 1px solid var(--line);
 }
 
-.context-bar>div:nth-child(2) {
+.context-bar>div:nth-child(3) {
     border: 0;
 }
+
+.processing-review-link {
+    display: grid;
+    place-items: center;
+    padding: 0 12px;
+    text-decoration: none;
+}
+
+.ai-rereview-card>h2 { margin: 0; font-size: 16px; }
+.ai-rereview-card>p:not(.eyebrow) { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.ai-rereview-card label { display: block; margin: 14px 0 6px; color: #4d5669; font-size: 11px; font-weight: 700; }
+.ai-rereview-card textarea { width: 100%; min-height: 92px; padding: 10px; resize: vertical; border: 1px solid #d6dae4; border-radius: 6px; font: inherit; }
+.ai-rereview-card .approve-action { width: 100%; margin-top: 10px; }
+.ai-rereview-card>small { display: block; margin-top: 8px; color: var(--muted); font-size: 9px; }
+.ai-rereview-card { min-width: 0; }
+.ai-rereview-card textarea { max-width: 100%; }
+.review-context strong,.review-marker em { overflow-wrap: anywhere; }
+.review-range { gap: 12px; }
+.review-range strong { flex: 1; text-align: center; }
+
+.evaluation-shell { padding-top: 42px; }
+.evaluation-hero,.evaluation-details { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 22px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.evaluation-hero h2,.evaluation-details h3 { margin: 0; }
+.evaluation-hero p:not(.eyebrow),.evaluation-details p { margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.evaluation-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin: 18px 0; }
+.evaluation-grid article { padding: 20px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.evaluation-grid span,.evaluation-grid small { display: block; color: var(--muted); font-size: 10px; }
+.evaluation-grid strong { display: block; margin: 10px 0 7px; color: var(--indigo); font-size: 28px; }
+.evaluation-actions { display: flex; gap: 9px; }
+.evaluation-actions a { display: grid; min-height: 38px; place-items: center; padding: 0 13px; text-decoration: none; }
+@media (max-width:900px) { .evaluation-grid { grid-template-columns: repeat(2,1fr); } }
+@media (max-width:700px) { .evaluation-grid { grid-template-columns: 1fr; }.evaluation-hero,.evaluation-details { align-items: stretch; flex-direction: column; }.evaluation-actions { flex-direction: column; } }
 
 .selected-files {
     display: grid;

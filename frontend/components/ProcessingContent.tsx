@@ -5,14 +5,23 @@ import { EvidenceDetails } from "./EvidenceDetails";
 import { ProcessingPipeline } from "./ProcessingPipeline";
 import { VideoEvidencePlayer } from "./VideoEvidencePlayer";
 import { loadUploadedVideo } from "../lib/uploadStorage";
+import {
+  getAnalysisWindow,
+  INCIDENT_KEYS,
+  timestampToSeconds,
+} from "../lib/incidentSession";
 
 export function ProcessingContent() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoUrl, setVideoUrl] = useState("");
   const [videoName, setVideoName] = useState("front_camera.mp4");
+  const [eventTimestamp, setEventTimestamp] = useState("00:00:00.000");
   useEffect(() => {
     setVideoName(
       sessionStorage.getItem("vlens:video-name") ?? "front_camera.mp4",
+    );
+    setEventTimestamp(
+      sessionStorage.getItem(INCIDENT_KEYS.timestamp) ?? "00:00:00.000",
     );
     let active = true;
     let objectUrl = "";
@@ -37,8 +46,7 @@ export function ProcessingContent() {
   const seekToTimestamp = (timestamp: string) => {
     const video = videoRef.current;
     if (!video) return;
-    const [hours, minutes, seconds] = timestamp.split(":");
-    const targetTime = Number(hours) * 3600 + Number(minutes) * 60 + Number(seconds);
+    const targetTime = timestampToSeconds(timestamp);
     const seek = () => {
       video.currentTime = Number.isFinite(video.duration)
         ? Math.min(targetTime, video.duration)
@@ -49,6 +57,7 @@ export function ProcessingContent() {
     else video.addEventListener("loadedmetadata", seek, { once: true });
     video.scrollIntoView({ behavior: "smooth", block: "center" });
   };
+  const analysisWindow = getAnalysisWindow(eventTimestamp);
   return (
     <>
       <section className="context-bar">
@@ -57,12 +66,16 @@ export function ProcessingContent() {
           <strong>{videoName}</strong>
         </div>
         <div>
+          <span>Known disengagement timestamp</span>
+          <strong>{eventTimestamp}</strong>
+        </div>
+        <div>
           <span>Analysis Window</span>
-          <strong>Full uploaded recording</strong>
+          <strong>{analysisWindow.start} <i>→</i> {analysisWindow.end}</strong>
         </div>
         <p>
-          The uploaded video and telemetry are analyzed without requiring a
-          manually entered event timestamp.
+          VLM analysis is limited to the synchronized ±10 second evidence
+          window around the known timestamp t0.
         </p>
       </section>
       <div className="processing-layout">
@@ -72,7 +85,7 @@ export function ProcessingContent() {
             videoName={videoName}
             videoRef={videoRef}
           />
-          <EvidenceDetails onSeek={seekToTimestamp} />
+          <EvidenceDetails onSeek={seekToTimestamp} eventTimestamp={eventTimestamp} />
         </div>
         <aside className="processing-sidebar">
           <ProcessingPipeline />
@@ -89,6 +102,9 @@ export function ProcessingContent() {
           </section>
           <Link className="back-home" href="/">
             ← Back to Home
+          </Link>
+          <Link className="approve-action processing-review-link" href="/review">
+            Review structured summary →
           </Link>
           <button type="button" className="background-button">
             Run in background

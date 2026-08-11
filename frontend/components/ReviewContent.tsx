@@ -2,8 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import {
+  getAnalysisWindow,
+  INCIDENT_KEYS,
+  secondsToTimestamp,
+  timestampToSeconds,
+} from "../lib/incidentSession";
 
 type Status = "Pending Review" | "Approved" | "Rejected";
+const DEFAULT_EVENT_TIMESTAMP = "00:00:06.800";
 const initialSummary = `Recorded Event\nDisengagement at 00:06.800\n\nObserved Before Event\n• Vehicle moved toward the lane boundary.\n• Relative lateral position changed before disengagement.\n\nVehicle Response\n• Speed decreased from 42 km/h to 27 km/h.\n• Steering angle increased near the event.\n\nEvidence References\n• Visual: Frames F12–F24\n• Telemetry: speed, steering, brake, lateral acceleration\n\nUnknown / Not Established\n• Root cause is not determined.\n• Driver intent is unknown.\n• No conclusion is made about system fault.`;
 const observations = [
   {
@@ -37,33 +45,87 @@ const telemetry = [
 ];
 
 export function ReviewContent() {
+  const router = useRouter();
   const [status, setStatus] = useState<Status>("Pending Review");
   const [editing, setEditing] = useState(false);
-  const [summary, setSummary] = useState(initialSummary);
-  const [draft, setDraft] = useState(initialSummary);
+  const defaultSummary = initialSummary.replace("00:06.800", DEFAULT_EVENT_TIMESTAMP);
+  const [summary, setSummary] = useState(defaultSummary);
+  const [draft, setDraft] = useState(defaultSummary);
   const [dialog, setDialog] = useState<"approve" | "reject" | null>(null);
   const [reason, setReason] = useState("Unsupported observation");
   const [note, setNote] = useState("");
+  const [eventTimestamp, setEventTimestamp] = useState(DEFAULT_EVENT_TIMESTAMP);
+  const [engineerRequest, setEngineerRequest] = useState("");
+  const [revisionCount, setRevisionCount] = useState(0);
+  const [editCount, setEditCount] = useState(0);
+  const [aiReviewing, setAiReviewing] = useState(false);
   const startedAt = useRef<number>(0);
   useEffect(() => {
     startedAt.current = Date.now();
+    const timestamp = sessionStorage.getItem(INCIDENT_KEYS.timestamp);
+    if (timestamp) {
+      setEventTimestamp(timestamp);
+      const nextSummary = initialSummary.replace("00:06.800", timestamp);
+      setSummary(nextSummary);
+      setDraft(nextSummary);
+    }
   }, []);
+  const analysisWindow = getAnalysisWindow(eventTimestamp);
+  const eventSeconds = timestampToSeconds(eventTimestamp);
+  const synchronizedObservations = observations.map((observation, index) => ({
+    ...observation,
+    time: secondsToTimestamp(eventSeconds + [-2.3, -0.8, 0.7][index]),
+  }));
+  const timelineMarkers = [
+    { l: "OBS-01", t: synchronizedObservations[0].time, p: "35%" },
+    { l: "OBS-02", t: synchronizedObservations[1].time, p: "44%" },
+    { l: "EVENT", t: eventTimestamp, p: "50%", event: true },
+    { l: "OBS-03", t: synchronizedObservations[2].time, p: "57%" },
+  ];
+  const requestAIReview = () => {
+    const request = engineerRequest.trim();
+    if (!request) return;
+    setAiReviewing(true);
+    window.setTimeout(() => {
+      const revised = `${summary}\n\nEngineer-requested revision\n• Request: ${request}\n• AI response: Summary revised while retaining only claims linked to the available visual or telemetry evidence.`;
+      setSummary(revised);
+      setDraft(revised);
+      setRevisionCount((count) => count + 1);
+      setEngineerRequest("");
+      setAiReviewing(false);
+      setStatus("Pending Review");
+    }, 650);
+  };
   const finish = (nextStatus: Status) => {
     const completedAt = Date.now();
+    const reviewDurationMs = completedAt - startedAt.current;
     setStatus(nextStatus);
     setDialog(null);
+    const metrics = {
+      incidentId: sessionStorage.getItem(INCIDENT_KEYS.incidentId) ?? "DG-MVP",
+      decision: nextStatus,
+      reviewStartedAt: new Date(startedAt.current).toISOString(),
+      reviewCompletedAt: new Date(completedAt).toISOString(),
+      reviewDurationMs,
+      engineerEditCount: editCount,
+      aiRevisionCycles: revisionCount,
+      observationCount: observations.length,
+      evidenceLinkedCount: observations.filter((item) => item.evidence).length,
+    };
+    sessionStorage.setItem(INCIDENT_KEYS.reviewMetrics, JSON.stringify(metrics));
     console.log({
       reviewStartedAt: new Date(startedAt.current).toISOString(),
       reviewCompletedAt: new Date(completedAt).toISOString(),
-      reviewDurationMs: completedAt - startedAt.current,
-    }); /* TODO: Send review timing to backend for evaluation. TODO: persist audit trail. */
+      reviewDurationMs,
+    });
+    window.setTimeout(() => router.push("/evaluation"), 300);
   };
   return (
     <>
       <section className="review-context">
         <div>
           <p>Recorded Disengagement</p>
-          <strong>00:06.800</strong>
+          <strong>{eventTimestamp}</strong>
           <small>Provided event timestamp</small>
         </div>
         <div>
@@ -75,7 +137,7 @@ export function ReviewContent() {
         <div>
           <p>Analysis window</p>
           <strong>
-            00:00.000 <i>→</i> 00:20.000
+            {analysisWindow.start} <i>→</i> {analysisWindow.end}
           </strong>
         </div>
         <Link href="/processing">← Back to Processing</Link>
@@ -93,7 +155,7 @@ export function ReviewContent() {
             <div className="review-video">
               <div className="video-overlay">
                 <span>FRONT CAMERA</span>
-                <span>00:06.800</span>
+                <span>{eventTimestamp}</span>
               </div>
               <div className="lane-boundary" />
               <button
@@ -106,12 +168,7 @@ export function ReviewContent() {
             </div>
             <div className="review-timeline">
               <div className="review-line">
-                {[
-                  { l: "OBS-01", t: "00:04.500", p: "23%" },
-                  { l: "OBS-02", t: "00:06.000", p: "30%" },
-                  { l: "EVENT", t: "00:06.800", p: "34%", event: true },
-                  { l: "OBS-03", t: "00:07.500", p: "38%" },
-                ].map((item) => (
+                {timelineMarkers.map((item) => (
                   <span
                     className={`review-marker ${item.event ? "event" : ""}`}
                     style={{ left: item.p }}
@@ -124,9 +181,9 @@ export function ReviewContent() {
                 ))}
               </div>
               <div className="review-range">
-                <span>00:00.000</span>
-                <strong>Recorded Disengagement · 00:06.800</strong>
-                <span>00:20.000</span>
+                <span>{analysisWindow.start}</span>
+                <strong>Recorded Disengagement · {eventTimestamp}</strong>
+                <span>{analysisWindow.end}</span>
               </div>
             </div>
           </section>
@@ -136,7 +193,7 @@ export function ReviewContent() {
               <h2>Grounded observations</h2>
             </div>
             <div className="review-observations">
-              {observations.map((obs) => (
+              {synchronizedObservations.map((obs) => (
                 <article key={obs.id}>
                   <div>
                     <strong>{obs.id}</strong>
@@ -229,6 +286,7 @@ export function ReviewContent() {
                   className="approve-action"
                   onClick={() => {
                     setSummary(draft);
+                    setEditCount((count) => count + 1);
                     setEditing(false);
                   }}
                 >
@@ -265,6 +323,30 @@ export function ReviewContent() {
                 </button>
               </div>
             )}
+          </section>
+          <section className="review-card ai-rereview-card">
+            <p className="eyebrow">Engineer-guided AI review</p>
+            <h2>Review again with AI</h2>
+            <p>
+              Add a concrete correction request. This MVP records the revision
+              cycle and updates the structured summary without adding unsupported claims.
+            </p>
+            <label htmlFor="engineer-ai-request">Engineer request</label>
+            <textarea
+              id="engineer-ai-request"
+              value={engineerRequest}
+              onChange={(event) => setEngineerRequest(event.target.value)}
+              placeholder="Example: Re-check braking evidence and remove any unsupported root-cause claim."
+            />
+            <button
+              type="button"
+              className="approve-action"
+              disabled={!engineerRequest.trim() || aiReviewing}
+              onClick={requestAIReview}
+            >
+              {aiReviewing ? "Reviewing…" : "Send request to AI"}
+            </button>
+            <small>{revisionCount} AI revision cycle(s)</small>
           </section>
           <section className="review-card limitations">
             <p className="eyebrow">Evidence limitations</p>

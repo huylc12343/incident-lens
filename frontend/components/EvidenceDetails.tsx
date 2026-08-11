@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Observation, TelemetryPoint } from "../types/analysis";
+import { secondsToTimestamp, timestampToSeconds } from "../lib/incidentSession";
 const observations: Observation[] = [
   {
     id: "OBS-01",
@@ -35,11 +36,16 @@ const telemetry: TelemetryPoint[] = [
   },
   { timestamp: "00:03:46.0", speed: 24, brake: "61%", steering: "2.7°" },
 ];
-type Props = { onSeek: (timestamp: string) => void };
+type Props = { onSeek: (timestamp: string) => void; eventTimestamp: string };
 
-export function EvidenceDetails({ onSeek }: Props) {
+export function EvidenceDetails({ onSeek, eventTimestamp }: Props) {
   const [selected, setSelected] = useState("F12");
   const [selectedObservation, setSelectedObservation] = useState("");
+  const center = timestampToSeconds(eventTimestamp);
+  const synchronizedObservations = observations.map((item, index) => ({
+    ...item,
+    timestamp: secondsToTimestamp(center + [-2.4, -1.1, 0.2][index]),
+  }));
   return (
     <>
       <section className="processing-panel observations-panel">
@@ -49,7 +55,7 @@ export function EvidenceDetails({ onSeek }: Props) {
           <p>Preliminary observations grounded in the current video window.</p>
         </div>
         <div className="observation-list">
-          {observations.map((item) => (
+          {synchronizedObservations.map((item) => (
             <button
               type="button"
               className={`observation ${selectedObservation === item.id ? "selected" : ""}`}
@@ -79,9 +85,9 @@ export function EvidenceDetails({ onSeek }: Props) {
         </div>
         <div className="frame-grid">
           {[
-            { id: "F08", time: "00:03:42.800", observation: "OBS-01" },
-            { id: "F10", time: "00:03:44.100", observation: "OBS-02" },
-            { id: "F12", time: "00:03:45.400", observation: "OBS-03" },
+            { id: "F08", time: synchronizedObservations[0].timestamp, observation: "OBS-01" },
+            { id: "F10", time: synchronizedObservations[1].timestamp, observation: "OBS-02" },
+            { id: "F12", time: synchronizedObservations[2].timestamp, observation: "OBS-03" },
           ].map((frame, index) => (
             <button
               type="button"

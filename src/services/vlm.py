@@ -35,7 +35,7 @@ from src.models.incidents import (
     VLMInputMode,
     VLMProvider,
 )
-from src.services.model_observability import ModelActivityRegistry
+from src.services.model_observability import ModelActivityRegistry, ModelRequestBudgetError
 
 logger = logging.getLogger(__name__)
 StructuredModel = TypeVar("StructuredModel", bound=BaseModel)
@@ -196,6 +196,8 @@ class OpenAIVLMService:
             return result
         except VLMServiceError:
             raise
+        except ModelRequestBudgetError:
+            raise
         except (ValidationError, ValueError, TypeError, json.JSONDecodeError) as exc:
             if activity_id is not None:
                 self._observability.fail(activity_id, "VLM_STRUCTURED_OUTPUT_INVALID", response)
@@ -269,15 +271,16 @@ class QwenNativeVideoVLMService:
         video_fps: float = 2.0,
         enable_thinking: bool = False,
         thinking_budget: int = 500,
-        max_structured_output_retries: int = 2,
+        max_structured_output_retries: int = 0,
+        max_network_retries: int = 0,
         observability: ModelActivityRegistry | None = None,
     ) -> None:
         if not model.strip() or not base_url.strip():
             raise ValueError("model and base_url must not be blank")
         if timeout_s <= 0 or not 0 < video_fps <= 10 or min(thinking_budget, base64_max_video_bytes) <= 0:
             raise ValueError("timeout, video_fps, and thinking_budget must be positive")
-        if max_structured_output_retries < 0:
-            raise ValueError("max_structured_output_retries must be non-negative")
+        if min(max_structured_output_retries, max_network_retries) < 0:
+            raise ValueError("structured output and network retries must be non-negative")
         self._client = client if client is not None else AsyncOpenAI(api_key=api_key, base_url=base_url)
         self._model = model
         self._artifact_dir = Path(artifact_dir).resolve()
@@ -289,6 +292,7 @@ class QwenNativeVideoVLMService:
         self._enable_thinking = enable_thinking
         self._thinking_budget = thinking_budget
         self._max_structured_output_retries = max_structured_output_retries
+        self._max_network_retries = max_network_retries
         self._observability = observability
         self._capabilities = VLMCapabilities(provider=VLMProvider.QWEN, input_mode=VLMInputMode.NATIVE_VIDEO)
 
@@ -347,16 +351,6 @@ class QwenNativeVideoVLMService:
     ) -> StructuredModel:
         activity_id = None
         response = None
-        if self._observability is not None:
-            activity_id = self._observability.start(
-                incident_id=incident_id,
-                step="vlm",
-                operation=operation,
-                description=description,
-                provider="qwen",
-                model=self._model,
-                metadata={"input_mode": "native_video", "video_fps": self._video_fps},
-            )
         try:
             output_schema = json.dumps(
                 output_model.model_json_schema(),
@@ -406,18 +400,54 @@ class QwenNativeVideoVLMService:
                         "thinking_budget": self._thinking_budget,
                         "result_format": "message",
                     }
-                response = await self._client.chat.completions.create(**request_kwargs)
+                for network_attempt in range(self._max_network_retries + 1):
+                    if self._observability is not None:
+                        activity_id = self._observability.start(
+                            incident_id=incident_id,
+                            step="vlm",
+                            operation=operation,
+                            description=description,
+                            provider="qwen",
+                            model=self._model,
+                            metadata={
+                                "input_mode": "native_video",
+                                "video_fps": self._video_fps,
+                                "structured_output_attempt": attempt + 1,
+                                "network_attempt": network_attempt + 1,
+                            },
+                        )
+                    try:
+                        response = await self._client.chat.completions.create(**request_kwargs)
+                        break
+                    except (APITimeoutError, APIConnectionError, RateLimitError):
+                        if activity_id is not None:
+                            self._observability.fail(activity_id, "QWEN_VIDEO_ANALYSIS_RETRYABLE", response)
+                            activity_id = None
+                        if network_attempt >= self._max_network_retries:
+                            raise
                 try:
                     content = response.choices[0].message.content
                     payload = _parse_json_content(content)
                     if not isinstance(payload, dict):
                         raise TypeError("Qwen structured output must be a JSON object")
-                    payload = {**payload, **(model_defaults or {})}
+                    payload = _prepare_qwen_payload(payload, output_model, model_defaults)
                     result = output_model.model_validate(payload)
                     if timestamp_bounds is not None:
                         _validate_qwen_timestamp_bounds(result, *timestamp_bounds)
                     if isinstance(result, VideoMemory):
-                        _validate_qwen_incident_conclusion(result)
+                        try:
+                            _validate_qwen_incident_conclusion(result)
+                        except QwenStructuredOutputValidationError as exc:
+                            if self._max_structured_output_retries > 0:
+                                raise
+                            logger.warning(
+                                "Qwen incident conclusion warning accepted because structured-output retries "
+                                "are disabled: %s",
+                                exc.details,
+                            )
+                    if activity_id is not None:
+                        self._observability.complete(activity_id, response)
+                        activity_id = None
                     break
                 except (ValidationError, ValueError, TypeError, json.JSONDecodeError, IndexError, AttributeError) as exc:
                     validation_details = _structured_output_error_details(exc)
@@ -429,11 +459,14 @@ class QwenNativeVideoVLMService:
                     )
                     if attempt >= self._max_structured_output_retries:
                         raise
+                    if activity_id is not None:
+                        self._observability.fail(activity_id, "VLM_STRUCTURED_OUTPUT_INVALID", response)
+                        activity_id = None
                     validation_feedback = json.dumps(validation_details, ensure_ascii=False, separators=(",", ":"))
-            if activity_id is not None:
-                self._observability.complete(activity_id, response)
             return result
         except VLMServiceError:
+            raise
+        except ModelRequestBudgetError:
             raise
         except (ValidationError, ValueError, TypeError, json.JSONDecodeError, IndexError, AttributeError) as exc:
             if activity_id is not None:
@@ -510,6 +543,26 @@ def _structured_output_error_details(exc: Exception) -> object:
     return str(exc)
 
 
+def _prepare_qwen_payload(
+    payload: dict[str, Any],
+    output_model: type[BaseModel],
+    model_defaults: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Apply backend-owned values before strict Pydantic validation."""
+    prepared = {**payload, **(model_defaults or {})}
+    if output_model not in {VideoMemory, VideoMemoryPatch}:
+        return prepared
+
+    claims = prepared.get("claims")
+    if not isinstance(claims, list):
+        return prepared
+    prepared["claims"] = [
+        {**claim, "verification_status": "unverified"} if isinstance(claim, dict) else claim
+        for claim in claims
+    ]
+    return prepared
+
+
 def _validate_qwen_timestamp_bounds(result: BaseModel, minimum_s: float, maximum_s: float) -> None:
     timestamps: list[tuple[str, float | None]] = []
     if isinstance(result, VideoMemory):
@@ -551,6 +604,21 @@ def _validate_qwen_timestamp_bounds(result: BaseModel, minimum_s: float, maximum
                     "location": "representative_timestamp_s",
                     "type": "timestamp_outside_incident_window",
                     "message": "Representative timestamp must be inside incident_window",
+                }
+            )
+    if isinstance(result, VideoMemory):
+        window = result.incident_window
+        semantic_timestamps = [
+            *(item.timestamp_s for item in result.timeline),
+            *(item.timestamp_s for item in result.claims if item.timestamp_s is not None),
+            *(evidence.timestamp_s for claim in result.claims for evidence in claim.evidence),
+        ]
+        if any(timestamp < window.t_start or timestamp > window.t_end for timestamp in semantic_timestamps):
+            errors.append(
+                {
+                    "location": "timeline/claims/evidence.timestamp_s",
+                    "type": "timestamp_outside_incident_window",
+                    "message": "All semantic timestamps must be inside incident_window",
                 }
             )
     if errors:

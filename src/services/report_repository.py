@@ -10,6 +10,7 @@ from typing import Protocol
 
 from src.models.api import ModelActivity, ReviewAuditEntry, StoredReport
 from src.models.incidents import Claim, DraftReport
+from src.services.async_worker import AsyncWorker
 
 
 class ReportRepositoryError(RuntimeError):
@@ -50,12 +51,29 @@ class InMemoryReportRepository:
 
 
 class SQLiteReportRepository:
-    def __init__(self, database_path: str) -> None:
+    def __init__(self, database_path: str, *, initialize: bool = True) -> None:
         if not database_path.strip():
             raise ValueError("database_path must not be blank")
         self._database_path = Path(database_path).resolve()
         self._database_path.parent.mkdir(parents=True, exist_ok=True)
-        self._initialize()
+        self._async_worker = AsyncWorker(name=f"report-sqlite-{self._database_path.name}")
+        if initialize:
+            self._initialize()
+
+    async def ainitialize(self) -> None:
+        await self._async_worker.call(self._initialize)
+
+    async def astore(self, report: StoredReport) -> StoredReport:
+        return await self._async_worker.call(self.store, report)
+
+    async def aget(self, incident_id: str) -> StoredReport | None:
+        return await self._async_worker.call(self.get, incident_id)
+
+    async def alist_reports(self) -> list[StoredReport]:
+        return await self._async_worker.call(self.list_reports)
+
+    async def adelete(self, incident_id: str) -> bool:
+        return await self._async_worker.call(self.delete, incident_id)
 
     def store(self, report: StoredReport) -> StoredReport:
         stored = report.model_copy(update={"stored_at": report.stored_at or datetime.now(UTC)})
@@ -143,38 +161,9 @@ class SQLiteReportRepository:
     def _initialize(self) -> None:
         try:
             with self._connect() as connection:
-                connection.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS incident_reports (
-                        incident_id TEXT PRIMARY KEY,
-                        status TEXT NOT NULL,
-                        final_report_json TEXT,
-                        evidence_json TEXT NOT NULL,
-                        reviewer TEXT NOT NULL,
-                        decision TEXT NOT NULL,
-                        reason TEXT,
-                        stored_at TEXT NOT NULL,
-                        has_log INTEGER NOT NULL DEFAULT 0,
-                        artifact_json TEXT NOT NULL DEFAULT '{}',
-                        claims_json TEXT NOT NULL DEFAULT '[]',
-                        warnings_json TEXT NOT NULL DEFAULT '[]',
-                        audit_json TEXT NOT NULL DEFAULT '[]',
-                        model_activities_json TEXT NOT NULL DEFAULT '[]'
-                    )
-                    """
-                )
+                connection.execute(_CREATE_TABLE_SQL)
                 columns = {row[1] for row in connection.execute("PRAGMA table_info(incident_reports)")}
-                migrations = {
-                    "has_log": "ALTER TABLE incident_reports ADD COLUMN has_log INTEGER NOT NULL DEFAULT 0",
-                    "artifact_json": "ALTER TABLE incident_reports ADD COLUMN artifact_json TEXT NOT NULL DEFAULT '{}'",
-                    "claims_json": "ALTER TABLE incident_reports ADD COLUMN claims_json TEXT NOT NULL DEFAULT '[]'",
-                    "warnings_json": "ALTER TABLE incident_reports ADD COLUMN warnings_json TEXT NOT NULL DEFAULT '[]'",
-                    "audit_json": "ALTER TABLE incident_reports ADD COLUMN audit_json TEXT NOT NULL DEFAULT '[]'",
-                    "model_activities_json": (
-                        "ALTER TABLE incident_reports ADD COLUMN model_activities_json TEXT NOT NULL DEFAULT '[]'"
-                    ),
-                }
-                for column, statement in migrations.items():
+                for column, statement in _MIGRATIONS.items():
                     if column not in columns:
                         connection.execute(statement)
         except sqlite3.Error as exc:
@@ -188,6 +177,24 @@ def _json_list(values: list[str]) -> str:
     return json.dumps(values, separators=(",", ":"))
 
 
+_CREATE_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS incident_reports (
+    incident_id TEXT PRIMARY KEY, status TEXT NOT NULL, final_report_json TEXT,
+    evidence_json TEXT NOT NULL, reviewer TEXT NOT NULL, decision TEXT NOT NULL,
+    reason TEXT, stored_at TEXT NOT NULL, has_log INTEGER NOT NULL DEFAULT 0,
+    artifact_json TEXT NOT NULL DEFAULT '{}', claims_json TEXT NOT NULL DEFAULT '[]',
+    warnings_json TEXT NOT NULL DEFAULT '[]', audit_json TEXT NOT NULL DEFAULT '[]',
+    model_activities_json TEXT NOT NULL DEFAULT '[]'
+)
+"""
+_MIGRATIONS = {
+    "has_log": "ALTER TABLE incident_reports ADD COLUMN has_log INTEGER NOT NULL DEFAULT 0",
+    "artifact_json": "ALTER TABLE incident_reports ADD COLUMN artifact_json TEXT NOT NULL DEFAULT '{}'",
+    "claims_json": "ALTER TABLE incident_reports ADD COLUMN claims_json TEXT NOT NULL DEFAULT '[]'",
+    "warnings_json": "ALTER TABLE incident_reports ADD COLUMN warnings_json TEXT NOT NULL DEFAULT '[]'",
+    "audit_json": "ALTER TABLE incident_reports ADD COLUMN audit_json TEXT NOT NULL DEFAULT '[]'",
+    "model_activities_json": "ALTER TABLE incident_reports ADD COLUMN model_activities_json TEXT NOT NULL DEFAULT '[]'",
+}
 def _stored_report_from_row(row: tuple[object, ...]) -> StoredReport:
     return StoredReport(
         incident_id=str(row[0]),

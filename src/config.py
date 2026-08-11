@@ -42,7 +42,9 @@ class Settings(BaseSettings):
     qwen_enable_thinking: bool = False
     qwen_thinking_budget: int = Field(default=500, gt=0)
     vlm_timeout_s: float = Field(default=120.0, gt=0)
-    vlm_max_retries: int = Field(default=2, ge=0)
+    vlm_structured_output_retries: int = Field(default=0, ge=0)
+    provider_network_retries: int = Field(default=0, ge=0)
+    provider_request_limit_per_incident: int = Field(default=12, gt=0)
     vlm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
 
     # Native video preprocessing
@@ -96,12 +98,16 @@ class Settings(BaseSettings):
     incident_clip_pre_roll_s: float = Field(default=1.0, ge=0)
     incident_clip_post_roll_s: float = Field(default=2.0, ge=0)
     log_timestamp_tolerance_s: float = Field(default=0.5, ge=0)
+    log_claim_sample_radius: int = Field(default=3, ge=0)
     log_brake_rise_threshold: float = Field(default=0.3, ge=0)
     log_steering_change_threshold: float = Field(default=10.0, ge=0)
     artifact_dir: str = "./data/artifacts"
     incident_database_path: str = "./data/incident_reports.sqlite3"
     incident_checkpoint_path: str = "./data/incident_checkpoints.sqlite3"
     background_concurrency: int = Field(default=2, gt=0)
+    incident_artifact_retention_hours: float = Field(default=168, gt=0)
+    model_activity_retention_hours: float = Field(default=168, gt=0)
+    model_activity_max_per_incident: int = Field(default=100, gt=0)
 
     # Database
     database_url: str = "sqlite:///./data/app.db"

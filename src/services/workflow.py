@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import re
+import shutil
+from collections.abc import Awaitable, Callable
 from datetime import datetime
+from pathlib import Path
 from typing import Protocol, cast
 
 from src.agents.incident_state import IncidentState
@@ -49,11 +53,17 @@ class WorkflowService:
         repository: ReportRepository,
         input_validator: IncidentInputValidator | None = None,
         observability: ModelActivityRegistry | None = None,
+        artifact_dir: str | None = None,
+        upload_dir: str | None = None,
+        remote_resource_releaser: Callable[[list], Awaitable[None]] | None = None,
     ) -> None:
         self._runner = runner
         self._repository = repository
         self._input_validator = input_validator
         self._observability = observability
+        self._artifact_root = Path(artifact_dir).resolve() if artifact_dir else None
+        self._upload_root = Path(upload_dir).resolve() if upload_dir else None
+        self._remote_resource_releaser = remote_resource_releaser
         self._states: dict[str, IncidentState] = {}
         self._review_locks: dict[str, asyncio.Lock] = {}
         self._audit: dict[str, list[ReviewAuditEntry]] = {}
@@ -84,7 +94,7 @@ class WorkflowService:
             if (
                 incident_id in self._states
                 or checkpoint_state is not None
-                or self._repository.get(incident_id) is not None
+                or await _repository_call(self._repository, "aget", "get", incident_id) is not None
             ):
                 raise WorkflowError("INCIDENT_ALREADY_EXISTS", "incident ID already exists")
             self._states[incident_id] = initial
@@ -120,34 +130,67 @@ class WorkflowService:
                 await self._register_recovered_state(incident_id, state)
         if state is not None:
             return self._snapshot(state)
-        stored = self._repository.get(incident_id)
+        stored = await _repository_call(self._repository, "aget", "get", incident_id)
         if stored is None:
             raise WorkflowError("INCIDENT_NOT_FOUND", "incident does not exist")
         return _stored_snapshot(stored)
 
     async def list_reports(self) -> list[StoredReport]:
-        return self._repository.list_reports()
+        return await _repository_call(self._repository, "alist_reports", "list_reports")
 
     async def list_incident_ids(self) -> list[str]:
         checkpoint_ids = await self._runner.list_incident_ids()
-        report_ids = [report.incident_id for report in self._repository.list_reports()]
+        reports = await _repository_call(self._repository, "alist_reports", "list_reports")
+        report_ids = [report.incident_id for report in reports]
         return list(dict.fromkeys([*checkpoint_ids, *report_ids]))
 
+    async def ready(self) -> None:
+        await self._runner.list_incident_ids()
+        await _repository_call(self._repository, "alist_reports", "list_reports")
+
     async def delete(self, incident_id: str) -> None:
-        state = self._states.get(incident_id) or await self._checkpoint_state(incident_id)
-        stored = self._repository.get(incident_id)
-        if state is None and stored is None:
-            raise WorkflowError("INCIDENT_NOT_FOUND", "incident does not exist")
-        if state is not None and state.get("status") in {"queued", "running"}:
-            raise WorkflowError("INCIDENT_DELETE_ACTIVE", "running incident cannot be deleted")
-        await self._runner.delete(incident_id)
-        self._repository.delete(incident_id)
         async with self._registry_lock:
-            self._states.pop(incident_id, None)
-            self._review_locks.pop(incident_id, None)
-            self._audit.pop(incident_id, None)
-            self._stored_at.pop(incident_id, None)
-            self._pending_terminal.pop(incident_id, None)
+            lock = self._review_locks.setdefault(incident_id, asyncio.Lock())
+        async with lock:
+            state = self._states.get(incident_id) or await self._checkpoint_state(incident_id)
+            stored = await _repository_call(self._repository, "aget", "get", incident_id)
+            if state is None and stored is None:
+                raise WorkflowError("INCIDENT_NOT_FOUND", "incident does not exist")
+            if state is not None and state.get("status") in {"queued", "running"}:
+                raise WorkflowError("INCIDENT_DELETE_ACTIVE", "running incident cannot be deleted")
+            await self._cleanup_incident_resources(incident_id, state)
+            await self._runner.delete(incident_id)
+            await _repository_call(self._repository, "adelete", "delete", incident_id)
+            async with self._registry_lock:
+                self._states.pop(incident_id, None)
+                self._review_locks.pop(incident_id, None)
+                self._audit.pop(incident_id, None)
+                self._stored_at.pop(incident_id, None)
+                self._pending_terminal.pop(incident_id, None)
+            if self._observability is not None:
+                self._observability.delete(incident_id)
+
+    async def _cleanup_incident_resources(self, incident_id: str, state: IncidentState | None) -> None:
+        if state is not None and self._remote_resource_releaser is not None:
+            handles = state.get("remote_media_handles", [])
+            if handles:
+                try:
+                    await self._remote_resource_releaser(handles)
+                except Exception:
+                    pass
+        targets: list[Path] = []
+        if self._artifact_root is not None:
+            safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", incident_id)
+            targets.append(self._artifact_root / safe_id)
+        if state is not None and self._upload_root is not None:
+            for value in (state.get("video_uri"), state.get("log_uri")):
+                if not value:
+                    continue
+                path = Path(value).resolve()
+                if path.is_relative_to(self._upload_root):
+                    targets.append(path)
+        for target in targets:
+            _delete_scoped_path(target)
 
     async def review(self, incident_id: str, decision: ReviewDecision) -> IncidentSnapshot:
         lock = self._review_locks.get(incident_id)
@@ -157,7 +200,7 @@ class WorkflowService:
                 await self._register_recovered_state(incident_id, recovered)
                 lock = self._review_locks[incident_id]
         if lock is None:
-            if self._repository.get(incident_id) is not None:
+            if await _repository_call(self._repository, "aget", "get", incident_id) is not None:
                 raise WorkflowError("INVALID_REVIEW_TRANSITION", "incident is already terminal")
             raise WorkflowError("INCIDENT_NOT_FOUND", "incident does not exist")
         async with lock:
@@ -169,7 +212,7 @@ class WorkflowService:
                 pending_state, pending_decision = pending
                 if decision != pending_decision:
                     raise WorkflowError("INVALID_REVIEW_TRANSITION", "a terminal decision is pending storage")
-                stored = self._store_terminal(pending_state, decision)
+                stored = await self._store_terminal(pending_state, decision)
                 self._commit_review(incident_id, pending_state, decision, stored.stored_at)
                 self._pending_terminal.pop(incident_id, None)
                 return self._snapshot(pending_state)
@@ -193,7 +236,7 @@ class WorkflowService:
                 raise WorkflowError("WORKFLOW_OUTPUT_INVALID", "incident workflow returned invalid state") from exc
             if updated.get("status") in {"approved", "not_incident"}:
                 try:
-                    stored = self._store_terminal(updated, decision)
+                    stored = await self._store_terminal(updated, decision)
                 except WorkflowError:
                     self._pending_terminal[incident_id] = (updated, decision)
                     raise
@@ -234,7 +277,7 @@ class WorkflowService:
         getter = getattr(self._runner, "get", None)
         return await getter(incident_id) if getter is not None else None
 
-    def _store_terminal(self, state: IncidentState, decision: ReviewDecision) -> StoredReport:
+    async def _store_terminal(self, state: IncidentState, decision: ReviewDecision) -> StoredReport:
         status = state.get("status")
         evidence_ids = []
         memory = state.get("video_memory")
@@ -252,8 +295,7 @@ class WorkflowService:
         if report is not None:
             evidence_ids.extend(report.evidence_ids)
         try:
-            return self._repository.store(
-                StoredReport(
+            report_to_store = StoredReport(
                     incident_id=state["incident_id"],
                     status=cast(str, status),
                     has_log=bool(state.get("log_uri")),
@@ -268,7 +310,7 @@ class WorkflowService:
                     decision=cast(str, decision.action),
                     reason=decision.reason,
                 )
-            )
+            return await _repository_call(self._repository, "astore", "store", report_to_store)
         except (ReportRepositoryError, ValueError) as exc:
             raise WorkflowError(
                 getattr(exc, "code", "REPORT_STORAGE_INVALID"),
@@ -353,7 +395,32 @@ def _safe_processing_error(code: str | None) -> str:
             "Kiểm tra OPENAI_VLM_MODEL_NAME và cấu hình VLM."
         ),
         "VERIFICATION_STRUCTURED_OUTPUT_INVALID": "OpenAI trả kết quả verification không đúng schema.",
+        "VLM_STRUCTURED_OUTPUT_INVALID": (
+            "VLM trả dữ liệu không đúng schema. Request không được tự động gọi lại khi retry được cấu hình bằng 0."
+        ),
+        "VLM_TIMESTAMP_OUTSIDE_INCIDENT_WINDOW": (
+            "VLM trả timeline, claim hoặc evidence nằm ngoài incident window; backend đã từ chối kết quả này."
+        ),
+        "VLM_NATIVE_EVIDENCE_MAPPING_FAILED": (
+            "Không tìm thấy sampled frame đủ gần timestamp của claim/evidence native-video."
+        ),
         "VLM_EVIDENCE_REFERENCE_INVALID": (
             "VLM trả evidence_id không tồn tại trong các frame đã phân tích. Hãy chạy lại bằng incident ID mới."
         ),
     }.get(code, "incident processing failed")
+
+
+def _delete_scoped_path(path: Path) -> None:
+    if path.is_symlink():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+    elif path.is_file():
+        path.unlink()
+
+
+async def _repository_call(repository: ReportRepository, async_name: str, sync_name: str, *args):
+    async_method = getattr(repository, async_name, None)
+    if async_method is not None:
+        return await async_method(*args)
+    return getattr(repository, sync_name)(*args)

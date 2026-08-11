@@ -1,7 +1,7 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.routes import router
@@ -64,4 +64,27 @@ app.include_router(router, prefix="/api/v1")
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "env": settings.app_env}
+    return {"status": "live", "env": settings.app_env}
+
+
+@app.get("/live")
+async def live():
+    return {"status": "live", "env": settings.app_env}
+
+
+@app.get("/ready")
+async def ready():
+    service = getattr(app.state, "incident_workflow_service", None)
+    if service is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "WORKFLOW_NOT_READY", "message": "workflow initialization is incomplete"},
+        )
+    try:
+        await service.ready()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "WORKFLOW_NOT_READY", "message": "workflow dependency check failed"},
+        ) from exc
+    return {"status": "ready", "env": settings.app_env}

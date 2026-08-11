@@ -15,6 +15,7 @@ from src.models.incidents import (
     VideoMemory,
 )
 from src.services.incident_runtime import ProviderClients, _build_vlm
+from src.services.model_observability import ModelActivityRegistry, ModelRequestBudgetError
 from src.services.vlm import QwenNativeVideoVLMService, VLMServiceError
 
 
@@ -115,10 +116,12 @@ async def test_qwen_retries_invalid_structured_output_with_validation_feedback()
     client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(side_effect=responses)))
     )
+    observability = ModelActivityRegistry()
     service = QwenNativeVideoVLMService(
         model="qwen3-vl-flash",
         client=client,
         max_structured_output_retries=1,
+        observability=observability,
     )
     request = NativeVideoAnalysisRequest(
         incident_id="INC-QWEN-RETRY",
@@ -134,6 +137,9 @@ async def test_qwen_retries_invalid_structured_output_with_validation_feedback()
     retry_prompt = client.chat.completions.create.await_args_list[1].kwargs["messages"][0]["content"][1]["text"]
     assert "incident_window.t_end" in retry_prompt
     assert "greater_than" in retry_prompt
+    activities = observability.list("INC-QWEN-RETRY")
+    assert [item.metadata["structured_output_attempt"] for item in activities] == [1, 2]
+    assert [item.status for item in activities] == ["failed", "completed"]
 
 
 @pytest.mark.asyncio
@@ -165,6 +171,168 @@ async def test_qwen_reports_invalid_output_after_retry_budget_is_exhausted() -> 
 
     assert exc_info.value.code == "VLM_STRUCTURED_OUTPUT_INVALID"
     assert client.chat.completions.create.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_qwen_default_makes_only_one_request_for_invalid_structured_output() -> None:
+    invalid = {"global_scene": "Đường giao thông.", "incident_window": {"t_start": 0, "t0": 0, "t_end": 0}}
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(invalid)))],
+    )
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=response)))
+    )
+    service = QwenNativeVideoVLMService(model="qwen3-vl-flash", client=client)
+    request = NativeVideoAnalysisRequest(
+        incident_id="INC-QWEN-SINGLE-ATTEMPT",
+        prompt=PromptEnvelope(text="Phân tích video."),
+        normalized_video_uri="https://cdn.example.test/artifacts/video.mp4",
+        metadata=NativeVideoMetadata(duration_s=2, width=1280, height=720, fps=15, size_bytes=100),
+    )
+
+    with pytest.raises(VLMServiceError) as exc_info:
+        await service.analyze_video(request)
+
+    assert exc_info.value.code == "VLM_STRUCTURED_OUTPUT_INVALID"
+    assert client.chat.completions.create.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model_status", ["supported", "verified_by_video"])
+async def test_qwen_forces_video_claims_to_unverified_before_schema_validation(model_status: str) -> None:
+    payload = {
+        "global_scene": "Đường giao thông.",
+        "incident_window": {"t_start": 0, "t0": 1, "t_end": 2},
+        "claims": [
+            {
+                "claim_id": "claim-01",
+                "text": "Xe ego dừng lại.",
+                "timestamp_s": 1,
+                "evidence": [],
+                "verification_status": model_status,
+            }
+        ],
+    }
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
+    )
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=response)))
+    )
+    service = QwenNativeVideoVLMService(model="qwen3-vl-flash", client=client)
+    request = NativeVideoAnalysisRequest(
+        incident_id="INC-QWEN-UNVERIFIED",
+        prompt=PromptEnvelope(text="Phân tích video."),
+        normalized_video_uri="https://cdn.example.test/artifacts/video.mp4",
+        metadata=NativeVideoMetadata(duration_s=2, width=1280, height=720, fps=15, size_bytes=100),
+    )
+
+    result = await service.analyze_video(request)
+
+    assert result.claims[0].verification_status.value == "unverified"
+    assert client.chat.completions.create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_qwen_forces_reanalysis_claims_to_unverified_before_schema_validation() -> None:
+    memory = VideoMemory(
+        global_scene="Đường giao thông.",
+        incident_window=IncidentWindow(t_start=0, t0=1, t_end=2),
+        revision=3,
+        analysis_mode=AnalysisMode.NATIVE_VIDEO,
+    )
+    payload = {
+        "claims": [
+            {
+                "claim_id": "claim-01",
+                "text": "Xe ego dừng lại.",
+                "timestamp_s": 1,
+                "evidence": [],
+                "verification_status": "verified_by_video",
+            }
+        ]
+    }
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
+    )
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=response)))
+    )
+    service = QwenNativeVideoVLMService(model="qwen3-vl-flash", client=client)
+    request = ReanalysisRequest(
+        incident_id="INC-QWEN-REANALYSIS-UNVERIFIED",
+        prompt=PromptEnvelope(text="Phân tích lại claim."),
+        target_claim_ids=["claim-01"],
+        incident_window=memory.incident_window,
+        current_memory=memory,
+        normalized_video_uri="https://cdn.example.test/artifacts/video.mp4",
+    )
+
+    result = await service.reanalyze_claims(request)
+
+    assert result.claims[0].verification_status.value == "unverified"
+    assert client.chat.completions.create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_qwen_rejects_timeline_outside_its_incident_window_in_one_request() -> None:
+    payload = {
+        "global_scene": "Đường giao thông.",
+        "incident_window": {"t_start": 1, "t0": 1.5, "t_end": 2},
+        "timeline": [{"timestamp_s": 0.5, "description": "Ngoài cửa sổ", "evidence_ids": []}],
+    }
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
+    )
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=response)))
+    )
+    service = QwenNativeVideoVLMService(model="qwen3-vl-flash", client=client)
+    request = NativeVideoAnalysisRequest(
+        incident_id="INC-QWEN-WINDOW",
+        prompt=PromptEnvelope(text="Phân tích video."),
+        normalized_video_uri="https://cdn.example.test/artifacts/video.mp4",
+        metadata=NativeVideoMetadata(duration_s=3, width=1280, height=720, fps=15, size_bytes=100),
+    )
+
+    with pytest.raises(VLMServiceError) as exc_info:
+        await service.analyze_video(request)
+
+    assert exc_info.value.code == "VLM_STRUCTURED_OUTPUT_INVALID"
+    assert client.chat.completions.create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_qwen_structured_retry_cannot_exceed_incident_request_budget() -> None:
+    invalid = {"global_scene": "Đường giao thông.", "incident_window": {"t_start": 0, "t0": 0, "t_end": 0}}
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(invalid)))],
+    )
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=response)))
+    )
+    observability = ModelActivityRegistry(
+        max_provider_requests_per_incident=1,
+        max_activities_per_incident=1,
+    )
+    service = QwenNativeVideoVLMService(
+        model="qwen3-vl-flash",
+        client=client,
+        max_structured_output_retries=1,
+        observability=observability,
+    )
+    request = NativeVideoAnalysisRequest(
+        incident_id="INC-QWEN-BUDGET",
+        prompt=PromptEnvelope(text="Phân tích video."),
+        normalized_video_uri="https://cdn.example.test/artifacts/video.mp4",
+        metadata=NativeVideoMetadata(duration_s=2, width=1280, height=720, fps=15, size_bytes=100),
+    )
+
+    with pytest.raises(ModelRequestBudgetError) as exc_info:
+        await service.analyze_video(request)
+
+    assert exc_info.value.code == "PROVIDER_REQUEST_BUDGET_EXCEEDED"
+    assert client.chat.completions.create.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -246,6 +414,42 @@ async def test_qwen_retries_ambiguous_collision_conclusion() -> None:
     retry_prompt = client.chat.completions.create.await_args_list[1].kwargs["messages"][0]["content"][1]["text"]
     assert "ambiguous_incident_conclusion" in retry_prompt
     assert "không dùng ngôn ngữ phỏng đoán" in retry_prompt
+
+
+@pytest.mark.asyncio
+async def test_qwen_accepts_valid_schema_with_ambiguous_conclusion_when_retries_are_disabled() -> None:
+    payload = {
+        "global_scene": "Đường đô thị.",
+        "video_summary": "Xe dừng trước bụi cây, cho thấy khả năng va chạm.",
+        "incident_window": {"t_start": 1, "t0": 2, "t_end": 3},
+    }
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
+    )
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=response)))
+    )
+    observability = ModelActivityRegistry()
+    service = QwenNativeVideoVLMService(
+        model="qwen3-vl-flash",
+        client=client,
+        max_structured_output_retries=0,
+        observability=observability,
+    )
+    request = NativeVideoAnalysisRequest(
+        incident_id="INC-QWEN-AMBIGUOUS-SINGLE-ATTEMPT",
+        prompt=PromptEnvelope(text="Xác định tai nạn."),
+        normalized_video_uri="https://cdn.example.test/artifacts/video.mp4",
+        metadata=NativeVideoMetadata(duration_s=3, width=1280, height=720, fps=15, size_bytes=100),
+    )
+
+    result = await service.analyze_video(request)
+
+    assert result.video_summary == payload["video_summary"]
+    assert client.chat.completions.create.await_count == 1
+    activities = observability.list("INC-QWEN-AMBIGUOUS-SINGLE-ATTEMPT")
+    assert len(activities) == 1
+    assert activities[0].status == "completed"
 
 
 @pytest.mark.asyncio

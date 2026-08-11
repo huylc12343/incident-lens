@@ -52,6 +52,23 @@ def test_claim_log_summary_uses_three_samples_each_side_and_precomputes_metrics(
     assert "Steer chuẩn hóa" in summary.summary
 
 
+def test_claim_log_summary_uses_configured_sample_radius(tmp_path) -> None:
+    log = tmp_path / "vehicle.csv"
+    _write_log(log)
+
+    summary = build_claim_log_summaries(
+        str(log),
+        [Claim(claim_id="claim-1", text="Xe phanh", timestamp_s=0.21)],
+        timestamp_tolerance_s=0.011,
+        sample_radius=1,
+    )[0]
+
+    assert summary.sample_count == 3
+    assert summary.sample_start_s == 0.15
+    assert summary.sample_end_s == 0.25
+    assert "dùng 3 mẫu trong [0.15, 0.25]s" in summary.summary
+
+
 def test_claim_log_summary_withholds_evidence_outside_timestamp_tolerance(tmp_path) -> None:
     log = tmp_path / "vehicle.csv"
     _write_log(log)

@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 
-from src.services.model_observability import ModelActivityRegistry, extract_token_usage
+import pytest
+
+from src.services.model_observability import ModelActivityRegistry, ModelRequestBudgetError, extract_token_usage
 
 
 def test_extracts_openai_responses_usage() -> None:
@@ -69,3 +71,22 @@ def test_registry_tracks_activity_per_incident() -> None:
     assert activity.usage is not None
     assert activity.usage.total_tokens == 12
     assert activity.duration_ms is not None
+
+
+def test_registry_enforces_hard_provider_request_budget() -> None:
+    registry = ModelActivityRegistry(max_provider_requests_per_incident=2)
+    kwargs = {
+        "incident_id": "INC-BUDGET",
+        "step": "vlm",
+        "operation": "video_analysis",
+        "description": "Provider attempt.",
+        "provider": "qwen",
+        "model": "qwen-test",
+    }
+    registry.start(**kwargs, metadata={"attempt": 1})
+    registry.start(**kwargs, metadata={"attempt": 2})
+
+    with pytest.raises(ModelRequestBudgetError) as exc_info:
+        registry.start(**kwargs, metadata={"attempt": 3})
+
+    assert exc_info.value.code == "PROVIDER_REQUEST_BUDGET_EXCEEDED"

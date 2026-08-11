@@ -27,27 +27,27 @@ def test_video_analysis_prompt_selects_mode_instruction(
 
     assert expected_instruction in prompt.text
     assert "t_start <= t0 <= t_end" in prompt.text
-    assert "toàn bộ chuỗi theo thứ tự thời gian" in prompt.text
+    assert "[incident_window.t_start, incident_window.t_end]" in prompt.text
+    assert "Không dùng timestamp pre-roll hoặc post-roll" in prompt.text
+    assert "toàn bộ chuỗi theo đúng thứ tự thời gian" in prompt.text
     assert "camera trước gắn cứng trên xe ego" in prompt.text
     assert "Camera không phải người quan sát tự di chuyển" in prompt.text
     assert "Không viết 'camera tiến'" in prompt.text
     assert "bụi cây" in prompt.text
     assert "trước–tại–sau" in prompt.text
     assert "không chỉ từ một frame tĩnh" in prompt.text
-    assert "không được kết luận 'không có tai nạn'" in prompt.text
-    assert "phải phân loại đây là va chạm của xe ego" in prompt.text
-    assert "không dùng các cách nói giảm mức chắc chắn" in prompt.text
-    assert "tai nạn đơn phương" in prompt.text
-    assert "không đặt t0 ở cảnh xe đã nằm yên sau va chạm" in prompt.text
+    assert "không hạ mức chắc chắn" in prompt.text
+    assert "không đặt t0 tại cảnh xe đã nằm yên sau sự cố" in prompt.text
     assert "không được ghi đè giả định camera trước" in prompt.text
     assert "kết cục cuối cùng nhìn thấy được" in prompt.text
-    assert "Tạo claim riêng có bằng chứng" in prompt.text
-    assert "video_summary thành một bản tóm tắt mạch lạc" in prompt.text
+    assert "Tạo claim cho từng giai đoạn quan trọng" in prompt.text
+    assert "video_summary thành một bản phân tích hình ảnh mạch lạc" in prompt.text
     assert "representative_timestamp_s" in prompt.text
-    assert "không chọn cảnh dưới nước" in prompt.text
+    assert "không chọn cảnh hậu quả xa sự kiện chính" in prompt.text
     assert "phải có đúng một object" in prompt.text
     assert "nội dung mô tả do bạn sinh ra phải bằng tiếng Việt" in prompt.text
     assert "VideoMemory" in prompt.text
+    assert 'verification_status="unverified"' in prompt.text
     assert "suy luận ẩn" in prompt.text
     assert prompt.source == PromptSource.SYSTEM
     assert prompt.version == "video-v2"

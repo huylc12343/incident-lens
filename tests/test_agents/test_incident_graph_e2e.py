@@ -14,7 +14,7 @@ from src.models.incidents import (
     Claim,
     ClaimVerification,
     IncidentWindow,
-    ReportNarrative,
+    ReportModelOutput,
     VerificationResult,
     VerificationStatus,
     VideoMemory,
@@ -28,13 +28,10 @@ def _client(*responses: object) -> SimpleNamespace:
     return SimpleNamespace(responses=SimpleNamespace(parse=AsyncMock(side_effect=responses)))
 
 
-def _narrative(label: str = "Initial") -> ReportNarrative:
-    return ReportNarrative(
-        summary=f"{label} summary",
+def _narrative(label: str = "Initial") -> ReportModelOutput:
+    return ReportModelOutput(
         timeline=f"{label} timeline",
         video_observations=f"{label} observations",
-        log_findings=f"{label} log findings",
-        alignment=f"{label} alignment",
         hypothesized_causes=f"{label} hypothesis",
     )
 

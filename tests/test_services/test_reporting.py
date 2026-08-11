@@ -8,7 +8,7 @@ from src.models.incidents import (
     Claim,
     EvidenceReference,
     IncidentWindow,
-    ReportNarrative,
+    ReportModelOutput,
     ReportRequest,
     VideoMemory,
 )
@@ -21,13 +21,12 @@ def _request() -> ReportRequest:
         video_memory=VideoMemory(
             global_scene="Road scene",
             incident_window=IncidentWindow(t_start=1, t0=2, t_end=3),
-            claims=[Claim(claim_id="claim-1", text="Vehicle brakes", evidence_ids=["frame-1"])],
-            evidence=[
-                EvidenceReference(
-                    evidence_id="frame-1",
-                    kind="frame",
-                    artifact_uri="private://frame.jpg",
+            claims=[
+                Claim(
+                    claim_id="claim-1",
+                    text="Vehicle brakes",
                     timestamp_s=2,
+                    evidence=[EvidenceReference(evidence_id="frame-1", timestamp_s=2)],
                 )
             ],
             analysis_mode=AnalysisMode.SINGLE_REQUEST,
@@ -35,15 +34,11 @@ def _request() -> ReportRequest:
     )
 
 
-def _narrative(evidence_ids: list[str] | None = None) -> ReportNarrative:
-    return ReportNarrative(
-        summary="A vehicle event occurred.",
+def _narrative() -> ReportModelOutput:
+    return ReportModelOutput(
         timeline="The event occurred near 2 seconds.",
         video_observations="The vehicle appears to brake.",
-        log_findings="No log data was supplied.",
-        alignment="The claim is unverified.",
         hypothesized_causes="A possible cause remains unconfirmed.",
-        evidence_ids=evidence_ids or ["frame-1"],
     )
 
 
@@ -58,19 +53,21 @@ async def test_openai_report_uses_one_structured_output_call() -> None:
 
     assert result == _narrative()
     client.responses.parse.assert_awaited_once()
-    assert client.responses.parse.await_args.kwargs["text_format"] is ReportNarrative
+    assert client.responses.parse.await_args.kwargs["text_format"] is ReportModelOutput
 
 
 @pytest.mark.asyncio
-async def test_report_rejects_invented_evidence_id() -> None:
+async def test_report_rejects_backend_owned_fields() -> None:
+    payload = _narrative().model_dump()
+    payload["summary"] = "Model must not own this field"
     client = SimpleNamespace(
-        responses=SimpleNamespace(parse=AsyncMock(return_value=SimpleNamespace(output_parsed=_narrative(["invented"]))))
+        responses=SimpleNamespace(parse=AsyncMock(return_value=SimpleNamespace(output_parsed=payload)))
     )
 
     with pytest.raises(ReportServiceError) as exc_info:
         await OpenAIReportService(model="gpt-test", client=client).build_narrative(_request())
 
-    assert exc_info.value.code == "REPORT_EVIDENCE_INVALID"
+    assert exc_info.value.code == "REPORT_STRUCTURED_OUTPUT_INVALID"
 
 
 @pytest.mark.asyncio

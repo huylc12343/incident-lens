@@ -8,7 +8,7 @@ from typing import Any
 from openai import AsyncOpenAI
 from pydantic import ValidationError
 
-from src.models.incidents import ReportNarrative, ReportRequest
+from src.models.incidents import ReportModelOutput, ReportRequest
 from src.prompts.reporting import build_report_prompt
 from src.services.model_observability import ModelActivityRegistry
 
@@ -45,7 +45,7 @@ class OpenAIReportService:
         self._prompt_version = prompt_version
         self._observability = observability
 
-    async def build_narrative(self, request: ReportRequest) -> ReportNarrative:
+    async def build_narrative(self, request: ReportRequest) -> ReportModelOutput:
         prompt = build_report_prompt(
             incident_id=request.incident_id,
             video_memory=request.video_memory,
@@ -69,14 +69,14 @@ class OpenAIReportService:
             response = await self._client.responses.parse(
                 model=self._model,
                 input=[{"role": "user", "content": prompt.text}],
-                text_format=ReportNarrative,
+                text_format=ReportModelOutput,
                 temperature=self._temperature,
                 timeout=self._timeout_s,
             )
             parsed = getattr(response, "output_parsed", None)
             if parsed is None:
                 parsed = json.loads(getattr(response, "output_text", ""))
-            narrative = ReportNarrative.model_validate(parsed)
+            narrative = ReportModelOutput.model_validate(parsed)
         except (ValidationError, ValueError, TypeError, json.JSONDecodeError) as exc:
             if activity_id is not None:
                 self._observability.fail(activity_id, "REPORT_STRUCTURED_OUTPUT_INVALID", response)
@@ -92,18 +92,6 @@ class OpenAIReportService:
                 "OpenAI report generation failed",
                 retryable=True,
             ) from exc
-        allowed_evidence = {
-            evidence.evidence_id for claim in request.video_memory.claims for evidence in claim.evidence
-        }
-        if request.log_evidence_summary is not None:
-            allowed_evidence.update(request.log_evidence_summary.evidence_ids)
-        if not set(narrative.evidence_ids).issubset(allowed_evidence):
-            if activity_id is not None:
-                self._observability.fail(activity_id, "REPORT_EVIDENCE_INVALID", response)
-            raise ReportServiceError(
-                "REPORT_EVIDENCE_INVALID",
-                "report references evidence not supplied by the workflow",
-            )
         if activity_id is not None:
             self._observability.complete(activity_id, response)
         return narrative

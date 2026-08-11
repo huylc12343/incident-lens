@@ -39,6 +39,7 @@ class IncidentGraphDependencies:
     report: ReportService
     artifact_dir: str
     timestamp_tolerance_s: float = 0.5
+    claim_log_sample_radius: int = 3
     reanalysis_prompt_version: str = "v1"
     auto_reanalysis_enabled: bool = True
     cleanup_remote_resources: bool = True
@@ -68,6 +69,7 @@ def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointe
             state,
             verification=dependencies.verification,
             timestamp_tolerance_s=dependencies.timestamp_tolerance_s,
+            sample_radius=dependencies.claim_log_sample_radius,
         )
         return _with_model_activities(state, result, dependencies.observability)
 

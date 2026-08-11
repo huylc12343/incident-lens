@@ -263,7 +263,7 @@ class MediaService:
             timestamp_s = min(start_s + (index / fps), clip_end)
             frames.append(
                 TimestampedFrame(
-                    frame_id=f"frame-{index:06d}",
+                    frame_id=path.stem,
                     sequence_index=index,
                     timestamp_s=timestamp_s,
                     delta_from_previous_s=0.0 if index == 0 else 1 / fps,

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.agents.nodes.incident import (
+    _incident_sampling_fps,
     _representative_timestamp,
     align_and_verify_claims_node,
     analyze_log_node,
@@ -18,13 +19,16 @@ from src.models.incidents import (
     AnalysisMode,
     Claim,
     ClaimVerification,
+    EvidenceReference,
     IncidentWindow,
     LogAnalysisResult,
     LogEvidenceSummary,
+    NativeVideoAnalysisRequest,
     NativeVideoMetadata,
+    PromptEnvelope,
     PromptSource,
     RemoteMediaHandle,
-    ReportNarrative,
+    ReportModelOutput,
     TimestampedFrame,
     VerificationResult,
     VerificationStatus,
@@ -218,6 +222,63 @@ async def test_cut_incident_video_node_creates_clip_and_frames(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
+async def test_native_cut_maps_fake_evidence_ids_to_sampled_artifacts(tmp_path: Path) -> None:
+    memory = VideoMemory(
+        global_scene="Road scene",
+        incident_window=IncidentWindow(t_start=0, t0=1, t_end=2),
+        analysis_mode=AnalysisMode.NATIVE_VIDEO,
+        claims=[
+            Claim(
+                claim_id="claim-1",
+                text="Vehicle brakes.",
+                timestamp_s=1,
+                evidence=[EvidenceReference(evidence_id="frame_7", timestamp_s=1)],
+                verification_status=VerificationStatus.SUPPORTED,
+            )
+        ],
+    )
+    clip = NormalizedVideoArtifact(
+        uri=str(tmp_path / "incident_clip.mp4"),
+        metadata=NativeVideoMetadata(duration_s=2, width=160, height=90, fps=5, size_bytes=100),
+    )
+    manifest = VideoSequenceManifest(
+        source_video_uri="video.mp4",
+        duration_s=2,
+        frames=[
+            TimestampedFrame(
+                frame_id=f"frame-{index:06d}",
+                sequence_index=index,
+                timestamp_s=float(index),
+                delta_from_previous_s=float(bool(index)),
+                image_uri=str(tmp_path / f"frame-{index:06d}.jpg"),
+            )
+            for index in range(3)
+        ],
+    )
+    media = SimpleNamespace(
+        cut_incident_clip=AsyncMock(return_value=clip),
+        sample_frames=AsyncMock(return_value=manifest),
+    )
+    workflow = VideoMemoryWorkflow(
+        vlm=_service(VLMInputMode.NATIVE_VIDEO, memory),
+        config=VideoMemoryWorkflowConfig(artifact_dir=str(tmp_path)),
+    )
+
+    result = await cut_incident_video_node(
+        {"incident_id": "INC-NATIVE", "video_uri": "video.mp4", "video_memory": memory},
+        media=media,
+        workflow=workflow,
+    )
+
+    assert result["status"] == "running"
+    claim = result["video_memory"].claims[0]
+    assert [item.evidence_id for item in claim.evidence] == ["frame-000001"]
+    assert claim.verification_status == VerificationStatus.UNVERIFIED
+    frame_artifacts = {Path(frame.image_uri).stem for frame in manifest.frames}
+    assert {item.evidence_id for item in claim.evidence}.issubset(frame_artifacts)
+
+
+@pytest.mark.asyncio
 async def test_analyze_log_node_exposes_verification_artifacts(tmp_path: Path) -> None:
     memory = _memory(AnalysisMode.SINGLE_REQUEST, 2)
     analysis = LogAnalysisResult(
@@ -274,6 +335,13 @@ def test_representative_timestamp_avoids_late_aftermath() -> None:
     assert _representative_timestamp(memory) == 6
 
 
+def test_incident_sampling_fps_covers_long_window_within_frame_budget() -> None:
+    memory = _memory(AnalysisMode.NATIVE_VIDEO, 60)
+    config = VideoMemoryWorkflowConfig(incident_frame_fps=4, incident_max_frames=60)
+
+    assert _incident_sampling_fps(memory, config) == 1
+
+
 @pytest.mark.asyncio
 async def test_align_and_verify_claims_builds_per_claim_log_summary(tmp_path: Path) -> None:
     memory = _claim_memory(AnalysisMode.SINGLE_REQUEST)
@@ -305,6 +373,7 @@ async def test_align_and_verify_claims_builds_per_claim_log_summary(tmp_path: Pa
         },
         verification=verifier,
         timestamp_tolerance_s=0.5,
+        sample_radius=1,
     )
 
     assert result["status"] == "running"
@@ -313,7 +382,65 @@ async def test_align_and_verify_claims_builds_per_claim_log_summary(tmp_path: Pa
     assert result["claims"][0].verification_status == VerificationStatus.CONTRADICTED
     assert result["video_memory"].claims[0].verification_status == VerificationStatus.CONTRADICTED
     request = verifier.verify.await_args.args[0]
+    assert request.claim_log_summaries[0].sample_count == 3
+    assert request.claim_log_summaries[0].sample_start_s == 1.5
+    assert request.claim_log_summaries[0].sample_end_s == 2.5
     assert request.claim_log_summaries[0].metrics["brake"]["max"] == 1
+
+
+@pytest.mark.asyncio
+async def test_video_claim_becomes_supported_only_after_log_verification(tmp_path: Path) -> None:
+    provider_memory = VideoMemory(
+        global_scene="Road scene",
+        incident_window=IncidentWindow(t_start=0, t0=1, t_end=2),
+        analysis_mode=AnalysisMode.NATIVE_VIDEO,
+        claims=[
+            Claim(
+                claim_id="claim-1",
+                text="Vehicle brakes.",
+                timestamp_s=1,
+                evidence=[EvidenceReference(evidence_id="frame_7", timestamp_s=1)],
+                verification_status=VerificationStatus.SUPPORTED,
+            )
+        ],
+    )
+    service = _service(VLMInputMode.NATIVE_VIDEO, provider_memory)
+    workflow = VideoMemoryWorkflow(vlm=service, config=VideoMemoryWorkflowConfig())
+    analyzed = await workflow.analyze(
+        NativeVideoAnalysisRequest(
+            incident_id="INC-TRUST",
+            prompt=PromptEnvelope(text="Analyze."),
+            normalized_video_uri="normalized.mp4",
+            metadata=NativeVideoMetadata(duration_s=2, width=1280, height=720, fps=15, size_bytes=100),
+        )
+    )
+    assert analyzed.claims[0].verification_status == VerificationStatus.UNVERIFIED
+
+    log = tmp_path / "vehicle.csv"
+    log.write_text("timestamp,brake\n1.0,1\n", encoding="utf-8")
+    verification_result = VerificationResult(
+        results=[
+            ClaimVerification(
+                claim_id="claim-1",
+                status=VerificationStatus.SUPPORTED,
+                reason="Brake signal supports the claim.",
+            )
+        ]
+    )
+    verifier = SimpleNamespace(verify=AsyncMock(return_value=verification_result))
+
+    result = await align_and_verify_claims_node(
+        {
+            "incident_id": "INC-TRUST",
+            "video_memory": analyzed,
+            "log_uri": str(log),
+            "log_evidence_summary": LogEvidenceSummary(),
+        },
+        verification=verifier,
+        timestamp_tolerance_s=0.5,
+    )
+
+    assert result["video_memory"].claims[0].verification_status == VerificationStatus.SUPPORTED
 
 
 @pytest.mark.asyncio
@@ -465,7 +592,20 @@ async def test_manual_native_reanalysis_reuses_remote_handle(tmp_path: Path) -> 
         vlm=service,
         config=VideoMemoryWorkflowConfig(artifact_dir=str(tmp_path)),
     )
-    media = SimpleNamespace(sample_frames=AsyncMock())
+    manifest = VideoSequenceManifest(
+        frames=[
+            TimestampedFrame(
+                frame_id="frame-000001",
+                sequence_index=0,
+                timestamp_s=2,
+                delta_from_previous_s=0,
+                image_uri=str(tmp_path / "frame-000001.jpg"),
+            )
+        ],
+        source_video_uri="video.mp4",
+        duration_s=3,
+    )
+    media = SimpleNamespace(sample_frames=AsyncMock(return_value=manifest))
 
     result = await manual_reanalyze_node(
         {
@@ -485,7 +625,7 @@ async def test_manual_native_reanalysis_reuses_remote_handle(tmp_path: Path) -> 
 
     assert result["status"] == "running"
     assert result["manual_reanalysis_count"] == 1
-    media.sample_frames.assert_not_awaited()
+    media.sample_frames.assert_awaited_once()
     request = service.reanalyze_claims.await_args.args[0]
     assert request.prompt.source == PromptSource.HUMAN_PROVIDED
     assert request.remote_media_handles == [handle]
@@ -497,14 +637,10 @@ async def test_draft_report_marks_video_only_and_unresolved_conflict() -> None:
     memory = _claim_memory(AnalysisMode.SINGLE_REQUEST)
     contradicted = memory.claims[0].model_copy(update={"verification_status": VerificationStatus.CONTRADICTED})
     memory = memory.model_copy(update={"claims": [contradicted]})
-    narrative = ReportNarrative(
-        summary="Summary",
+    narrative = ReportModelOutput(
         timeline="Timeline",
         video_observations="Video findings",
-        log_findings="Invented log findings",
-        alignment="Conflict remains",
         hypothesized_causes="Possible cause",
-        evidence_ids=[],
     )
     report = SimpleNamespace(build_narrative=AsyncMock(return_value=narrative))
 
@@ -590,12 +726,9 @@ async def test_draft_report_uses_code_log_summary_and_verification_alignment() -
         summary="Tốc độ giảm và brake tăng mạnh tại 2 giây.",
         evidence_ids=["log-evidence:2:brake_rise"],
     )
-    narrative = ReportNarrative(
-        summary="Tóm tắt video.",
+    narrative = ReportModelOutput(
         timeline="Timeline.",
         video_observations="Quan sát.",
-        log_findings="Nội dung model không được dùng.",
-        alignment="Đối chiếu model không được dùng.",
         hypothesized_causes="Chưa xác định.",
     )
     report = SimpleNamespace(build_narrative=AsyncMock(return_value=narrative))
@@ -612,6 +745,7 @@ async def test_draft_report_uses_code_log_summary_and_verification_alignment() -
     )
 
     draft = result["draft_report"]
+    assert draft.summary == memory.global_scene
     assert draft.log_findings.narrative == log_summary.summary
     assert "claim-1 được log hỗ trợ" in draft.alignment.narrative
     assert "log-evidence:2:brake_rise" in draft.alignment.narrative

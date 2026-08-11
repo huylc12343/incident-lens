@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from threading import RLock
 from typing import Any
 from uuid import uuid4
@@ -11,9 +11,22 @@ from src.models.api import ModelActivity, TokenUsage
 
 
 class ModelActivityRegistry:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        max_provider_requests_per_incident: int = 12,
+        max_activities_per_incident: int = 100,
+        retention_hours: float = 168,
+    ) -> None:
+        if min(max_provider_requests_per_incident, max_activities_per_incident, retention_hours) <= 0:
+            raise ValueError("activity limits and retention must be positive")
+        if max_activities_per_incident < max_provider_requests_per_incident:
+            raise ValueError("activity capacity must be at least the provider request budget")
         self._activities: dict[str, list[ModelActivity]] = {}
         self._lock = RLock()
+        self._max_provider_requests = max_provider_requests_per_incident
+        self._max_activities = max_activities_per_incident
+        self._retention = timedelta(hours=retention_hours)
 
     def start(
         self,
@@ -26,6 +39,7 @@ class ModelActivityRegistry:
         model: str,
         metadata: dict[str, Any] | None = None,
     ) -> str:
+        now = datetime.now(UTC)
         activity = ModelActivity(
             activity_id=str(uuid4()),
             incident_id=incident_id,
@@ -35,11 +49,18 @@ class ModelActivityRegistry:
             provider=provider,
             model=model,
             status="running",
-            started_at=datetime.now(UTC),
+            started_at=now,
             metadata=metadata or {},
         )
         with self._lock:
-            self._activities.setdefault(incident_id, []).append(activity)
+            activities = self._pruned(incident_id, now)
+            if len(activities) >= self._max_provider_requests:
+                raise ModelRequestBudgetError(
+                    "PROVIDER_REQUEST_BUDGET_EXCEEDED",
+                    f"incident {incident_id} exceeded its provider request budget",
+                )
+            activities.append(activity)
+            self._activities[incident_id] = activities[-self._max_activities :]
         return activity.activity_id
 
     def complete(self, activity_id: str, response: Any) -> None:
@@ -55,13 +76,25 @@ class ModelActivityRegistry:
 
     def list(self, incident_id: str) -> list[ModelActivity]:
         with self._lock:
-            return [item.model_copy(deep=True) for item in self._activities.get(incident_id, [])]
+            return [item.model_copy(deep=True) for item in self._pruned(incident_id, datetime.now(UTC))]
 
     def restore(self, incident_id: str, activities: list[ModelActivity]) -> None:
         with self._lock:
             if incident_id not in self._activities:
                 self._activities[incident_id] = [item.model_copy(deep=True) for item in activities]
 
+    def delete(self, incident_id: str) -> None:
+        with self._lock:
+            self._activities.pop(incident_id, None)
+
+    def _pruned(self, incident_id: str, now: datetime) -> list[ModelActivity]:
+        cutoff = now - self._retention
+        activities = [item for item in self._activities.get(incident_id, []) if item.started_at >= cutoff]
+        if activities:
+            self._activities[incident_id] = activities
+        else:
+            self._activities.pop(incident_id, None)
+        return activities
     def _finish(
         self,
         activity_id: str,
@@ -87,6 +120,12 @@ class ModelActivityRegistry:
                         }
                     )
                     return
+
+
+class ModelRequestBudgetError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def extract_token_usage(response: Any) -> TokenUsage | None:

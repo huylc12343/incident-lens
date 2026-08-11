@@ -44,6 +44,8 @@ INCIDENT_CHECKPOINT_PATH=./data/incident_checkpoints.sqlite3
 
 Incident clip mặc định có tối thiểu 5 giây, thêm 1 giây trước và 2 giây sau window do VLM xác định. Có thể điều chỉnh bằng `INCIDENT_CLIP_MIN_DURATION_S`, `INCIDENT_CLIP_PRE_ROLL_S` và `INCIDENT_CLIP_POST_ROLL_S`. Ảnh `representative_frame` được chọn gần `t0` thay vì lấy frame đầu tiên.
 
+Khi đối chiếu claim với log, `LOG_CLAIM_SAMPLE_RADIUS` quy định số mẫu lấy ở mỗi phía của mẫu gần nhất. Mặc định `3` tạo tối đa 7 mẫu (`3 trước + mẫu gần nhất + 3 sau`); đặt `0` để chỉ dùng mẫu gần nhất. Ở đầu hoặc cuối log, số mẫu thực tế có thể ít hơn.
+
 Qwen native video dùng `VLM_PROVIDER=qwen`, `VLM_INPUT_MODE=native_video` và `DASHSCOPE_API_KEY`. Video được resize/pad theo `VLM_VIDEO_TARGET_WIDTH`, `VLM_VIDEO_TARGET_HEIGHT` và chuẩn hóa FPS trước khi gửi. Video local nhỏ hơn `QWEN_BASE64_MAX_VIDEO_BYTES` (mặc định 7 MB) được gửi bằng Base64 Data URL. Video lớn hơn ngưỡng cần `QWEN_ARTIFACT_URL_BASE` công khai `ARTIFACT_DIR`. Qwen gọi `qwen3-vl-flash` qua DashScope chat completions.
 
 Streamlit upload file vào `INCIDENT_UPLOAD_DIR`; backend kiểm tra phần mở rộng, dung lượng, path root, file tồn tại và video không quá 60 giây. URL từ xa và external object storage không thuộc baseline.
@@ -143,13 +145,17 @@ Create/review trả `202` khi đang chờ review, `200` khi terminal; `404` cho 
 9. Evidence/artifact/warnings.
 10. Review status.
 
-LLM chỉ sinh sáu narrative fields. Backend sở hữu timestamps, metrics, kết quả verification, evidence/artifact URI, warning và review status. Video-only luôn ghi `Không có dữ liệu log.`.
+Report LLM chỉ sinh ba narrative fields: `timeline`, `video_observations`, `hypothesized_causes`. Backend sở hữu summary, log findings, alignment, timestamps, metrics, verification, evidence/artifact URI, warning và review status. Video-only luôn ghi `Không có dữ liệu log.`.
 
 ## Persistence
 
 - `INCIDENT_CHECKPOINT_PATH`: SQLite LangGraph checkpoint để GET/resume incident `awaiting_review` sau process restart.
 - `INCIDENT_DATABASE_PATH`: SQLite repository cho terminal `approved | not_incident`.
 - Qwen không tạo remote handle; DashScope đọc native video từ URL công khai của artifact.
+- SQLite checkpoint/repository chạy trên worker tuần tự, không thực thi SQLite sync trực tiếp trên event loop.
+- `GET /live` chỉ kiểm tra process; `GET /ready` kiểm tra workflow, checkpointer và report repository. Docker dùng `/ready`.
+- `PROVIDER_REQUEST_LIMIT_PER_INCIDENT` đặt hard limit request model; structured-output retry và network retry được cấu hình riêng.
+- `INCIDENT_ARTIFACT_RETENTION_HOURS` và `MODEL_ACTIVITY_RETENTION_HOURS` kiểm soát retention.
 
 ## Kiểm thử
 

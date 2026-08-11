@@ -12,6 +12,7 @@ from src.models.incidents import (
     IncidentWindow,
     LogAnalysisResult,
     LogEvent,
+    LogEvidenceSummary,
     NativeVideoAnalysisRequest,
     NativeVideoMetadata,
     PromptEnvelope,
@@ -20,6 +21,7 @@ from src.models.incidents import (
     ReportEvidenceAndWarnings,
     ReportGeneralInformation,
     ReportLogSection,
+    ReportModelOutput,
     ReportNarrative,
     ReportRequest,
     ReportService,
@@ -40,8 +42,11 @@ from src.services.log_analysis import build_claim_log_summaries
 from src.services.media import NormalizedVideoArtifact
 from src.services.video_memory import (
     VideoMemoryWorkflow,
+    VideoMemoryWorkflowConfig,
     merge_video_memory_patch,
+    reconcile_native_video_evidence,
     reconcile_video_memory_patch_evidence,
+    validate_video_memory,
 )
 
 
@@ -221,7 +226,7 @@ async def cut_incident_video_node(
         frames = await media.sample_frames(
             video_uri,
             str(frame_dir),
-            fps=config.incident_frame_fps,
+            fps=_incident_sampling_fps(memory, config),
             width=config.frame_width,
             height=config.frame_height,
             image_format=config.frame_format,
@@ -230,6 +235,15 @@ async def cut_incident_video_node(
             start_s=memory.incident_window.t_start,
             end_s=memory.incident_window.t_end,
         )
+        if workflow.vlm.capabilities.input_mode == VLMInputMode.NATIVE_VIDEO:
+            memory = reconcile_native_video_evidence(memory, frames.frames)
+            validate_video_memory(
+                memory,
+                source_duration_s=frames.duration_s,
+                source_frame_ids={frame.frame_id for frame in frames.frames},
+                expected_analysis_mode=memory.analysis_mode,
+                limits=config.limits,
+            )
         artifact_uris = {
             **state.get("artifact_uris", {}),
             "incident_clip": clip.uri,
@@ -239,7 +253,10 @@ async def cut_incident_video_node(
             target_timestamp_s = _representative_timestamp(memory)
             representative = min(frames.frames, key=lambda frame: abs(frame.timestamp_s - target_timestamp_s))
             artifact_uris["representative_frame"] = representative.image_uri
-        return {"status": "running", "artifact_uris": artifact_uris}
+        output: dict[str, object] = {"status": "running", "artifact_uris": artifact_uris}
+        if workflow.vlm.capabilities.input_mode == VLMInputMode.NATIVE_VIDEO:
+            output.update({"video_memory": memory, "claims": memory.claims})
+        return output
     except Exception as exc:
         return {
             "status": "failed",
@@ -304,6 +321,7 @@ async def align_and_verify_claims_node(
     *,
     verification: VerificationService,
     timestamp_tolerance_s: float,
+    sample_radius: int = 3,
 ) -> dict[str, object]:
     incident_id = state.get("incident_id", "").strip()
     memory = state.get("video_memory")
@@ -320,6 +338,7 @@ async def align_and_verify_claims_node(
             log_uri,
             memory.claims,
             timestamp_tolerance_s=timestamp_tolerance_s,
+            sample_radius=sample_radius,
         )
         result = await verification.verify(
             VerificationRequest(
@@ -474,7 +493,17 @@ async def build_draft_report_node(
                     log_evidence_summary=state.get("log_evidence_summary"),
                 )
             )
-            narrative = ReportNarrative.model_validate(narrative)
+            model_output = ReportModelOutput.model_validate(narrative)
+            has_log = state.get("log_evidence_summary") is not None
+            narrative = ReportNarrative(
+                summary=memory.video_summary or memory.global_scene,
+                timeline=model_output.timeline,
+                video_observations=model_output.video_observations,
+                log_findings=_backend_log_findings(state.get("log_evidence_summary")),
+                alignment=_verification_alignment(state.get("verification")) if has_log else "Không có dữ liệu log.",
+                hypothesized_causes=model_output.hypothesized_causes,
+                evidence_ids=[evidence.evidence_id for claim in memory.claims for evidence in claim.evidence],
+            )
         except Exception as exc:
             warning = (
                 f"{getattr(exc, 'code', 'REPORT_GENERATION_FAILED')}: report model unavailable; "
@@ -483,23 +512,20 @@ async def build_draft_report_node(
             warnings = list(dict.fromkeys([*warnings, warning]))
             narrative = _fallback_report_narrative(memory, has_log=state.get("log_evidence_summary") is not None)
 
-    if memory.video_summary:
-        narrative = narrative.model_copy(update={"summary": memory.video_summary})
-    if state.get("log_evidence_summary") is None:
-        narrative = narrative.model_copy(update={"log_findings": "Không có dữ liệu log."})
-    else:
-        log_summary = state["log_evidence_summary"]
-        narrative = narrative.model_copy(
-            update={
-                "log_findings": log_summary.summary or "Không có dữ liệu log có thể tổng hợp trong cửa sổ sự cố.",
-                "alignment": _verification_alignment(state.get("verification")),
-            }
+    conflict_ids = list(
+        dict.fromkeys(
+            [
+                item.claim_id
+                for item in (state.get("verification").results if state.get("verification") else [])
+                if item.status == VerificationStatus.CONTRADICTED
+            ]
+            + [
+                claim.claim_id
+                for claim in memory.claims
+                if claim.verification_status == VerificationStatus.CONTRADICTED
+            ]
         )
-    conflict_ids = [
-        item.claim_id
-        for item in (state.get("verification").results if state.get("verification") else [])
-        if item.status == VerificationStatus.CONTRADICTED
-    ]
+    )
     warnings.extend(f"Unresolved contradicted claim: {claim_id}" for claim_id in conflict_ids)
     warnings = list(dict.fromkeys(warnings))
     draft_report = DraftReport(
@@ -559,25 +585,25 @@ async def _reanalyze(
 
     config = workflow.config
     artifacts = dict(state.get("artifact_uris", {}))
-    frame_manifest = None
-    normalized_video_uri = None
-    if workflow.vlm.capabilities.input_mode == VLMInputMode.TIMESTAMPED_FRAMES:
-        frame_dir = Path(config.artifact_dir).resolve() / _safe_incident_id(incident_id) / "reanalysis_frames"
-        frame_manifest = await media.sample_frames(
-            video_uri,
-            str(frame_dir),
-            fps=config.incident_frame_fps,
-            width=config.frame_width,
-            height=config.frame_height,
-            image_format=config.frame_format,
-            jpeg_quality=config.frame_jpeg_quality,
-            max_frames=config.incident_max_frames,
-            start_s=memory.incident_window.t_start,
-            end_s=memory.incident_window.t_end,
-        )
-        artifacts["reanalysis_frames"] = str(frame_dir)
-    else:
-        normalized_video_uri = artifacts.get("normalized_video")
+    frame_dir = Path(config.artifact_dir).resolve() / _safe_incident_id(incident_id) / "reanalysis_frames"
+    frame_manifest = await media.sample_frames(
+        video_uri,
+        str(frame_dir),
+        fps=_incident_sampling_fps(memory, config),
+        width=config.frame_width,
+        height=config.frame_height,
+        image_format=config.frame_format,
+        jpeg_quality=config.frame_jpeg_quality,
+        max_frames=config.incident_max_frames,
+        start_s=memory.incident_window.t_start,
+        end_s=memory.incident_window.t_end,
+    )
+    artifacts["reanalysis_frames"] = str(frame_dir)
+    normalized_video_uri = (
+        artifacts.get("normalized_video")
+        if workflow.vlm.capabilities.input_mode == VLMInputMode.NATIVE_VIDEO
+        else None
+    )
 
     patch = await workflow.vlm.reanalyze_claims(
         ReanalysisRequest(
@@ -591,17 +617,12 @@ async def _reanalyze(
             remote_media_handles=state.get("remote_media_handles", memory.remote_media_handles),
         )
     )
-    if frame_manifest is not None:
-        patch = reconcile_video_memory_patch_evidence(
-            patch,
-            frame_manifest.frames,
-            fallback_timestamp_s=memory.incident_window.t0,
-        )
-    return merge_video_memory_patch(
-        memory,
+    patch = reconcile_video_memory_patch_evidence(
         patch,
-        reconcile_native_evidence=workflow.vlm.capabilities.input_mode == VLMInputMode.NATIVE_VIDEO,
-    ), artifacts
+        frame_manifest.frames,
+        fallback_timestamp_s=memory.incident_window.t0,
+    )
+    return merge_video_memory_patch(memory, patch), artifacts
 
 
 def _failure(code: str, message: str) -> dict[str, object]:
@@ -610,6 +631,14 @@ def _failure(code: str, message: str) -> dict[str, object]:
 
 def _safe_incident_id(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]", "_", value)
+
+
+def _incident_sampling_fps(memory: VideoMemory, config: VideoMemoryWorkflowConfig) -> float:
+    """Cover the full incident window without exceeding the frame budget."""
+    duration_s = memory.incident_window.t_end - memory.incident_window.t_start
+    if duration_s <= 0:
+        return config.incident_frame_fps
+    return min(config.incident_frame_fps, config.incident_max_frames / duration_s)
 
 
 def _representative_timestamp(memory: VideoMemory) -> float:
@@ -666,3 +695,9 @@ def _verification_alignment(verification: VerificationResult | None) -> str:
         evidence = f" Bằng chứng: {', '.join(item.evidence_ids)}." if item.evidence_ids else ""
         statements.append(f"{item.claim_id} {conclusion}: {item.reason.rstrip('.')}.{evidence}")
     return " ".join(statements) or "Không có claim để đối chiếu với log."
+
+
+def _backend_log_findings(summary: LogEvidenceSummary | None) -> str:
+    if summary is None:
+        return "Không có dữ liệu log."
+    return summary.summary or "Không có dữ liệu log có thể tổng hợp trong cửa sổ sự cố."

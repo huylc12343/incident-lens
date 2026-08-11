@@ -78,3 +78,16 @@ def test_sqlite_repository_deletes_one_terminal_outcome(tmp_path: Path) -> None:
     assert repository.delete("INC-STORED") is True
     assert repository.delete("INC-STORED") is False
     assert repository.get("INC-STORED") is None
+
+
+@pytest.mark.asyncio
+async def test_sqlite_repository_supports_nonblocking_async_crud(tmp_path: Path) -> None:
+    repository = SQLiteReportRepository(str(tmp_path / "async-reports.sqlite3"), initialize=False)
+    await repository.ainitialize()
+
+    stored = await repository.astore(_stored_report())
+    loaded = await repository.aget("INC-STORED")
+
+    assert loaded == stored
+    assert [item.incident_id for item in await repository.alist_reports()] == ["INC-STORED"]
+    assert await repository.adelete("INC-STORED") is True

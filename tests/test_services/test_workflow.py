@@ -381,3 +381,80 @@ async def test_workflow_lists_and_deletes_one_incident_history() -> None:
     with pytest.raises(WorkflowError) as exc_info:
         await service.get("INC-HISTORY")
     assert exc_info.value.code == "INCIDENT_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_delete_removes_incident_artifacts_and_uploaded_inputs(tmp_path) -> None:
+    artifact_dir = tmp_path / "artifacts"
+    incident_dir = artifact_dir / "INC-CLEAN"
+    incident_dir.mkdir(parents=True)
+    (incident_dir / "clip.mp4").write_bytes(b"clip")
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    uploaded_video = upload_dir / "video.mp4"
+    uploaded_video.write_bytes(b"video")
+    state = {**_review_state("INC-CLEAN"), "remote_media_handles": ["remote-handle"]}
+    runner = SimpleNamespace(
+        start=AsyncMock(return_value=state),
+        resume=AsyncMock(),
+        get=AsyncMock(return_value=None),
+        list_incident_ids=AsyncMock(return_value=["INC-CLEAN"]),
+        delete=AsyncMock(return_value=None),
+    )
+    releaser = AsyncMock()
+    service = WorkflowService(
+        runner=runner,
+        repository=InMemoryReportRepository(),
+        artifact_dir=str(artifact_dir),
+        upload_dir=str(upload_dir),
+        remote_resource_releaser=releaser,
+    )
+    await service.create(
+        IncidentCreateRequest(incident_id="INC-CLEAN", video_uri=str(uploaded_video), analysis_prompt="Analyze")
+    )
+
+    await service.delete("INC-CLEAN")
+
+    assert not incident_dir.exists()
+    assert not uploaded_video.exists()
+    releaser.assert_awaited_once_with(["remote-handle"])
+
+
+@pytest.mark.asyncio
+async def test_delete_waits_for_in_flight_review_transaction() -> None:
+    review_started = asyncio.Event()
+    release_review = asyncio.Event()
+
+    async def resume(_incident_id, _decision):
+        review_started.set()
+        await release_review.wait()
+        return {**_review_state("INC-RACE"), "status": "not_incident"}
+
+    runner = SimpleNamespace(
+        start=AsyncMock(return_value=_review_state("INC-RACE")),
+        resume=AsyncMock(side_effect=resume),
+        get=AsyncMock(return_value=None),
+        list_incident_ids=AsyncMock(return_value=["INC-RACE"]),
+        delete=AsyncMock(return_value=None),
+    )
+    repository = InMemoryReportRepository()
+    service = WorkflowService(runner=runner, repository=repository)
+    await service.create(IncidentCreateRequest(incident_id="INC-RACE", video_uri="video.mp4", analysis_prompt="A"))
+
+    review_task = asyncio.create_task(
+        service.review(
+            "INC-RACE",
+            ReviewDecision(action="not_incident", reviewer="reviewer", reason="Not an incident"),
+        )
+    )
+    await review_started.wait()
+    delete_task = asyncio.create_task(service.delete("INC-RACE"))
+    await asyncio.sleep(0)
+    assert not delete_task.done()
+
+    release_review.set()
+    await review_task
+    await delete_task
+
+    runner.delete.assert_awaited_once_with("INC-RACE")
+    assert repository.get("INC-RACE") is None

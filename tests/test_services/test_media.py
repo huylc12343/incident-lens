@@ -31,6 +31,7 @@ async def test_probe_and_sample_real_video(tmp_path: Path) -> None:
     assert [frame.sequence_index for frame in manifest.frames] == list(range(len(manifest.frames)))
     assert [frame.timestamp_s for frame in manifest.frames] == sorted(frame.timestamp_s for frame in manifest.frames)
     assert all(Path(frame.image_uri).is_file() for frame in manifest.frames)
+    assert all(frame.frame_id == Path(frame.image_uri).stem for frame in manifest.frames)
 
 
 @pytest.mark.asyncio

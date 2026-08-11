@@ -30,6 +30,7 @@ Thumbs.db
 
 # Data (never commit large data)
 data/
+frontend/mock-data/**/*.mp4
 *.db
 *.sqlite3
 

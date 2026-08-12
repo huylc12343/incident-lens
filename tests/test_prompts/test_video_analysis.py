@@ -27,28 +27,20 @@ def test_video_analysis_prompt_selects_mode_instruction(
 
     assert expected_instruction in prompt.text
     assert "t_start <= t0 <= t_end" in prompt.text
-    assert "[incident_window.t_start, incident_window.t_end]" in prompt.text
-    assert "Không dùng timestamp pre-roll hoặc post-roll" in prompt.text
-    assert "toàn bộ chuỗi theo đúng thứ tự thời gian" in prompt.text
-    assert "camera trước gắn cứng trên xe ego" in prompt.text
-    assert "Camera không phải người quan sát tự di chuyển" in prompt.text
-    assert "Không viết 'camera tiến'" in prompt.text
-    assert "bụi cây" in prompt.text
+    assert "incident_window.t_end = thời lượng video" in prompt.text
+    assert "Không bao giờ trả incident_window.t_end = 0" in prompt.text
+    assert "representative_timestamp_s = null" in prompt.text
+    assert "camera trước gắn cố định trên xe ego" in prompt.text
+    assert 'Không mô tả "camera tiến/quay/dừng"' in prompt.text
     assert "trước–tại–sau" in prompt.text
-    assert "không chỉ từ một frame tĩnh" in prompt.text
-    assert "không hạ mức chắc chắn" in prompt.text
-    assert "không đặt t0 tại cảnh xe đã nằm yên sau sự cố" in prompt.text
-    assert "không được ghi đè giả định camera trước" in prompt.text
-    assert "kết cục cuối cùng nhìn thấy được" in prompt.text
-    assert "Tạo claim cho từng giai đoạn quan trọng" in prompt.text
-    assert "video_summary thành một bản phân tích hình ảnh mạch lạc" in prompt.text
     assert "representative_timestamp_s" in prompt.text
-    assert "không chọn cảnh hậu quả xa sự kiện chính" in prompt.text
-    assert "phải có đúng một object" in prompt.text
-    assert "nội dung mô tả do bạn sinh ra phải bằng tiếng Việt" in prompt.text
+    assert "JSON Schema được cung cấp cùng request là nguồn duy nhất" in prompt.text
+    assert "incident_window: object gồm đúng t_start, t0, t_end và t_end > 0" in prompt.text
+    assert "claim.evidence: array" in prompt.text
+    assert "Không dùng chuỗi thay cho array/object" in prompt.text
     assert "VideoMemory" in prompt.text
     assert 'verification_status="unverified"' in prompt.text
-    assert "suy luận ẩn" in prompt.text
+    assert "Không trả chain-of-thought" in prompt.text
     assert prompt.source == PromptSource.SYSTEM
     assert prompt.version == "video-v2"
     assert prompt.context == {"input_mode": mode.value}

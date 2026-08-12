@@ -48,6 +48,13 @@ def build_report_prompt(
         "nào của claim có thể đối chiếu với log là phù hợp, mâu thuẫn hoặc không đủ dữ liệu. Không được hiểu "
         "verification.status=unverified là video claim sai hoặc chưa được VLM quan sát.",
 
+        "Hãy tận dụng linh hoạt cả ba nguồn khi tổng hợp báo cáo: video_memory cho biết điều gì đã xảy ra về mặt "
+        "hình ảnh (sự kiện, quỹ đạo tổng thể, va chạm, vật cản); log_evidence_summary cho biết trạng thái vận hành "
+        "đo lường được (tốc độ, phanh, ga, góc lái); verification cho biết mức độ hai nguồn này khớp nhau trong "
+        "phạm vi log có khả năng kiểm tra. Không nguồn nào một mình đủ để kết luận toàn bộ sự cố — hãy kết hợp cả "
+        "ba để đưa ra bức tranh nhất quán và chính xác nhất, ưu tiên video cho các sự kiện hình ảnh và log cho các "
+        "chi tiết vận hành định lượng mà video khó ước lượng chính xác.",
+
         "Toàn bộ nội dung báo cáo phải bằng tiếng Việt tự nhiên, rõ ràng, nhất quán và có tính tường thuật. "
         "Giữ nguyên tên field, ID, timestamp, số liệu, enum và cấu trúc schema bằng tiếng Anh.",
 
@@ -68,9 +75,13 @@ def build_report_prompt(
         "video_summary, timeline và claims. Field này được phép chứa suy luận hình ảnh hợp lý đã được VLM rút ra "
         "từ chuỗi thời gian, bao gồm kết luận về chuyển động, tiếp xúc hoặc va chạm khi VideoMemory đã kết luận như vậy.",
 
-        "Không hạ mức chắc chắn của video_observations chỉ vì log không có sensor để quan sát cùng hiện tượng. "
-        "Ví dụ, verification=unverified do không có collision sensor không phải lý do để thay câu 'xe va chạm "
-        "với hàng rào' thành 'không có bằng chứng xác nhận va chạm' nếu VideoMemory đã kết luận va chạm từ video.",
+        "Không hạ mức chắc chắn của video_observations chỉ vì log không có sensor để quan sát cùng hiện tượng, dù "
+        "verification trả về unverified hay contradicted. Ví dụ, verification=unverified do không có collision "
+        "sensor không phải lý do để thay câu 'xe va chạm với hàng rào' thành 'không có bằng chứng xác nhận va "
+        "chạm' nếu VideoMemory đã kết luận va chạm từ video. Tương tự, nếu verification=contradicted nhưng reason "
+        "cho thấy mâu thuẫn chỉ liên quan đến một chi tiết vận hành cụ thể (như tốc độ, góc lái) chứ không phải "
+        "phủ định trực tiếp sự kiện hình ảnh chính (như va chạm) mà log vốn không có khả năng đo, video_observations "
+        "vẫn giữ nguyên kết luận hình ảnh của VideoMemory.",
 
         "video_observations không phải nơi đề xuất root cause. Không biến hiện tượng xảy ra trong hoặc sau sự cố "
         "thành nguyên nhân nếu VideoMemory không cung cấp quan hệ nhân quả đó.",
@@ -105,7 +116,9 @@ def build_report_prompt(
         "dùng để lập giả thuyết.",
 
         "Nếu verification.status=contradicted, phải phản ánh mâu thuẫn đó trong hypothesized_causes hoặc timeline "
-        "như một cảnh báo có ý nghĩa, và không xây dựng giả thuyết dựa trên phần claim đang bị log bác bỏ.",
+        "như một cảnh báo có ý nghĩa, và không xây dựng giả thuyết dựa trên phần claim đang bị log bác bỏ. Tuy nhiên "
+        "hãy diễn giải mâu thuẫn đúng phạm vi mà log thực sự đo được theo reason đi kèm: nếu mâu thuẫn chỉ liên quan "
+        "đến một chi tiết vận hành cụ thể, không phủ định toàn bộ sự kiện hình ảnh chính mà VideoMemory đã kết luận.",
 
         "Không viết lại hoặc xuất các timestamp có tính thẩm quyền, metrics dạng số, metadata sự cố, vị trí artifact "
         "hoặc trạng thái review ngoài những gì cấu trúc report yêu cầu; backend sở hữu các dữ liệu định lượng và "

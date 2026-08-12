@@ -24,9 +24,11 @@ def test_verification_prompt_requires_one_result_per_claim() -> None:
 
     assert "chính xác một kết quả cho mỗi claim_id" in prompt.text
     assert "supported" in prompt.text
-    assert "supported, contradicted hoặc unverified" in prompt.text
-    assert "màu/loại xe, cầu, sông hoặc xe chìm" in prompt.text
-    assert "Không suy ra va chạm" in prompt.text
+    assert "Root output phải là object có đúng field results" in prompt.text
+    assert "Mỗi phần tử results phải có đúng bốn field" in prompt.text
+    assert "evidence_ids phải là array các string" in prompt.text
+    assert "Không dùng log để xác nhận hoặc phủ định" in prompt.text
+    assert "Không suy ra có/không có va chạm" in prompt.text
     assert "reason phải ngắn gọn bằng tiếng Việt" in prompt.text
     item = prompt.context["verification_items"][0]
     assert item["allowed_evidence_ids"] == ["log-row:12.5"]

@@ -480,7 +480,22 @@ class QwenNativeVideoVLMService:
             if activity_id is not None:
                 self._observability.fail(activity_id, "QWEN_VIDEO_ANALYSIS_RETRYABLE", response)
             raise VLMServiceError("QWEN_VIDEO_ANALYSIS_RETRYABLE", str(exc), retryable=True) from exc
-        except (BadRequestError, NotFoundError, PermissionDeniedError) as exc:
+        except PermissionDeniedError as exc:
+            error_code = (
+                "QWEN_QUOTA_EXHAUSTED"
+                if _is_dashscope_free_tier_exhausted(exc)
+                else "QWEN_PERMISSION_DENIED"
+            )
+            if activity_id is not None:
+                self._observability.fail(activity_id, error_code, response)
+            message = (
+                "DashScope free quota đã hết. Hãy bổ sung thông tin thanh toán hoặc tắt chế độ "
+                "'use free tier only' trong DashScope console."
+                if error_code == "QWEN_QUOTA_EXHAUSTED"
+                else "DashScope API key không có quyền dùng model Qwen đã cấu hình."
+            )
+            raise VLMServiceError(error_code, message) from exc
+        except (BadRequestError, NotFoundError) as exc:
             if activity_id is not None:
                 self._observability.fail(activity_id, "QWEN_VIDEO_ANALYSIS_REQUEST_INVALID", response)
             raise VLMServiceError("QWEN_VIDEO_ANALYSIS_REQUEST_INVALID", str(exc)) from exc
@@ -530,6 +545,13 @@ def _parse_json_content(content: str | None) -> object:
     if normalized.startswith("```"):
         normalized = normalized.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     return json.loads(normalized)
+
+
+def _is_dashscope_free_tier_exhausted(exc: PermissionDeniedError) -> bool:
+    body = getattr(exc, "body", None)
+    error = body.get("error", body) if isinstance(body, dict) else {}
+    provider_code = error.get("code", "") if isinstance(error, dict) else ""
+    return provider_code == "AllocationQuota.FreeTierOnly" or "free quota has been exhausted" in str(exc).lower()
 
 
 def _structured_output_error_details(exc: Exception) -> object:

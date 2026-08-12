@@ -310,18 +310,18 @@ API `GET /api/v1/incidents/reports` đọc danh sách terminal report từ repos
 
 Base URL local: `http://localhost:8000`.
 
-| Method   | Path                                       | Mục đích                             |
-| -------- | ------------------------------------------ | --------------------------------------- |
-| `GET`  | `/health`                                | Health check app                        |
-| `GET`  | `/api/v1/status`                         | Kiểm tra agent baseline                |
-| `POST` | `/api/v1/chat`                           | Chat agent demo                         |
-| `POST` | `/api/v1/incidents/uploads`              | Upload video và CSV log                |
-| `POST` | `/api/v1/incidents`                      | Tạo và chạy incident                 |
-| `GET`  | `/api/v1/incidents`                      | Liệt kê lịch sử Incident trong SQLite |
-| `GET`  | `/api/v1/incidents/{incident_id}`        | Lấy snapshot hiện tại                |
-| `DELETE` | `/api/v1/incidents/{incident_id}`     | Xóa một lịch sử Incident             |
-| `GET`  | `/api/v1/incidents/reports`              | Liệt kê terminal reports trong SQLite |
-| `POST` | `/api/v1/incidents/{incident_id}/review` | Gửi quyết định human review         |
+| Method     | Path                                       | Mục đích                               |
+| ---------- | ------------------------------------------ | ----------------------------------------- |
+| `GET`    | `/health`                                | Health check app                          |
+| `GET`    | `/api/v1/status`                         | Kiểm tra agent baseline                  |
+| `POST`   | `/api/v1/chat`                           | Chat agent demo                           |
+| `POST`   | `/api/v1/incidents/uploads`              | Upload video và CSV log                  |
+| `POST`   | `/api/v1/incidents`                      | Tạo và chạy incident                   |
+| `GET`    | `/api/v1/incidents`                      | Liệt kê lịch sử Incident trong SQLite |
+| `GET`    | `/api/v1/incidents/{incident_id}`        | Lấy snapshot hiện tại                  |
+| `DELETE` | `/api/v1/incidents/{incident_id}`        | Xóa một lịch sử Incident              |
+| `GET`    | `/api/v1/incidents/reports`              | Liệt kê terminal reports trong SQLite   |
+| `POST`   | `/api/v1/incidents/{incident_id}/review` | Gửi quyết định human review           |
 
 ### 7.1. Upload
 
@@ -409,26 +409,26 @@ Không commit `.env`. Điền tối thiểu `OPENAI_API_KEY` nếu dùng OpenAI.
 
 Các tổ hợp provider/input mode sau được chấp nhận:
 
-| `VLM_PROVIDER` | `VLM_INPUT_MODE`     | Ý nghĩa                                         |
-| ---------------- | ---------------------- | ------------------------------------------------- |
-| `openai`       | `timestamped_frames` | Lấy frame theo timestamp và gửi cho OpenAI VLM |
+| `VLM_PROVIDER` | `VLM_INPUT_MODE`     | Ý nghĩa                                               |
+| ---------------- | ---------------------- | ------------------------------------------------------- |
+| `openai`       | `timestamped_frames` | Lấy frame theo timestamp và gửi cho OpenAI VLM       |
 | `qwen`         | `native_video`       | Gửi video public URL tới Qwen3-VL-Flash qua DashScope |
 
 OpenAI + `native_video` và Qwen + `timestamped_frames` bị từ chối khi bootstrap Settings.
 
 ### 8.3. Nhóm biến quan trọng
 
-| Nhóm            | Biến                                                                                                                                    |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| App              | `APP_ENV`, `APP_HOST`, `APP_PORT`, `LOG_LEVEL`, `CORS_ORIGINS`                                                                 |
-| LLM              | `OPENAI_API_KEY`, `MODEL_NAME`, `LLM_TEMPERATURE`                                                                                  |
+| Nhóm            | Biến                                                                                                                                                                        |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App              | `APP_ENV`, `APP_HOST`, `APP_PORT`, `LOG_LEVEL`, `CORS_ORIGINS`                                                                                                     |
+| LLM              | `OPENAI_API_KEY`, `MODEL_NAME`, `LLM_TEMPERATURE`                                                                                                                      |
 | VLM              | `VLM_PROVIDER`, `VLM_INPUT_MODE`, `OPENAI_VLM_MODEL_NAME`, `DASHSCOPE_API_KEY`, `QWEN_VLM_MODEL_NAME`, `QWEN_BASE64_MAX_VIDEO_BYTES`, `QWEN_ARTIFACT_URL_BASE` |
-| VLM limits       | `VLM_TIMEOUT_S`, `VLM_MAX_RETRIES`, `VLM_FRAME_FPS`, `VLM_MAX_FRAMES`, `VLM_FRAME_OVERFLOW_STRATEGY`                           |
-| Model downstream | `VERIFICATION_MODEL_NAME`, `REPORT_MODEL_NAME`, timeout/temperature tương ứng                                                     |
-| Input            | `INCIDENT_INPUT_ROOTS`, `INCIDENT_UPLOAD_DIR`, `INCIDENT_MAX_VIDEO_BYTES`, `INCIDENT_MAX_LOG_BYTES`, `INCIDENT_MAX_DURATION_S` |
-| Log              | `LOG_TIMESTAMP_TOLERANCE_S`, `LOG_BRAKE_RISE_THRESHOLD`, `LOG_STEERING_CHANGE_THRESHOLD`                                           |
-| Storage          | `ARTIFACT_DIR`, `INCIDENT_DATABASE_PATH`, `INCIDENT_CHECKPOINT_PATH`                                                               |
-| Qwen video       | `QWEN_BASE_URL`, `QWEN_VIDEO_FPS`, `QWEN_ENABLE_THINKING`, `QWEN_THINKING_BUDGET`                                                     |
+| VLM limits       | `VLM_TIMEOUT_S`, `VLM_MAX_RETRIES`, `VLM_FRAME_FPS`, `VLM_MAX_FRAMES`, `VLM_FRAME_OVERFLOW_STRATEGY`                                                               |
+| Model downstream | `VERIFICATION_MODEL_NAME`, `REPORT_MODEL_NAME`, timeout/temperature tương ứng                                                                                         |
+| Input            | `INCIDENT_INPUT_ROOTS`, `INCIDENT_UPLOAD_DIR`, `INCIDENT_MAX_VIDEO_BYTES`, `INCIDENT_MAX_LOG_BYTES`, `INCIDENT_MAX_DURATION_S`                                     |
+| Log              | `LOG_TIMESTAMP_TOLERANCE_S`, `LOG_BRAKE_RISE_THRESHOLD`, `LOG_STEERING_CHANGE_THRESHOLD`                                                                               |
+| Storage          | `ARTIFACT_DIR`, `INCIDENT_DATABASE_PATH`, `INCIDENT_CHECKPOINT_PATH`                                                                                                   |
+| Qwen video       | `QWEN_BASE_URL`, `QWEN_VIDEO_FPS`, `QWEN_ENABLE_THINKING`, `QWEN_THINKING_BUDGET`                                                                                    |
 
 Với Qwen, `VLM_MAX_RETRIES` cũng là số lần thử lại khi JSON trả về đúng cú pháp nhưng không đạt schema. Mỗi lần
 thử lại nhận danh sách field validation bị lỗi. Adapter cũng kiểm tra incident window, representative timestamp,

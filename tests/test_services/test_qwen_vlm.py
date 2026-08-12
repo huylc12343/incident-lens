@@ -2,7 +2,9 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
+from openai import PermissionDeniedError
 
 from src.config import Settings
 from src.models.incidents import (
@@ -195,6 +197,47 @@ async def test_qwen_default_makes_only_one_request_for_invalid_structured_output
 
     assert exc_info.value.code == "VLM_STRUCTURED_OUTPUT_INVALID"
     assert client.chat.completions.create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_qwen_classifies_exhausted_free_tier_quota() -> None:
+    response = httpx.Response(
+        403,
+        request=httpx.Request("POST", "https://dashscope.example.test/chat/completions"),
+    )
+    provider_error = PermissionDeniedError(
+        "The free quota has been exhausted.",
+        response=response,
+        body={
+            "error": {
+                "type": "AllocationQuota.FreeTierOnly",
+                "code": "AllocationQuota.FreeTierOnly",
+            }
+        },
+    )
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(side_effect=provider_error)))
+    )
+    observability = ModelActivityRegistry()
+    service = QwenNativeVideoVLMService(
+        model="qwen3-vl-flash",
+        client=client,
+        observability=observability,
+    )
+    request = NativeVideoAnalysisRequest(
+        incident_id="INC-QWEN-QUOTA",
+        prompt=PromptEnvelope(text="Phân tích video."),
+        normalized_video_uri="https://cdn.example.test/artifacts/video.mp4",
+        metadata=NativeVideoMetadata(duration_s=2, width=1280, height=720, fps=15, size_bytes=100),
+    )
+
+    with pytest.raises(VLMServiceError) as exc_info:
+        await service.analyze_video(request)
+
+    assert exc_info.value.code == "QWEN_QUOTA_EXHAUSTED"
+    assert exc_info.value.retryable is False
+    assert "free quota" in str(exc_info.value)
+    assert observability.list("INC-QWEN-QUOTA")[0].error_code == "QWEN_QUOTA_EXHAUSTED"
 
 
 @pytest.mark.asyncio

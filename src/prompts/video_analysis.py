@@ -32,14 +32,16 @@ def build_video_analysis_prompt(
     }[input_mode]()
     text = "\n".join(
         [
-        "Nhiệm vụ duy nhất của bạn là phân tích toàn bộ video để xác định tai nạn hoặc va chạm giao thông "
-        "liên quan đến xe ego và tạo VideoMemory làm nguồn bằng chứng hình ảnh cho các bước xử lý sau.",
+        "Nhiệm vụ duy nhất của bạn là phân tích toàn bộ video một cách chính xác để xác định xem có tai nạn hoặc "
+        "va chạm giao thông liên quan đến xe ego hay không, và tạo VideoMemory làm nguồn bằng chứng hình ảnh cho "
+        "các bước xử lý sau. Độ chính xác của kết luận (đúng khi có tai nạn, đúng khi không có tai nạn) quan trọng "
+        "ngang với khả năng phát hiện tai nạn.",
 
         "Giả định bất biến: video LUÔN được quay bằng camera trước gắn cứng trên xe ego, hướng về phía trước "
-        "của xe. Camera không phải người quan sát tự di chuyển. Chuyển động tịnh tiến, quay, lệch hướng và "
-        "dừng của góc nhìn phải được phân tích là chuyển động tương ứng của xe ego, trừ khi có bằng chứng "
-        "rõ ràng về lỗi video. Không viết 'camera tiến', 'camera quay' hoặc 'camera dừng'; hãy viết "
-        "'xe ego tiến', 'xe ego đổi hướng' hoặc 'xe ego dừng'.",
+        "của xe (góc nhìn thứ nhất của xe ego, tương tự camera hành trình). Camera không phải người quan sát tự di "
+        "chuyển. Chuyển động tịnh tiến, quay, lệch hướng và dừng của góc nhìn phải được phân tích là chuyển động "
+        "tương ứng của xe ego, trừ khi có bằng chứng rõ ràng về lỗi video. Không viết 'camera tiến', 'camera quay' "
+        "hoặc 'camera dừng'; hãy viết 'xe ego tiến', 'xe ego đổi hướng' hoặc 'xe ego dừng'.",
 
         mode_instruction,
 
@@ -49,6 +51,13 @@ def build_video_analysis_prompt(
         "Chủ động tìm tai nạn của xe ego, bao gồm va chạm với phương tiện, người, lan can, hàng rào, tường, "
         "cây, bụi cây, vỉa hè, địa hình hoặc vật cản khác. Xe ego lao khỏi phần đường có thể lưu thông cũng "
         "là sự cố cần phát hiện. Không yêu cầu phải có phương tiện khác mới được xem là tai nạn.",
+
+        "Cẩn trọng với trường hợp không có tai nạn: không phải video nào cũng chứa va chạm. Nhiều video chỉ ghi lại "
+        "quá trình lái xe bình thường — rẽ, đổi làn, lên/xuống dốc, qua khúc cua, rung lắc nhẹ do mặt đường — mà "
+        "không có bất kỳ va chạm hoặc sự cố nào. Chuyển động camera thông thường không phải là bằng chứng của tai "
+        "nạn. Nếu sau khi xem toàn bộ video không có chuỗi bằng chứng đủ mạnh và nhất quán theo các tiêu chí bên "
+        "dưới, phải kết luận rõ ràng rằng không quan sát được tai nạn hoặc va chạm nào của xe ego, thay vì suy diễn "
+        "một sự cố không tồn tại. Ưu tiên độ chính xác hơn là xu hướng luôn cố tìm ra một sự cố.",
 
         "Điểm tiếp xúc có thể bị nắp capo, tán lá hoặc vật cản che khuất. Khi không nhìn thấy trực tiếp điểm "
         "tiếp xúc, phải đánh giá toàn bộ chuỗi trước–tại–sau sự kiện. Các dấu hiệu có thể gồm: xe ego liên tục "
@@ -72,7 +81,10 @@ def build_video_analysis_prompt(
 
         "Xác định đầy đủ incident_window bằng t_start, t0 và t_end, thỏa mãn "
         "t_start <= t0 <= t_end. Đặt t_start tại dấu hiệu sớm nhất liên quan trực tiếp đến sự cố, t0 tại sự kiện "
-        "nguy cấp chính và chỉ đặt t_end sau khi hậu quả hoặc kết cục cuối cùng nhìn thấy được đã ổn định hoặc kết thúc.",
+        "nguy cấp chính và chỉ đặt t_end sau khi hậu quả hoặc kết cục cuối cùng nhìn thấy được đã ổn định hoặc kết "
+        "thúc. Nếu không xác định được tai nạn hoặc va chạm nào, đặt incident_window quanh thời điểm hoặc giai đoạn "
+        "đáng chú ý nhất đã quan sát trong video (ví dụ khúc cua, tình huống cần chú ý dù không dẫn đến va chạm), "
+        "hoặc một đoạn đại diện hợp lý cho video nếu không có gì bất thường, để vẫn đảm bảo đầy đủ cấu trúc output.",
 
         "Sau khi chọn incident_window, chỉ đưa vào timeline, claims và evidence những mục có timestamp_s nằm "
         "trong đoạn đóng [incident_window.t_start, incident_window.t_end]. Không dùng timestamp pre-roll hoặc "
@@ -90,15 +102,18 @@ def build_video_analysis_prompt(
         "Viết video_summary thành một bản phân tích hình ảnh mạch lạc cho toàn bộ video: bối cảnh ban đầu, "
         "diễn biến dẫn đến sự cố, sự kiện chính và kết cục cuối cùng nhìn thấy được. video_summary được phép "
         "chứa suy luận hình ảnh hợp lý dựa trên chuỗi thời gian, bao gồm kết luận va chạm khi các quy tắc trên "
-        "được thỏa mãn; không giới hạn video_summary thành mô tả từng frame tĩnh.",
+        "được thỏa mãn, hoặc kết luận không có va chạm khi bằng chứng không đủ; không giới hạn video_summary thành "
+        "mô tả từng frame tĩnh.",
 
-        "Đặt representative_timestamp_s tại khung hình đại diện rõ nhất cho sự kiện chính. Với va chạm phương "
-        "tiện hoặc vật cản, ưu tiên thời điểm tiếp xúc hoặc tiếp cận gần nhất liên quan trực tiếp đến va chạm, "
-        "không chọn cảnh hậu quả xa sự kiện chính.",
+        "representative_timestamp_s phải là thời điểm chính xác xảy ra tai nạn/va chạm — thời điểm tiếp xúc thực tế "
+        "hoặc thời điểm gần nhất có thể xác định được của sự kiện nguy cấp chính, trùng hoặc rất sát t0; không chọn "
+        "cảnh tiếp cận từ xa hoặc cảnh hậu quả xa sự kiện chính. Nếu video không có tai nạn, chọn thời điểm đại diện "
+        "rõ nhất cho giai đoạn hoặc sự kiện đáng chú ý nhất đã phân tích.",
 
-        "Tạo claim cho từng giai đoạn quan trọng của sự cố. Mỗi claim phải có một ý chính rõ ràng và có evidence "
-        "tương ứng. Ưu tiên tách thành các giai đoạn như: trạng thái dẫn tới sự cố, sự kiện chính và trạng thái "
-        "sau sự cố thay vì gộp toàn bộ diễn biến vào một claim dài.",
+        "Tạo claim cho từng giai đoạn quan trọng của sự cố (hoặc từng giai đoạn quan trọng của quá trình lái xe nếu "
+        "không có sự cố). Mỗi claim phải có một ý chính rõ ràng, chính xác và có evidence tương ứng. Ưu tiên tách "
+        "thành các giai đoạn như: trạng thái dẫn tới sự cố, sự kiện chính và trạng thái sau sự cố thay vì gộp toàn "
+        "bộ diễn biến vào một claim dài.",
 
         "Một claim có thể chứa cả thông tin cảnh vật và trạng thái chuyển động nếu chúng cùng mô tả một sự kiện "
         "hình ảnh, nhưng tránh gộp nhiều sự thật độc lập không cần thiết. Việc này giúp bước đối chiếu log sau đó "
@@ -142,6 +157,7 @@ def build_video_analysis_prompt(
         f"Yêu cầu của chuyên viên phân tích: {user_request}",
         ]
     )
+
     return PromptEnvelope(
         text=text,
         source=PromptSource.SYSTEM,

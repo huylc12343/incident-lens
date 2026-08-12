@@ -71,6 +71,8 @@ async def test_qwen_sends_native_video_to_dashscope_chat_completions() -> None:
     assert '"analysis_mode"' in structured_prompt
     assert "Quy tắc phân tích hệ thống." in structured_prompt
     assert "Tập trung vào va chạm chính." not in structured_prompt
+    assert "Video bắt đầu tại 0s và kết thúc tại 2s" in structured_prompt
+    assert "t_start <= t0 <= t_end" in structured_prompt
     assert call["messages"][1]["content"][1]["text"] == (
         '<context>{"analyst_request":"Tập trung vào va chạm chính."}</context>'
     )
@@ -329,7 +331,7 @@ async def test_qwen_forces_reanalysis_claims_to_unverified_before_schema_validat
 
 
 @pytest.mark.asyncio
-async def test_qwen_rejects_timeline_outside_its_incident_window_in_one_request() -> None:
+async def test_qwen_expands_incident_window_to_cover_valid_timeline_in_one_request() -> None:
     payload = {
         "global_scene": "Đường giao thông.",
         "incident_window": {"t_start": 1, "t0": 1.5, "t_end": 2},
@@ -349,10 +351,43 @@ async def test_qwen_rejects_timeline_outside_its_incident_window_in_one_request(
         metadata=NativeVideoMetadata(duration_s=3, width=1280, height=720, fps=15, size_bytes=100),
     )
 
-    with pytest.raises(VLMServiceError) as exc_info:
-        await service.analyze_video(request)
+    result = await service.analyze_video(request)
 
-    assert exc_info.value.code == "VLM_STRUCTURED_OUTPUT_INVALID"
+    assert result.incident_window.t_start == 0.5
+    assert result.timeline[0].timestamp_s == 0.5
+    assert client.chat.completions.create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_qwen_clamps_one_sample_of_timestamp_rounding_drift_without_retry() -> None:
+    payload = {
+        "global_scene": "Đường giao thông.",
+        "incident_window": {"t_start": 1, "t0": 2, "t_end": 3.4},
+        "timeline": [{"timestamp_s": 3.4, "description": "Khung hình cuối", "evidence_ids": []}],
+    }
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
+    )
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=response)))
+    )
+    service = QwenNativeVideoVLMService(
+        model="qwen3-vl-flash",
+        client=client,
+        video_fps=2,
+        max_structured_output_retries=0,
+    )
+    request = NativeVideoAnalysisRequest(
+        incident_id="INC-QWEN-ROUNDING",
+        prompt=PromptEnvelope(text="Phân tích video."),
+        normalized_video_uri="https://cdn.example.test/artifacts/video.mp4",
+        metadata=NativeVideoMetadata(duration_s=3, width=1280, height=720, fps=15, size_bytes=100),
+    )
+
+    result = await service.analyze_video(request)
+
+    assert result.incident_window.t_end == 3
+    assert result.timeline[0].timestamp_s == 3
     assert client.chat.completions.create.await_count == 1
 
 
@@ -426,7 +461,6 @@ async def test_qwen_retries_timestamps_that_exceed_video_duration() -> None:
     assert client.chat.completions.create.await_count == 2
     retry_prompt = client.chat.completions.create.await_args_list[1].kwargs["messages"][1]["content"][1]["text"]
     assert "incident_window.t_end" in retry_prompt
-    assert "timeline.0.timestamp_s" in retry_prompt
     assert "timestamp_out_of_range" in retry_prompt
 
 

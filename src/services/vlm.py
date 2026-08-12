@@ -24,6 +24,7 @@ from pydantic import BaseModel, ValidationError
 
 from src.models.incidents import (
     AnalysisMode,
+    IncidentWindow,
     NativeVideoAnalysisRequest,
     ReanalysisRequest,
     RemoteMediaHandle,
@@ -379,7 +380,13 @@ class QwenNativeVideoVLMService:
             )
             if timestamp_bounds is not None:
                 structured_system_prompt += (
-                    f"\nMọi timestamp phải nằm trong [{timestamp_bounds[0]:g}, {timestamp_bounds[1]:g}] giây."
+                    "\nQUY TẮC TIMESTAMP BẮT BUỘC:\n"
+                    f"- Video bắt đầu tại {timestamp_bounds[0]:g}s và kết thúc tại "
+                    f"{timestamp_bounds[1]:g}s; không được trả timestamp ngoài khoảng này.\n"
+                    "- Phải có t_start <= t0 <= t_end.\n"
+                    "- representative_timestamp_s, mọi timeline.timestamp_s, claim.timestamp_s và "
+                    "evidence.timestamp_s phải nằm trong [t_start, t_end].\n"
+                    "- Timestamp là số giây tính từ đầu video, không phải số frame hay chuỗi thời gian."
                 )
             validation_feedback = ""
             for attempt in range(self._max_structured_output_retries + 1):
@@ -451,6 +458,11 @@ class QwenNativeVideoVLMService:
                     payload = _prepare_qwen_payload(payload, output_model, model_defaults)
                     result = output_model.model_validate(payload)
                     if timestamp_bounds is not None:
+                        result = _stabilize_qwen_timestamps(
+                            result,
+                            *timestamp_bounds,
+                            rounding_tolerance_s=1.0 / self._video_fps,
+                        )
                         _validate_qwen_timestamp_bounds(result, *timestamp_bounds)
                     if isinstance(result, VideoMemory):
                         try:
@@ -668,6 +680,80 @@ def _validate_qwen_timestamp_bounds(result: BaseModel, minimum_s: float, maximum
             )
     if errors:
         raise QwenStructuredOutputValidationError(errors, "Qwen output violates video timestamp bounds")
+
+
+def _stabilize_qwen_timestamps(
+    result: StructuredModel,
+    minimum_s: float,
+    maximum_s: float,
+    *,
+    rounding_tolerance_s: float,
+) -> StructuredModel:
+    """Repair sampling-rounding drift without accepting materially out-of-range timestamps."""
+
+    def normalize(timestamp_s: float | None) -> float | None:
+        if timestamp_s is None:
+            return None
+        if minimum_s - rounding_tolerance_s <= timestamp_s < minimum_s:
+            return minimum_s
+        if maximum_s < timestamp_s <= maximum_s + rounding_tolerance_s:
+            return maximum_s
+        return timestamp_s
+
+    if isinstance(result, VideoMemoryPatch):
+        claims = [
+            claim.model_copy(
+                update={
+                    "timestamp_s": normalize(claim.timestamp_s),
+                    "evidence": [
+                        evidence.model_copy(update={"timestamp_s": normalize(evidence.timestamp_s)})
+                        for evidence in claim.evidence
+                    ],
+                }
+            )
+            for claim in result.claims
+        ]
+        return result.model_copy(update={"claims": claims})
+
+    if not isinstance(result, VideoMemory):
+        return result
+
+    timeline = [
+        item.model_copy(update={"timestamp_s": normalize(item.timestamp_s)}) for item in result.timeline
+    ]
+    claims = [
+        claim.model_copy(
+            update={
+                "timestamp_s": normalize(claim.timestamp_s),
+                "evidence": [
+                    evidence.model_copy(update={"timestamp_s": normalize(evidence.timestamp_s)})
+                    for evidence in claim.evidence
+                ],
+            }
+        )
+        for claim in result.claims
+    ]
+    representative_timestamp_s = normalize(result.representative_timestamp_s)
+    window = result.incident_window
+    semantic_timestamps = [
+        *(item.timestamp_s for item in timeline),
+        *(claim.timestamp_s for claim in claims if claim.timestamp_s is not None),
+        *(evidence.timestamp_s for claim in claims for evidence in claim.evidence),
+        *([representative_timestamp_s] if representative_timestamp_s is not None else []),
+    ]
+    normalized_window = IncidentWindow(
+        t_start=min([normalize(window.t_start), *semantic_timestamps]),
+        t0=normalize(window.t0),
+        t_end=max([normalize(window.t_end), *semantic_timestamps]),
+    )
+    return result.model_copy(
+        update={
+            "incident_window": normalized_window,
+            "representative_timestamp_s": representative_timestamp_s,
+            "timeline": timeline,
+            "claims": claims,
+        }
+    )
 
 
 def _validate_qwen_incident_conclusion(memory: VideoMemory) -> None:

@@ -88,8 +88,9 @@ class OpenAIVLMService:
     async def analyze_video(self, request: VideoAnalysisRequest) -> VideoMemory:
         if not isinstance(request, TimestampedFramesAnalysisRequest):
             raise VLMServiceError("OPENAI_UNSUPPORTED_INPUT_MODE", "OpenAI VLM accepts timestamped frames only")
-        content = await self._build_frame_content(request.prompt.text, request.manifest.frames)
+        content = await self._build_frame_content(_prompt_context_text(request.prompt.context), request.manifest.frames)
         return await self._parse_response(
+            request.prompt.text,
             content,
             VideoMemory,
             "OPENAI_VIDEO_ANALYSIS_FAILED",
@@ -105,8 +106,12 @@ class OpenAIVLMService:
                 "OPENAI_REANALYSIS_FRAMES_REQUIRED",
                 "OpenAI re-analysis requires a timestamped frame manifest",
             )
-        content = await self._build_frame_content(request.prompt.text, request.frame_manifest.frames)
+        content = await self._build_frame_content(
+            _prompt_context_text(request.prompt.context),
+            request.frame_manifest.frames,
+        )
         patch = await self._parse_response(
+            request.prompt.text,
             content,
             VideoMemoryPatch,
             "OPENAI_REANALYSIS_FAILED",
@@ -153,6 +158,7 @@ class OpenAIVLMService:
 
     async def _parse_response(
         self,
+        system_prompt: str,
         content: list[dict[str, Any]],
         output_model: type[StructuredModel],
         error_code: str,
@@ -177,7 +183,10 @@ class OpenAIVLMService:
         try:
             request_kwargs: dict[str, Any] = {
                 "model": self._model,
-                "input": [{"role": "user", "content": content}],
+                "input": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": content},
+                ],
                 "text_format": output_model,
                 "timeout": self._timeout_s,
             }
@@ -279,6 +288,8 @@ class QwenNativeVideoVLMService:
             raise ValueError("model and base_url must not be blank")
         if timeout_s <= 0 or not 0 < video_fps <= 10 or min(thinking_budget, base64_max_video_bytes) <= 0:
             raise ValueError("timeout, video_fps, and thinking_budget must be positive")
+        if temperature != 0:
+            raise ValueError("Qwen3-VL-Flash temperature must be 0")
         if min(max_structured_output_retries, max_network_retries) < 0:
             raise ValueError("structured output and network retries must be non-negative")
         self._client = client if client is not None else AsyncOpenAI(api_key=api_key, base_url=base_url)
@@ -287,7 +298,7 @@ class QwenNativeVideoVLMService:
         self._artifact_url_base = artifact_url_base.rstrip("/")
         self._base64_max_video_bytes = base64_max_video_bytes
         self._timeout_s = timeout_s
-        self._temperature = temperature
+        self._temperature = 0.0
         self._video_fps = video_fps
         self._enable_thinking = enable_thinking
         self._thinking_budget = thinking_budget
@@ -308,7 +319,8 @@ class QwenNativeVideoVLMService:
             operation="video_analysis",
             description="Phân tích native video bằng Qwen3-VL-Flash và tạo VideoMemory có cấu trúc.",
             video_uri=request.normalized_video_uri,
-            prompt=request.prompt.text,
+            system_prompt=request.prompt.text,
+            user_prompt=_prompt_context_text(request.prompt.context),
             output_model=VideoMemory,
             model_defaults={"analysis_mode": AnalysisMode.NATIVE_VIDEO.value},
             timestamp_bounds=(0.0, request.metadata.duration_s),
@@ -323,7 +335,8 @@ class QwenNativeVideoVLMService:
             operation="claim_reanalysis",
             description="Phân tích lại các claim được chọn bằng Qwen3-VL-Flash.",
             video_uri=request.normalized_video_uri,
-            prompt=request.prompt.text,
+            system_prompt=request.prompt.text,
+            user_prompt=_prompt_context_text(request.prompt.context),
             output_model=VideoMemoryPatch,
             model_defaults={
                 "target_claim_ids": request.target_claim_ids,
@@ -344,7 +357,8 @@ class QwenNativeVideoVLMService:
         operation: str,
         description: str,
         video_uri: str,
-        prompt: str,
+        system_prompt: str,
+        user_prompt: str,
         output_model: type[StructuredModel],
         model_defaults: dict[str, Any] | None = None,
         timestamp_bounds: tuple[float, float] | None = None,
@@ -357,27 +371,31 @@ class QwenNativeVideoVLMService:
                 ensure_ascii=False,
                 separators=(",", ":"),
             )
-            structured_prompt = (
-                f"{prompt}\n"
+            structured_system_prompt = (
+                f"{system_prompt}\n"
                 "Trả về đúng một JSON object, không kèm Markdown. "
                 "JSON phải tuân thủ chính xác JSON Schema sau; không thêm trường ngoài schema:\n"
                 f"<json_schema>{output_schema}</json_schema>"
             )
             if timestamp_bounds is not None:
-                structured_prompt += (
+                structured_system_prompt += (
                     f"\nMọi timestamp phải nằm trong [{timestamp_bounds[0]:g}, {timestamp_bounds[1]:g}] giây."
                 )
             validation_feedback = ""
             for attempt in range(self._max_structured_output_retries + 1):
-                attempt_prompt = structured_prompt
+                attempt_user_prompt = user_prompt
                 if validation_feedback:
-                    attempt_prompt += (
+                    attempt_user_prompt += (
                         "\nJSON ở lần trước không hợp lệ. Hãy sửa đúng các lỗi validation sau và trả lại toàn bộ "
                         f"JSON object:\n<validation_errors>{validation_feedback}</validation_errors>"
                     )
                 request_kwargs: dict[str, Any] = {
                     "model": self._model,
                     "messages": [
+                        {
+                            "role": "system",
+                            "content": structured_system_prompt,
+                        },
                         {
                             "role": "user",
                             "content": [
@@ -386,11 +404,11 @@ class QwenNativeVideoVLMService:
                                     "video_url": {"url": self._public_video_url(video_uri)},
                                     "fps": self._video_fps,
                                 },
-                                {"type": "text", "text": attempt_prompt},
+                                {"type": "text", "text": attempt_user_prompt},
                             ],
                         }
                     ],
-                    "temperature": self._temperature,
+                    "temperature": 0.0,
                     "timeout": self._timeout_s,
                     "response_format": {"type": "json_object"},
                 }
@@ -545,6 +563,11 @@ def _parse_json_content(content: str | None) -> object:
     if normalized.startswith("```"):
         normalized = normalized.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     return json.loads(normalized)
+
+
+def _prompt_context_text(context: dict[str, Any]) -> str:
+    serialized = json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return f"<context>{serialized}</context>"
 
 
 def _is_dashscope_free_tier_exhausted(exc: PermissionDeniedError) -> bool:

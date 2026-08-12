@@ -57,7 +57,31 @@ async def test_openai_verification_uses_structured_output() -> None:
     assert result == verification
     call = client.responses.parse.await_args.kwargs
     assert call["text_format"] is VerificationResult
-    assert "claim-1" in call["input"][0]["content"]
+    assert [message["role"] for message in call["input"]] == ["system", "user"]
+    assert "claim-1" not in call["input"][0]["content"]
+    assert "claim-1" in call["input"][1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_gpt5_verification_omits_unsupported_temperature() -> None:
+    verification = VerificationResult(
+        results=[
+            ClaimVerification(
+                claim_id="claim-1",
+                status=VerificationStatus.UNVERIFIED,
+                reason="Không đủ dữ liệu.",
+            )
+        ]
+    )
+    client = SimpleNamespace(
+        responses=SimpleNamespace(parse=AsyncMock(return_value=SimpleNamespace(output_parsed=verification)))
+    )
+
+    await OpenAIVerificationService(model="gpt-5.6-luna", client=client).verify(_request())
+
+    call = client.responses.parse.await_args.kwargs
+    assert "temperature" not in call
+    assert [message["role"] for message in call["input"]] == ["system", "user"]
 
 
 @pytest.mark.asyncio

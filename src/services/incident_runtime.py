@@ -248,7 +248,7 @@ def _build_vlm(
             artifact_url_base=settings.qwen_artifact_url_base,
             base64_max_video_bytes=settings.qwen_base64_max_video_bytes,
             timeout_s=settings.vlm_timeout_s,
-            temperature=settings.vlm_temperature,
+            temperature=0.0,
             video_fps=settings.qwen_video_fps,
             enable_thinking=settings.qwen_enable_thinking,
             thinking_budget=settings.qwen_thinking_budget,

@@ -74,13 +74,18 @@ class OpenAIVerificationService:
                 metadata={"claim_count": len(request.claims)},
             )
         try:
-            response = await self._client.responses.parse(
-                model=self._model,
-                input=[{"role": "user", "content": prompt.text}],
-                text_format=VerificationResult,
-                temperature=self._temperature,
-                timeout=self._timeout_s,
-            )
+            request_kwargs: dict[str, Any] = {
+                "model": self._model,
+                "input": [
+                    {"role": "system", "content": prompt.text},
+                    {"role": "user", "content": _prompt_context_text(prompt.context)},
+                ],
+                "text_format": VerificationResult,
+                "timeout": self._timeout_s,
+            }
+            if not self._model.startswith("gpt-5"):
+                request_kwargs["temperature"] = self._temperature
+            response = await self._client.responses.parse(**request_kwargs)
             parsed = getattr(response, "output_parsed", None)
             if parsed is None:
                 parsed = json.loads(getattr(response, "output_text", ""))
@@ -215,3 +220,8 @@ def _validate_verification_result(request: VerificationRequest, result: Verifica
             item.model_copy(update={"evidence_ids": evidence_ids})
         )
     return result.model_copy(update={"results": normalized_results})
+
+
+def _prompt_context_text(context: dict[str, Any]) -> str:
+    serialized = json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return f"<context>{serialized}</context>"

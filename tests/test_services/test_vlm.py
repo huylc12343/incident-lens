@@ -76,7 +76,9 @@ async def test_openai_sends_all_ordered_frames_in_one_request(tmp_path: Path) ->
     assert result.analysis_mode == AnalysisMode.SINGLE_REQUEST
     client.responses.parse.assert_awaited_once()
     call = client.responses.parse.await_args.kwargs
-    content = call["input"][0]["content"]
+    assert [message["role"] for message in call["input"]] == ["system", "user"]
+    assert call["input"][0]["content"] == "Analyze frames"
+    content = call["input"][1]["content"]
     assert [item["type"] for item in content] == [
         "input_text",
         "input_text",

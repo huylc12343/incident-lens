@@ -8,7 +8,7 @@ from typing import Any
 from openai import AsyncOpenAI
 from pydantic import ValidationError
 
-from src.models.incidents import ReportModelOutput, ReportRequest
+from src.models.incidents import PromptEnvelope, ReportModelOutput, ReportRequest
 from src.prompts.reporting import build_report_prompt
 from src.services.model_observability import ModelActivityRegistry
 
@@ -66,13 +66,18 @@ class OpenAIReportService:
                 metadata={"claim_count": len(request.video_memory.claims)},
             )
         try:
-            response = await self._client.responses.parse(
-                model=self._model,
-                input=[{"role": "user", "content": prompt.text}],
-                text_format=ReportModelOutput,
-                temperature=self._temperature,
-                timeout=self._timeout_s,
-            )
+            request_kwargs: dict[str, Any] = {
+                "model": self._model,
+                "input": [
+                    {"role": "system", "content": prompt.text},
+                    {"role": "user", "content": _prompt_context_text(prompt)},
+                ],
+                "text_format": ReportModelOutput,
+                "timeout": self._timeout_s,
+            }
+            if not self._model.startswith("gpt-5"):
+                request_kwargs["temperature"] = self._temperature
+            response = await self._client.responses.parse(**request_kwargs)
             parsed = getattr(response, "output_parsed", None)
             if parsed is None:
                 parsed = json.loads(getattr(response, "output_text", ""))
@@ -95,3 +100,8 @@ class OpenAIReportService:
         if activity_id is not None:
             self._observability.complete(activity_id, response)
         return narrative
+
+
+def _prompt_context_text(prompt: PromptEnvelope) -> str:
+    serialized = json.dumps(prompt.context, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return f"<context>{serialized}</context>"

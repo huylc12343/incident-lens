@@ -53,7 +53,24 @@ async def test_openai_report_uses_one_structured_output_call() -> None:
 
     assert result == _narrative()
     client.responses.parse.assert_awaited_once()
-    assert client.responses.parse.await_args.kwargs["text_format"] is ReportModelOutput
+    call = client.responses.parse.await_args.kwargs
+    assert call["text_format"] is ReportModelOutput
+    assert [message["role"] for message in call["input"]] == ["system", "user"]
+    assert "INC-REPORT" not in call["input"][0]["content"]
+    assert "INC-REPORT" in call["input"][1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_gpt5_report_omits_unsupported_temperature() -> None:
+    client = SimpleNamespace(
+        responses=SimpleNamespace(parse=AsyncMock(return_value=SimpleNamespace(output_parsed=_narrative())))
+    )
+
+    await OpenAIReportService(model="gpt-5.6-luna", client=client).build_narrative(_request())
+
+    call = client.responses.parse.await_args.kwargs
+    assert "temperature" not in call
+    assert [message["role"] for message in call["input"]] == ["system", "user"]
 
 
 @pytest.mark.asyncio

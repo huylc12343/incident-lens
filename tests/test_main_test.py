@@ -95,7 +95,7 @@ def test_generated_incident_ids_are_unique() -> None:
     assert first != second
 
 
-def test_claim_status_rows_hide_raw_evidence() -> None:
+def test_claim_status_rows_include_verification_reason_and_hide_raw_evidence() -> None:
     rows = main_test._claim_status_rows(
         [
             {
@@ -105,7 +105,17 @@ def test_claim_status_rows_hide_raw_evidence() -> None:
                 "evidence": [{"evidence_id": "frame-1", "timestamp_s": 18.25}],
                 "verification_status": "supported",
             }
-        ]
+        ],
+        {
+            "results": [
+                {
+                    "claim_id": "claim-1",
+                    "status": "supported",
+                    "reason": "Tốc độ giảm về gần 0 km/h đúng thời điểm claim.",
+                    "evidence_ids": ["log-row:18.25"],
+                }
+            ]
+        },
     )
 
     assert rows == [
@@ -114,5 +124,14 @@ def test_claim_status_rows_hide_raw_evidence() -> None:
             "timestamp_s": 18.25,
             "claim": "Xe ego va chạm bụi cây",
             "status": "supported",
+            "reason": "Tốc độ giảm về gần 0 km/h đúng thời điểm claim.",
         }
     ]
+
+
+def test_claim_status_rows_leave_reason_empty_when_verification_is_unavailable() -> None:
+    rows = main_test._claim_status_rows(
+        [{"claim_id": "claim-1", "text": "Claim", "timestamp_s": 1.0}]
+    )
+
+    assert rows[0]["reason"] == ""

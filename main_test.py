@@ -307,23 +307,45 @@ def _render_snapshot(snapshot: dict[str, Any]) -> None:
             with st.expander(label, expanded=key in {"summary", "evidence_and_warnings"}):
                 _render_report_value(report.get(key))
 
+    verification = snapshot.get("verification")
+    if not isinstance(verification, dict) and isinstance(report, dict):
+        alignment = report.get("alignment")
+        if isinstance(alignment, dict):
+            verification = alignment.get("verification")
+
     st.subheader("Trạng thái xác thực claims")
-    st.dataframe(_claim_status_rows(snapshot.get("claims", [])), use_container_width=True, hide_index=True)
+    st.dataframe(
+        _claim_status_rows(snapshot.get("claims", []), verification),
+        use_container_width=True,
+        hide_index=True,
+    )
     for warning in snapshot.get("warnings", []):
         st.warning(warning)
     if snapshot.get("error_message"):
         st.error(f"{snapshot.get('error_code')}: {snapshot.get('error_message')}")
 
 
-def _claim_status_rows(claims: Any) -> list[dict[str, Any]]:
+def _claim_status_rows(claims: Any, verification: Any = None) -> list[dict[str, Any]]:
     if not isinstance(claims, list):
         return []
+
+    reasons_by_claim_id: dict[str, str] = {}
+    if isinstance(verification, dict) and isinstance(verification.get("results"), list):
+        for result in verification["results"]:
+            if not isinstance(result, dict):
+                continue
+            claim_id = result.get("claim_id")
+            reason = result.get("reason")
+            if isinstance(claim_id, str) and isinstance(reason, str):
+                reasons_by_claim_id[claim_id] = reason
+
     return [
         {
             "claim_id": claim.get("claim_id"),
             "timestamp_s": claim.get("timestamp_s"),
             "claim": claim.get("text"),
             "status": claim.get("verification_status", "unverified"),
+            "reason": reasons_by_claim_id.get(claim.get("claim_id"), ""),
         }
         for claim in claims
         if isinstance(claim, dict)

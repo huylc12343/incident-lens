@@ -44,7 +44,10 @@ async def test_qwen_sends_native_video_to_dashscope_chat_completions() -> None:
     service = QwenNativeVideoVLMService(model="qwen3-vl-flash", client=client)
     request = NativeVideoAnalysisRequest(
         incident_id="INC-QWEN",
-        prompt=PromptEnvelope(text="Phân tích video."),
+        prompt=PromptEnvelope(
+            text="Quy tắc phân tích hệ thống.",
+            context={"analyst_request": "Tập trung vào va chạm chính."},
+        ),
         normalized_video_uri="https://cdn.example.test/artifacts/video.mp4",
         metadata=NativeVideoMetadata(duration_s=2, width=1280, height=720, fps=15, size_bytes=100),
     )
@@ -54,15 +57,23 @@ async def test_qwen_sends_native_video_to_dashscope_chat_completions() -> None:
     assert result.analysis_mode == AnalysisMode.NATIVE_VIDEO
     call = client.chat.completions.create.await_args.kwargs
     assert call["model"] == "qwen3-vl-flash"
-    assert call["messages"][0]["content"][0] == {
+    assert call["temperature"] == 0.0
+    assert call["messages"][0]["role"] == "system"
+    assert call["messages"][1]["role"] == "user"
+    assert call["messages"][1]["content"][0] == {
         "type": "video_url",
         "video_url": {"url": request.normalized_video_uri},
         "fps": 2.0,
     }
     assert call["response_format"] == {"type": "json_object"}
-    structured_prompt = call["messages"][0]["content"][1]["text"]
+    structured_prompt = call["messages"][0]["content"]
     assert "<json_schema>" in structured_prompt
     assert '"analysis_mode"' in structured_prompt
+    assert "Quy tắc phân tích hệ thống." in structured_prompt
+    assert "Tập trung vào va chạm chính." not in structured_prompt
+    assert call["messages"][1]["content"][1]["text"] == (
+        '<context>{"analyst_request":"Tập trung vào va chạm chính."}</context>'
+    )
     assert "extra_body" not in call
 
 
@@ -136,7 +147,7 @@ async def test_qwen_retries_invalid_structured_output_with_validation_feedback()
 
     assert result.incident_window.t_end == 2
     assert client.chat.completions.create.await_count == 2
-    retry_prompt = client.chat.completions.create.await_args_list[1].kwargs["messages"][0]["content"][1]["text"]
+    retry_prompt = client.chat.completions.create.await_args_list[1].kwargs["messages"][1]["content"][1]["text"]
     assert "incident_window.t_end" in retry_prompt
     assert "greater_than" in retry_prompt
     activities = observability.list("INC-QWEN-RETRY")
@@ -413,7 +424,7 @@ async def test_qwen_retries_timestamps_that_exceed_video_duration() -> None:
 
     assert result.incident_window.t_end == 2
     assert client.chat.completions.create.await_count == 2
-    retry_prompt = client.chat.completions.create.await_args_list[1].kwargs["messages"][0]["content"][1]["text"]
+    retry_prompt = client.chat.completions.create.await_args_list[1].kwargs["messages"][1]["content"][1]["text"]
     assert "incident_window.t_end" in retry_prompt
     assert "timeline.0.timestamp_s" in retry_prompt
     assert "timestamp_out_of_range" in retry_prompt
@@ -454,7 +465,7 @@ async def test_qwen_retries_ambiguous_collision_conclusion() -> None:
 
     assert result.video_summary == "Xe ego va chạm bụi cây và dừng lại."
     assert client.chat.completions.create.await_count == 2
-    retry_prompt = client.chat.completions.create.await_args_list[1].kwargs["messages"][0]["content"][1]["text"]
+    retry_prompt = client.chat.completions.create.await_args_list[1].kwargs["messages"][1]["content"][1]["text"]
     assert "ambiguous_incident_conclusion" in retry_prompt
     assert "không dùng ngôn ngữ phỏng đoán" in retry_prompt
 
@@ -532,7 +543,7 @@ async def test_qwen_retries_collision_denial_that_conflicts_with_its_observation
     result = await service.analyze_video(request)
 
     assert result.video_summary == "Xe ego va chạm bụi cây và dừng lại."
-    retry_prompt = client.chat.completions.create.await_args_list[1].kwargs["messages"][0]["content"][1]["text"]
+    retry_prompt = client.chat.completions.create.await_args_list[1].kwargs["messages"][1]["content"][1]["text"]
     assert "incident_conclusion_conflicts_with_observed_sequence" in retry_prompt
 
 
@@ -547,6 +558,16 @@ def test_qwen_runtime_allows_base64_mode_without_public_artifact_url() -> None:
     service = _build_vlm(settings, ProviderClients(qwen=SimpleNamespace()))
 
     assert isinstance(service, QwenNativeVideoVLMService)
+    assert service._temperature == 0.0
+
+
+def test_qwen_rejects_nonzero_temperature() -> None:
+    with pytest.raises(ValueError, match="temperature must be 0"):
+        QwenNativeVideoVLMService(
+            model="qwen3-vl-flash",
+            client=SimpleNamespace(),
+            temperature=0.1,
+        )
 
 
 def test_qwen_encodes_small_local_video_as_data_url(tmp_path) -> None:

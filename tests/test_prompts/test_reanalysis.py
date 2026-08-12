@@ -2,7 +2,6 @@ import pytest
 
 from src.models.incidents import (
     Claim,
-    EvidenceReference,
     IncidentWindow,
     LogEvidenceSummary,
     PromptSource,
@@ -32,30 +31,25 @@ def test_auto_reanalysis_contains_only_automatic_context() -> None:
         "timestamp_window",
     }
     assert "feedback" not in prompt.context
-    assert "claim-1" in prompt.text
+    assert "claim-1" not in prompt.text
+    assert prompt.context["conflict_claim"]["claim_id"] == "claim-1"
 
 
 def test_human_reanalysis_contains_only_reviewer_context() -> None:
     claim = Claim(claim_id="claim-1", text="The vehicle braked hard", timestamp_s=12.5)
-    evidence = EvidenceReference(
-        evidence_id="frame-1",
-        kind="frame",
-        artifact_uri="data/artifacts/frame-1.jpg",
-        timestamp_s=12.5,
-    )
     prompt = build_human_reanalysis_prompt(
         target_claim_ids=["claim-1"],
         feedback="Check whether the brake lights illuminate.",
         current_claims=[claim],
-        current_evidence=[evidence],
         version="human-v3",
     )
 
     assert prompt.source == PromptSource.HUMAN_PROVIDED
     assert prompt.version == "human-v3"
-    assert set(prompt.context) == {"target_claim_ids", "feedback", "current_claims", "current_evidence"}
+    assert set(prompt.context) == {"target_claim_ids", "feedback", "current_claims"}
     assert "verification_reason" not in prompt.context
-    assert "Check whether" in prompt.text
+    assert "Check whether" not in prompt.text
+    assert prompt.context["feedback"] == "Check whether the brake lights illuminate."
     assert "nội dung giải thích mới phải bằng tiếng Việt" in prompt.text
 
 
@@ -71,12 +65,12 @@ def test_auto_and_human_prompts_are_deterministic_and_distinct() -> None:
         "target_claim_ids": ["claim-1"],
         "feedback": "Review this claim",
         "current_claims": [claim],
-        "current_evidence": [],
     }
 
     assert build_auto_reanalysis_prompt(**auto_kwargs) == build_auto_reanalysis_prompt(**auto_kwargs)
     assert build_human_reanalysis_prompt(**human_kwargs) == build_human_reanalysis_prompt(**human_kwargs)
-    assert build_auto_reanalysis_prompt(**auto_kwargs).text != build_human_reanalysis_prompt(**human_kwargs).text
+    assert build_auto_reanalysis_prompt(**auto_kwargs).text == build_human_reanalysis_prompt(**human_kwargs).text
+    assert build_auto_reanalysis_prompt(**auto_kwargs).context != build_human_reanalysis_prompt(**human_kwargs).context
 
 
 @pytest.mark.parametrize("feedback", ["", "   "])
@@ -86,7 +80,6 @@ def test_human_reanalysis_rejects_blank_feedback(feedback: str) -> None:
             target_claim_ids=["claim-1"],
             feedback=feedback,
             current_claims=[Claim(claim_id="claim-1", text="Claim")],
-            current_evidence=[],
         )
 
 
@@ -96,5 +89,4 @@ def test_human_reanalysis_rejects_unknown_target_claim() -> None:
             target_claim_ids=["missing"],
             feedback="Review",
             current_claims=[Claim(claim_id="claim-1", text="Claim")],
-            current_evidence=[],
         )

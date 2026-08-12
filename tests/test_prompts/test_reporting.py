@@ -41,10 +41,10 @@ def test_report_prompt_only_requests_three_model_owned_fields() -> None:
     prompt = build_report_prompt(incident_id="INC-001", video_memory=_video_memory_with_private_provider_data())
 
     assert "field tường thuật" in prompt.text
-    assert "Cả ba field bắt buộc là string tiếng Việt không rỗng" in prompt.text
-    assert "không đổi field thành array" in prompt.text
-    assert "Không tạo summary, log_findings, alignment, evidence_ids" in prompt.text
-    assert "Không bọc JSON trong Markdown" in prompt.text
+    assert "timeline, video_observations, hypothesized_causes" in prompt.text
+    assert "Không sinh summary, log_findings, alignment, evidence_ids" in prompt.text
+    assert "Toàn bộ nội dung bằng tiếng Việt" in prompt.text
+    assert "trạng thái review" in prompt.text
 
 
 def test_report_prompt_excludes_provider_handles_and_artifact_locations() -> None:

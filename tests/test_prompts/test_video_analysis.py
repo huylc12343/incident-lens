@@ -27,23 +27,20 @@ def test_video_analysis_prompt_selects_mode_instruction(
 
     assert expected_instruction in prompt.text
     assert "t_start <= t0 <= t_end" in prompt.text
-    assert "incident_window.t_end = thời lượng video" in prompt.text
-    assert "Không bao giờ trả incident_window.t_end = 0" in prompt.text
-    assert "representative_timestamp_s = null" in prompt.text
-    assert "camera trước gắn cố định trên xe ego" in prompt.text
-    assert 'Không mô tả "camera tiến/quay/dừng"' in prompt.text
+    assert "camera trước gắn cứng trên xe ego" in prompt.text
+    assert "không viết 'camera tiến/quay/dừng'" in prompt.text
     assert "trước–tại–sau" in prompt.text
     assert "representative_timestamp_s" in prompt.text
-    assert "JSON Schema được cung cấp cùng request là nguồn duy nhất" in prompt.text
-    assert "incident_window: object gồm đúng t_start, t0, t_end và t_end > 0" in prompt.text
-    assert "claim.evidence: array" in prompt.text
-    assert "Không dùng chuỗi thay cho array/object" in prompt.text
     assert "VideoMemory" in prompt.text
     assert 'verification_status="unverified"' in prompt.text
-    assert "Không trả chain-of-thought" in prompt.text
+    assert "không trả chain-of-thought" in prompt.text
+    assert "Identify the main traffic incident." not in prompt.text
     assert prompt.source == PromptSource.SYSTEM
     assert prompt.version == "video-v2"
-    assert prompt.context == {"input_mode": mode.value}
+    assert prompt.context == {
+        "input_mode": mode.value,
+        "analyst_request": "Identify the main traffic incident.",
+    }
 
 
 def test_video_analysis_prompt_is_deterministic() -> None:

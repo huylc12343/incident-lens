@@ -566,7 +566,8 @@ def _build_claim_summary(
                 f"Mẫu log gần nhất: {_format_timestamp_s(nearest_timestamp_s)}s",
                 f"Log window: {_format_timestamp_s(records[0].timestamp_s)}s → "
                 f"{_format_timestamp_s(records[-1].timestamp_s)}s",
-                f"Số mẫu: {len(records)}",
+                f"Số mẫu log trong cửa sổ: {len(records)}",
+                f"Số mẫu đại diện tối đa trong mỗi bảng: {min(len(records), 4)}",
                 f"Sai lệch timestamp: {_format_timestamp_s(distance_s)}s",
                 f"Trong tolerance: **{'Có' if within_tolerance else 'Không'}**",
             ]
@@ -587,8 +588,8 @@ def _build_claim_summary(
             f"Tốc độ tại giây thứ {_second_label(records[-1].timestamp_s)}: {float(speed['end']):g} km/h",
             f"Tốc độ nhỏ nhất: {float(speed['min']):g} km/h",
             f"Tốc độ lớn nhất: {float(speed['max']):g} km/h",
-            "Tốc độ theo từng giây như sau:",
-            *_per_second_signal_lines(records, CLAIM_SPEED_ALIASES, unit=" km/h"),
+            "Tốc độ — các mẫu đại diện phân bố đều:",
+            *_representative_signal_table(records, CLAIM_SPEED_ALIASES, "Speed (km/h)"),
         ]
         speed_lines.extend(_derived_speed_states(speed))
         sections.append("\n".join(speed_lines))
@@ -601,16 +602,16 @@ def _build_claim_summary(
             control_lines.extend(
                 [
                     _brake_statement(brake),
-                    "Brake theo từng giây như sau:",
-                    *_per_second_signal_lines(records, CLAIM_BRAKE_ALIASES),
+                    "Brake — các mẫu đại diện phân bố đều:",
+                    *_representative_signal_table(records, CLAIM_BRAKE_ALIASES, "Brake"),
                 ]
             )
         if throttle:
             control_lines.extend(
                 [
                     _throttle_statement(throttle),
-                    "Ga theo từng giây như sau:",
-                    *_per_second_signal_lines(records, CLAIM_THROTTLE_ALIASES),
+                    "Throttle — các mẫu đại diện phân bố đều:",
+                    *_representative_signal_table(records, CLAIM_THROTTLE_ALIASES, "Throttle"),
                 ]
             )
         if speed and speed.get("acceleration_at_claim") is not None:
@@ -639,8 +640,8 @@ def _build_claim_summary(
                 [
                     f"Steering thay đổi lớn nhất: {steer_change:g}",
                     _steering_direction_statement(records, claim_timestamp_s),
-                    "Steering theo từng giây như sau:",
-                    *_per_second_signal_lines(records, CLAIM_STEER_ALIASES),
+                    "Steering — các mẫu đại diện phân bố đều:",
+                    *_representative_signal_table(records, CLAIM_STEER_ALIASES, "Steering"),
                 ]
             )
         sections.append("\n".join(direction_lines))
@@ -662,27 +663,30 @@ def _second_label(value: float) -> str:
     return f"{value:g}"
 
 
-def _per_second_signal_lines(
+def _representative_signal_table(
     records: list[LogRecord],
     aliases: tuple[str, ...],
-    *,
-    unit: str = "",
+    value_label: str,
+    max_samples: int = 4,
 ) -> list[str]:
-    start_second = math.ceil(records[0].timestamp_s)
-    end_second = math.floor(records[-1].timestamp_s)
-    lines = []
-    for second in range(start_second, end_second + 1):
-        record = min(records, key=lambda item: abs(item.timestamp_s - second))
-        value = record.number(aliases)
-        if value is not None and abs(record.timestamp_s - second) <= 0.5:
-            lines.append(f"{second}s: {value:g}{unit}")
-    if lines:
-        return lines
-    present = [(record.timestamp_s, record.number(aliases)) for record in records]
+    if max_samples <= 0:
+        raise ValueError("max_samples must be positive")
+    sample_count = min(len(records), max_samples)
+    if sample_count == 1:
+        selected = records[:1]
+    else:
+        last_index = len(records) - 1
+        indexes = [round(position * last_index / (sample_count - 1)) for position in range(sample_count)]
+        selected = [records[index] for index in indexes]
+    rows = [
+        (record.timestamp_s, value)
+        for record in selected
+        if (value := record.number(aliases)) is not None
+    ]
     return [
-        f"{_format_timestamp_s(timestamp_s)}s: {value:g}{unit}"
-        for timestamp_s, value in present
-        if value is not None
+        f"| Timestamp | {value_label} |",
+        "| --------: | -----------: |",
+        *(f"| {_format_timestamp_s(timestamp_s)}s | {value:g} |" for timestamp_s, value in rows),
     ]
 
 

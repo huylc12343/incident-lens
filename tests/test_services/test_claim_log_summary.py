@@ -72,7 +72,7 @@ def test_claim_log_summary_uses_configured_sample_radius(tmp_path) -> None:
     assert summary.sample_start_s == 0.15
     assert summary.sample_end_s == 0.25
     assert "Log window: 0.15s → 0.25s" in summary.summary
-    assert "Số mẫu: 3" in summary.summary
+    assert "Số mẫu log trong cửa sổ: 3" in summary.summary
 
 
 def test_claim_log_summary_withholds_evidence_outside_timestamp_tolerance(tmp_path) -> None:
@@ -166,7 +166,7 @@ def test_claim_log_summary_formats_rule_derived_states_for_verification(tmp_path
 
     assert "Claim timestamp: 17.0s" in summary.summary
     assert "Log window: 16.7s → 17.3s" in summary.summary
-    assert "Số mẫu: 3" in summary.summary
+    assert "Số mẫu log trong cửa sổ: 3" in summary.summary
     assert "Sai lệch timestamp: 0.0s" in summary.summary
     assert "Trong tolerance: **Có**" in summary.summary
     assert "Tốc độ tại giây thứ 16.7: 29.7 km/h" in summary.summary
@@ -178,7 +178,7 @@ def test_claim_log_summary_formats_rule_derived_states_for_verification(tmp_path
     assert "Gia tốc tại 17.0s: -26.8981 m/s²" in summary.summary
     assert "Yaw thay đổi: 0.05°" in summary.summary
     assert "Steering tại 17.0s: 0.02 => xe có xu hướng rẽ phải." in summary.summary
-    assert "17s: 0.65 km/h" in summary.summary
+    assert "| 17.0s | 0.65 |" in summary.summary
 
 
 def test_claim_log_summary_formats_per_second_series_and_claim_acceleration(tmp_path) -> None:
@@ -218,15 +218,49 @@ def test_claim_log_summary_formats_per_second_series_and_claim_acceleration(tmp_
 
     assert summary.sample_count == 13
     assert "Log window: 7.0s → 13.0s" in summary.summary
-    assert "Số mẫu: 13" in summary.summary
+    assert "Số mẫu log trong cửa sổ: 13" in summary.summary
+    assert "Số mẫu đại diện tối đa trong mỗi bảng: 4" in summary.summary
     assert "brake [0, 1]: 0 là không phanh, 1 là đạp phanh hết cỡ;" in summary.summary
     assert "steering < 0 rẽ trái" in summary.summary
-    assert "Tốc độ theo từng giây như sau:\n7s: 28 km/h\n8s: 26 km/h" in summary.summary
-    assert "13s: 1.2 km/h" in summary.summary
-    assert "Brake theo từng giây như sau:\n7s: 0.9" in summary.summary
-    assert "Ga theo từng giây như sau:\n7s: 0.03" in summary.summary
+    assert "| Timestamp | Speed (km/h) |" in summary.summary
+    assert "| 7.0s | 28 |\n| 9.0s | 24 |\n| 11.0s | 10 |\n| 13.0s | 1.2 |" in summary.summary
+    assert "| Timestamp | Brake |" in summary.summary
+    assert "| 7.0s | 0.9 |\n| 9.0s | 0.58 |\n| 11.0s | 0.31 |\n| 13.0s | 0.17 |" in summary.summary
+    assert "| Timestamp | Throttle |" in summary.summary
+    assert "| Timestamp | Steering |" in summary.summary
     assert "Gia tốc tại 10.0s: -3.61111 m/s²" in summary.summary
     assert "Giảm tốc cực đại trong cửa sổ: -3.61111 m/s² tại 10.0s" in summary.summary
     assert "Steering tại 10.0s: -0.34 => xe có xu hướng rẽ trái." in summary.summary
     assert summaries[0].metrics["speed_kmh"]["acceleration_at_claim"] == pytest.approx(-3.611111)
     assert summaries[1].metrics["speed_kmh"]["acceleration_at_claim"] == pytest.approx(-1.666667)
+
+
+def test_claim_log_summary_evenly_samples_a_subsecond_window(tmp_path) -> None:
+    log = tmp_path / "subsecond-window.csv"
+    rows = [
+        (3.7 + index * 0.05, 20 + index, index / 20, index / 12, -0.3 + index * 0.05)
+        for index in range(13)
+    ]
+    log.write_text(
+        "timestamp,speed_kmh,throttle,brake,steer\n"
+        + "\n".join(",".join(str(value) for value in row) for row in rows)
+        + "\n",
+        encoding="utf-8",
+    )
+
+    summary = build_claim_log_summaries(
+        str(log),
+        [Claim(claim_id="claim-3", text="Xe thay đổi chuyển động", timestamp_s=4.0)],
+        timestamp_tolerance_s=0.1,
+        sample_radius=6,
+    )[0]
+
+    assert summary.sample_count == 13
+    assert "Số mẫu log trong cửa sổ: 13" in summary.summary
+    assert "Số mẫu đại diện tối đa trong mỗi bảng: 4" in summary.summary
+    for value_label in ("Speed (km/h)", "Brake", "Throttle", "Steering"):
+        table = summary.summary.split(f"| Timestamp | {value_label} |", 1)[1].split("\n\n", 1)[0]
+        assert "| 3.7s |" in table
+        assert "| 3.9s |" in table
+        assert "| 4.1s |" in table
+        assert "| 4.3s |" in table

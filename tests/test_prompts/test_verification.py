@@ -33,6 +33,8 @@ def test_verification_prompt_requires_one_result_per_claim() -> None:
     assert item["within_tolerance"] is True
     assert item["claim"]["log_summary"] == "Brake tăng mạnh tại 12.5 giây."
     assert set(item) == {"claim", "within_tolerance", "allowed_evidence_ids"}
+    assert "verification_items" not in prompt.text
+    assert "Brake tăng mạnh tại 12.5 giây." not in prompt.text
     assert "claim_log_summary" not in prompt.text
     assert '"metrics"' not in prompt.text
     assert "log_evidence_summary" not in prompt.context

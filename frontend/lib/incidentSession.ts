@@ -2,6 +2,7 @@ export const INCIDENT_KEYS = {
   timestamp: "vlens:event-timestamp",
   incidentId: "vlens:incident-id",
   reviewMetrics: "vlens:review-metrics",
+  snapshot: "vlens:incident-snapshot",
 } as const;
 
 export function isTimestamp(value: string) {

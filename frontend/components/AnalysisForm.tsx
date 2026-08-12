@@ -6,6 +6,7 @@ import { FileUploadCard } from "./FileUploadCard";
 import { TimestampInput } from "./TimestampInput";
 import { saveUploadedVideo } from "../lib/uploadStorage";
 import { INCIDENT_KEYS, isTimestamp } from "../lib/incidentSession";
+import { createIncident, uploadIncident } from "../lib/incidentApi";
 
 export function AnalysisForm() {
   const router = useRouter();
@@ -14,6 +15,8 @@ export function AnalysisForm() {
   const [timestamp, setTimestamp] = useState("");
   const [touched, setTouched] = useState(false);
   const [toast, setToast] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
   const timestampError =
     touched && !isTimestamp(timestamp)
       ? timestamp
@@ -24,7 +27,9 @@ export function AnalysisForm() {
   async function submit(event: FormEvent) {
     event.preventDefault();
     setTouched(true);
-    if (!ready || !video || !telemetry.length) return;
+    if (!ready || !video || !telemetry.length || submitting) return;
+    setSubmitting(true);
+    setError("");
     const previousUrl = sessionStorage.getItem("vlens:video-url");
     if (previousUrl) URL.revokeObjectURL(previousUrl);
     sessionStorage.setItem("vlens:video-url", URL.createObjectURL(video));
@@ -34,17 +39,26 @@ export function AnalysisForm() {
       // The session object URL above remains available as the playback fallback.
     }
     sessionStorage.setItem("vlens:video-name", video.name);
-    sessionStorage.setItem(INCIDENT_KEYS.timestamp, timestamp);
-    sessionStorage.setItem(INCIDENT_KEYS.incidentId, `DG-${Date.now()}`);
-    const request = {
-      videoFile: video.name,
-      telemetryFiles: telemetry.map((file) => file.name),
-      knownTimestamp: timestamp,
-    };
-    console.log(request);
-    setToast(true);
-    window.setTimeout(() => router.push("/processing"), 550);
-    /* TODO: Connect this action to the FastAPI analysis endpoint. */
+    const incidentId = `INC-${crypto.randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
+    try {
+      const uploaded = await uploadIncident(video, telemetry[0]);
+      const snapshot = await createIncident({
+        incident_id: incidentId,
+        video_uri: uploaded.video_uri,
+        log_uri: uploaded.log_uri,
+        analysis_prompt: `Analyze the disengagement incident around ${timestamp}. Use only observable video and telemetry evidence.`,
+        metadata: { known_timestamp: timestamp, telemetry_files: telemetry.map((file) => file.name) },
+      });
+      sessionStorage.setItem(INCIDENT_KEYS.timestamp, timestamp);
+      sessionStorage.setItem(INCIDENT_KEYS.incidentId, snapshot.incident_id);
+      sessionStorage.setItem(INCIDENT_KEYS.snapshot, JSON.stringify(snapshot));
+      setToast(true);
+      router.push("/processing");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not start incident analysis.");
+    } finally {
+      setSubmitting(false);
+    }
   }
   return (
     <section className="workspace-card" aria-labelledby="analysis-title">
@@ -78,8 +92,8 @@ export function AnalysisForm() {
         </div>
         <div className="form-footer">
           <p>Files are used to review this recorded disengagement only.</p>
-          <button className="primary-button" type="submit" disabled={!ready}>
-            Analyze Disengagement <span>→</span>
+          <button className="primary-button" type="submit" disabled={!ready || submitting}>
+            {submitting ? "Uploading…" : "Analyze Disengagement"} <span>→</span>
           </button>
         </div>
       </form>
@@ -88,6 +102,7 @@ export function AnalysisForm() {
           <span>✓</span> Analysis request ready.
         </div>
       )}
+      {error && <p className="form-error" role="alert">{error}</p>}
     </section>
   );
 }

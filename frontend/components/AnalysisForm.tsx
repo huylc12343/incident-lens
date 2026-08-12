@@ -1,32 +1,32 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileUploadCard } from "./FileUploadCard";
-import { TimestampInput } from "./TimestampInput";
 import { saveUploadedVideo } from "../lib/uploadStorage";
-import { INCIDENT_KEYS, isTimestamp } from "../lib/incidentSession";
+import { INCIDENT_KEYS } from "../lib/incidentSession";
 import { createIncident, uploadIncident } from "../lib/incidentApi";
 
 export function AnalysisForm() {
   const router = useRouter();
   const [video, setVideo] = useState<File | null>(null);
   const [telemetry, setTelemetry] = useState<File[]>([]);
-  const [timestamp, setTimestamp] = useState("");
-  const [touched, setTouched] = useState(false);
   const [toast, setToast] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [submitProgress, setSubmitProgress] = useState(0);
   const [error, setError] = useState("");
-  const timestampError =
-    touched && !isTimestamp(timestamp)
-      ? timestamp
-        ? "Use a valid timestamp in HH:MM:SS.mmm format."
-        : "Known event timestamp is required."
-      : "";
-  const ready = Boolean(video && telemetry.length && isTimestamp(timestamp));
+  const ready = Boolean(video && telemetry.length);
+
+  useEffect(() => {
+    if (!submitting) return;
+    setSubmitProgress(12);
+    const timer = window.setInterval(() => {
+      setSubmitProgress((current) => Math.min(90, current + Math.max(1, Math.round((90 - current) / 8))));
+    }, 450);
+    return () => window.clearInterval(timer);
+  }, [submitting]);
   async function submit(event: FormEvent) {
     event.preventDefault();
-    setTouched(true);
     if (!ready || !video || !telemetry.length || submitting) return;
     setSubmitting(true);
     setError("");
@@ -46,10 +46,11 @@ export function AnalysisForm() {
         incident_id: incidentId,
         video_uri: uploaded.video_uri,
         log_uri: uploaded.log_uri,
-        analysis_prompt: `Analyze the disengagement incident around ${timestamp}. Use only observable video and telemetry evidence.`,
-        metadata: { known_timestamp: timestamp, telemetry_files: telemetry.map((file) => file.name) },
+        analysis_prompt: "Analyze the full recording, automatically identify the disengagement event timestamp, and use only observable video and telemetry evidence.",
+        metadata: { timestamp_detection: "automatic", telemetry_files: telemetry.map((file) => file.name) },
       });
-      sessionStorage.setItem(INCIDENT_KEYS.timestamp, timestamp);
+      setSubmitProgress(100);
+      sessionStorage.removeItem(INCIDENT_KEYS.timestamp);
       sessionStorage.setItem(INCIDENT_KEYS.incidentId, snapshot.incident_id);
       sessionStorage.setItem(INCIDENT_KEYS.snapshot, JSON.stringify(snapshot));
       setToast(true);
@@ -67,15 +68,10 @@ export function AnalysisForm() {
           <p className="eyebrow">New review</p>
           <h2 id="analysis-title">Prepare an analysis request</h2>
         </div>
-        <TimestampInput
-          value={timestamp}
-          error={timestampError}
-          onChange={(value) => {
-            setTimestamp(value);
-            setTouched(true);
-          }}
-        />
-        <span>Required fields marked *</span>
+        <div className="automatic-timestamp" role="note">
+          <strong>Automatic event detection</strong>
+          <span>The event timestamp will be detected from the uploaded recording.</span>
+        </div>
       </div>
       <form onSubmit={submit}>
         <div className="upload-grid">
@@ -90,6 +86,13 @@ export function AnalysisForm() {
             onChange={setTelemetry}
           />
         </div>
+        {submitting && (
+          <div className="submission-progress" role="status" aria-live="polite">
+            <div><strong>Starting analysis…</strong><span>{submitProgress}%</span></div>
+            <div className="progress-track"><span style={{ width: `${submitProgress}%` }} /></div>
+            <p>Please keep this page open while the files are uploaded.</p>
+          </div>
+        )}
         <div className="form-footer">
           <p>Files are used to review this recorded disengagement only.</p>
           <button className="primary-button" type="submit" disabled={!ready || submitting}>

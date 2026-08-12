@@ -17,11 +17,11 @@ export function ProcessingContent() {
   const [videoUrl, setVideoUrl] = useState("");
   const [error, setError] = useState("");
   const [videoName, setVideoName] = useState("front_camera.mp4");
-  const [eventTimestamp, setEventTimestamp] = useState("00:00:00.000");
+  const [eventTimestamp, setEventTimestamp] = useState("Detecting automatically…");
 
   useEffect(() => {
     setVideoName(sessionStorage.getItem("vlens:video-name") ?? "front_camera.mp4");
-    setEventTimestamp(sessionStorage.getItem(INCIDENT_KEYS.timestamp) ?? "00:00:00.000");
+    setEventTimestamp(sessionStorage.getItem(INCIDENT_KEYS.timestamp) ?? "Detecting automatically…");
     let objectUrl = "";
     loadUploadedVideo().then((file) => {
       if (file) { objectUrl = URL.createObjectURL(file); setVideoUrl(objectUrl); }
@@ -39,6 +39,14 @@ export function ProcessingContent() {
         const next = await getIncident(id);
         if (!active) return;
         setSnapshot(next);
+        const report = next.draft_report ?? next.final_report;
+        const incidentWindow = report?.incident_window as { t0?: number } | undefined;
+        const detectedTimestamp = incidentWindow?.t0 ?? next.claims[0]?.timestamp_s;
+        if (detectedTimestamp !== undefined) {
+          const formatted = secondsToTimestamp(detectedTimestamp);
+          setEventTimestamp(formatted);
+          sessionStorage.setItem(INCIDENT_KEYS.timestamp, formatted);
+        }
         sessionStorage.setItem(INCIDENT_KEYS.snapshot, JSON.stringify(next));
         if (next.status === "awaiting_review") { router.push("/review"); return; }
         if (["approved", "not_incident"].includes(next.status)) { router.push("/evaluation"); return; }
@@ -57,7 +65,7 @@ export function ProcessingContent() {
     <>
       <section className="context-bar">
         <div><span>Analyzing video</span><strong>{videoName}</strong></div>
-        <div><span>Known disengagement timestamp</span><strong>{eventTimestamp}</strong></div>
+        <div><span>Detected event timestamp</span><strong>{eventTimestamp}</strong></div>
         <div><span>Workflow status</span><strong>{snapshot?.status ?? "queued"} <i>·</i> {snapshot?.claims.length ?? 0} claims</strong></div>
         <p>Visual and telemetry evidence is analyzed by the incident workflow. This page updates automatically.</p>
       </section>

@@ -1,6 +1,8 @@
 import type { IncidentSnapshot, ReviewPayload } from "../types/incident";
 
-export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
+// Use the Next.js same-origin proxy by default. This also works when the UI is
+// opened from another device, where `localhost` would refer to that device.
+export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "/backend").replace(/\/$/, "");
 
 async function responseJson<T>(response: Response): Promise<T> {
   const data = await response.json().catch(() => null);

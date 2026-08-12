@@ -27,6 +27,7 @@ from src.services.video_memory import (
     VideoMemoryWorkflowConfig,
     analyze_rolling_batches,
     build_sequence_manifest,
+    merge_memory_only_patch,
     merge_video_memory_patch,
     reconcile_video_memory_patch_evidence,
     validate_video_memory,
@@ -445,6 +446,101 @@ def test_merge_video_memory_patch_rejects_stale_revision() -> None:
         merge_video_memory_patch(memory, patch)
 
     assert exc_info.value.code == "VLM_PATCH_REVISION_CONFLICT"
+
+
+def test_memory_only_patch_preserves_unselected_claim_and_reuses_existing_evidence() -> None:
+    evidence = EvidenceReference(evidence_id="frame-1", timestamp_s=1)
+    memory = VideoMemory(
+        global_scene="Road scene",
+        incident_window=IncidentWindow(t_start=0, t0=1, t_end=2),
+        claims=[
+            Claim(
+                claim_id="claim-1",
+                text="Original target",
+                timestamp_s=1,
+                evidence=[evidence],
+                verification_status=VerificationStatus.SUPPORTED,
+            ),
+            Claim(
+                claim_id="claim-2",
+                text="Unselected",
+                timestamp_s=1.5,
+                verification_status=VerificationStatus.CONTRADICTED,
+            ),
+        ],
+        analysis_mode=AnalysisMode.SINGLE_REQUEST,
+    )
+    patch = VideoMemoryPatch(
+        target_claim_ids=["claim-1"],
+        claims=[
+            Claim(
+                claim_id="claim-1",
+                text="Revised target",
+                timestamp_s=1,
+                evidence=[EvidenceReference(evidence_id="frame-1", timestamp_s=1.1)],
+            )
+        ],
+        base_revision=1,
+    )
+
+    merged = merge_memory_only_patch(memory, patch, ["claim-1"])
+
+    assert merged.global_scene == memory.global_scene
+    assert merged.incident_window == memory.incident_window
+    assert merged.claims[0].text == "Revised target"
+    assert merged.claims[0].evidence == [evidence]
+    assert merged.claims[0].verification_status == VerificationStatus.UNVERIFIED
+    assert merged.claims[1] == memory.claims[1]
+
+
+def test_memory_only_patch_rejects_new_evidence() -> None:
+    memory = VideoMemory(
+        global_scene="Road scene",
+        incident_window=IncidentWindow(t_start=0, t0=1, t_end=2),
+        claims=[Claim(claim_id="claim-1", text="Original", timestamp_s=1)],
+        analysis_mode=AnalysisMode.SINGLE_REQUEST,
+    )
+    patch = VideoMemoryPatch(
+        target_claim_ids=["claim-1"],
+        claims=[
+            Claim(
+                claim_id="claim-1",
+                text="Revised",
+                timestamp_s=1,
+                evidence=[EvidenceReference(evidence_id="invented", timestamp_s=1)],
+            )
+        ],
+        base_revision=1,
+    )
+
+    with pytest.raises(VideoMemoryError) as exc_info:
+        merge_memory_only_patch(memory, patch, ["claim-1"])
+
+    assert exc_info.value.code == "MEMORY_PATCH_EVIDENCE_INVALID"
+
+
+def test_memory_only_patch_keeps_verification_when_claim_content_is_unchanged() -> None:
+    original = Claim(
+        claim_id="claim-1",
+        text="Unchanged",
+        timestamp_s=1,
+        verification_status=VerificationStatus.SUPPORTED,
+    )
+    memory = VideoMemory(
+        global_scene="Road scene",
+        incident_window=IncidentWindow(t_start=0, t0=1, t_end=2),
+        claims=[original],
+        analysis_mode=AnalysisMode.SINGLE_REQUEST,
+    )
+    patch = VideoMemoryPatch(
+        target_claim_ids=["claim-1"],
+        claims=[original.model_copy(update={"verification_status": VerificationStatus.UNVERIFIED})],
+        base_revision=1,
+    )
+
+    merged = merge_memory_only_patch(memory, patch, ["claim-1"])
+
+    assert merged.claims[0].verification_status == VerificationStatus.SUPPORTED
 
 
 @pytest.mark.asyncio

@@ -397,6 +397,77 @@ def merge_video_memory_patch(
     return merged
 
 
+def merge_memory_only_patch(
+    memory: VideoMemory,
+    patch: VideoMemoryPatch,
+    requested_target_claim_ids: list[str],
+) -> VideoMemory:
+    """Validate and merge a text-only patch without permitting new visual evidence."""
+    if patch.base_revision != memory.revision:
+        raise VideoMemoryError("VLM_PATCH_REVISION_CONFLICT", "patch base revision does not match current memory")
+    if patch.target_claim_ids != requested_target_claim_ids:
+        raise VideoMemoryError("VLM_PATCH_TARGET_MISMATCH", "patch targets do not match requested claims")
+    if patch.remote_media_handles:
+        raise VideoMemoryError("MEMORY_PATCH_MEDIA_FORBIDDEN", "memory-only patch cannot add remote media")
+
+    current_claims = {claim.claim_id: claim for claim in memory.claims}
+    if not set(requested_target_claim_ids).issubset(current_claims):
+        raise VideoMemoryError("VLM_PATCH_TARGET_MISSING", "patch targets claims not present in current memory")
+    existing_evidence = {
+        evidence.evidence_id: evidence
+        for claim in memory.claims
+        for evidence in claim.evidence
+    }
+    patch_claims = {claim.claim_id: claim for claim in patch.claims}
+    if len(patch_claims) != len(patch.claims):
+        raise VideoMemoryError("VLM_PATCH_CLAIM_DUPLICATE", "memory-only patch contains duplicate claim IDs")
+
+    for claim_id, claim in patch_claims.items():
+        if claim_id not in requested_target_claim_ids:
+            raise VideoMemoryError("VLM_PATCH_TARGET_MISMATCH", "patch modifies a claim outside requested targets")
+        if claim.timestamp_s is not None and not (
+            memory.incident_window.t_start <= claim.timestamp_s <= memory.incident_window.t_end
+        ):
+            raise VideoMemoryError(
+                "VLM_TIMESTAMP_OUTSIDE_INCIDENT_WINDOW",
+                "memory-only claim timestamp must stay inside the incident window",
+            )
+        unknown_evidence = [
+            evidence.evidence_id for evidence in claim.evidence if evidence.evidence_id not in existing_evidence
+        ]
+        if unknown_evidence:
+            raise VideoMemoryError(
+                "MEMORY_PATCH_EVIDENCE_INVALID",
+                "memory-only patch cannot create evidence not present in VideoMemory",
+            )
+        canonical_evidence = [existing_evidence[evidence.evidence_id] for evidence in claim.evidence]
+        normalized_claim = claim.model_copy(
+            update={
+                "evidence": canonical_evidence,
+            }
+        )
+        previous_claim = current_claims[claim_id]
+        content_changed = previous_claim.model_dump(exclude={"verification_status"}) != normalized_claim.model_dump(
+            exclude={"verification_status"}
+        )
+        current_claims[claim_id] = normalized_claim.model_copy(
+            update={
+                "verification_status": (
+                    VerificationStatus.UNVERIFIED
+                    if content_changed
+                    else previous_claim.verification_status
+                )
+            }
+        )
+
+    return memory.model_copy(
+        update={
+            "claims": [current_claims[claim.claim_id] for claim in memory.claims],
+            "revision": memory.revision + 1,
+        }
+    )
+
+
 def _reset_claim_verification(memory: VideoMemory) -> VideoMemory:
     return memory.model_copy(
         update={

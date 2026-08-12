@@ -1,6 +1,6 @@
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -19,6 +19,7 @@ from src.models.incidents import (
     ReportVideoObservationsSection,
     VideoMemory,
 )
+from src.services.model_observability import ModelActivityRegistry
 from src.services.report_repository import InMemoryReportRepository, ReportRepositoryError
 from src.services.workflow import WorkflowError, WorkflowService
 
@@ -182,6 +183,39 @@ async def test_manual_reanalysis_can_return_to_review() -> None:
     assert snapshot.has_log is True
     assert snapshot.manual_reanalysis_count == 1
     assert snapshot.review_audit[0].feedback == "Inspect braking again"
+
+
+@pytest.mark.asyncio
+async def test_manual_reanalysis_grants_budget_for_reanalyze_verify_and_report() -> None:
+    initial = _review_state("INC-REANALYZE-BUDGET")
+    initial["log_uri"] = "vehicle.csv"
+    runner = SimpleNamespace(start=AsyncMock(return_value=initial), resume=AsyncMock(return_value=initial))
+    observability = Mock(wraps=ModelActivityRegistry())
+    service = WorkflowService(
+        runner=runner,
+        repository=InMemoryReportRepository(),
+        observability=observability,
+    )
+    await service.create(
+        IncidentCreateRequest(
+            incident_id="INC-REANALYZE-BUDGET",
+            video_uri="video.mp4",
+            log_uri="vehicle.csv",
+            analysis_prompt="Analyze",
+        )
+    )
+
+    await service.review(
+        "INC-REANALYZE-BUDGET",
+        ReviewDecision(
+            action="reanalyze",
+            reviewer="reviewer",
+            feedback="Inspect again",
+            target_claim_ids=["claim-1"],
+        ),
+    )
+
+    observability.grant_additional_requests.assert_called_once_with("INC-REANALYZE-BUDGET", 3)
 
 
 @pytest.mark.asyncio

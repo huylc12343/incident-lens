@@ -376,6 +376,11 @@ class VLMService(Protocol):
 
 
 @runtime_checkable
+class MemoryReanalysisService(Protocol):
+    async def reanalyze_claims(self, request: ReanalysisRequest) -> VideoMemoryPatch: ...
+
+
+@runtime_checkable
 class VerificationService(Protocol):
     async def verify(self, request: VerificationRequest) -> VerificationResult: ...
 

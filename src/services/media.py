@@ -127,6 +127,7 @@ class MediaService:
             f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
             f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps={fps}"
         )
+        target_bitrate_kbps = max(int(max_output_bytes * 8 * 0.75 / probe.duration_s / 1000), 64)
         await self._run_command(
             self._ffmpeg,
             "-y",
@@ -136,8 +137,15 @@ class MediaService:
             video_filter,
             "-c:v",
             codec,
+            "-b:v",
+            f"{target_bitrate_kbps}k",
+            "-maxrate",
+            f"{target_bitrate_kbps}k",
+            "-bufsize",
+            f"{target_bitrate_kbps * 2}k",
             "-pix_fmt",
             pixel_format,
+            "-an",
             "-movflags",
             "+faststart",
             str(output),

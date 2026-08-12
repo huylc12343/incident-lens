@@ -223,6 +223,9 @@ class WorkflowService:
                 invalid_targets = set(decision.target_claim_ids) - claim_ids
                 if invalid_targets:
                     raise WorkflowError("REANALYSIS_TARGET_INVALID", "re-analysis target claim does not exist")
+                if self._observability is not None:
+                    provider_calls = 3 if state.get("log_uri") else 2
+                    self._observability.grant_additional_requests(incident_id, provider_calls)
             try:
                 result = await self._runner.resume(incident_id, decision)
             except Exception as exc:

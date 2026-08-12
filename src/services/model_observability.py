@@ -23,6 +23,7 @@ class ModelActivityRegistry:
         if max_activities_per_incident < max_provider_requests_per_incident:
             raise ValueError("activity capacity must be at least the provider request budget")
         self._activities: dict[str, list[ModelActivity]] = {}
+        self._additional_request_budget: dict[str, int] = {}
         self._lock = RLock()
         self._max_provider_requests = max_provider_requests_per_incident
         self._max_activities = max_activities_per_incident
@@ -54,7 +55,8 @@ class ModelActivityRegistry:
         )
         with self._lock:
             activities = self._pruned(incident_id, now)
-            if len(activities) >= self._max_provider_requests:
+            request_limit = self._max_provider_requests + self._additional_request_budget.get(incident_id, 0)
+            if len(activities) >= request_limit:
                 raise ModelRequestBudgetError(
                     "PROVIDER_REQUEST_BUDGET_EXCEEDED",
                     f"incident {incident_id} exceeded its provider request budget",
@@ -62,6 +64,15 @@ class ModelActivityRegistry:
             activities.append(activity)
             self._activities[incident_id] = activities[-self._max_activities :]
         return activity.activity_id
+
+    def grant_additional_requests(self, incident_id: str, count: int) -> None:
+        """Extend one incident's budget for an explicitly requested manual re-analysis cycle."""
+        if not incident_id.strip() or count <= 0:
+            raise ValueError("incident_id and additional request count must be positive")
+        with self._lock:
+            self._additional_request_budget[incident_id] = (
+                self._additional_request_budget.get(incident_id, 0) + count
+            )
 
     def complete(self, activity_id: str, response: Any) -> None:
         self._finish(activity_id, status="completed", usage=extract_token_usage(response))
@@ -86,6 +97,7 @@ class ModelActivityRegistry:
     def delete(self, incident_id: str) -> None:
         with self._lock:
             self._activities.pop(incident_id, None)
+            self._additional_request_budget.pop(incident_id, None)
 
     def _pruned(self, incident_id: str, now: datetime) -> list[ModelActivity]:
         cutoff = now - self._retention

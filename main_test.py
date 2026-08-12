@@ -259,11 +259,26 @@ def _render_live_incident(base_url: str, incident_id: str) -> None:
             except RuntimeError:
                 st.info("Workflow is starting…")
 
+    review_future = st.session_state.get("review_future")
+    if isinstance(review_future, Future):
+        action = st.session_state.get("review_action", "review")
+        if review_future.done():
+            try:
+                st.session_state.snapshot = review_future.result()
+                st.success(f"{_review_action_label(action)} đã hoàn tất.")
+            except RuntimeError as exc:
+                st.error(str(exc))
+            finally:
+                st.session_state.pop("review_future", None)
+                st.session_state.pop("review_action", None)
+        else:
+            st.info(f"⏳ Đang {_review_action_label(action).lower()}. Vui lòng không gửi lại yêu cầu.")
+
     snapshot = st.session_state.get("snapshot")
     if not isinstance(snapshot, dict):
         return
     _render_snapshot(snapshot)
-    if snapshot.get("status") == "awaiting_review":
+    if snapshot.get("status") == "awaiting_review" and not _review_request_in_progress():
         _render_review_form(base_url, snapshot)
 
 
@@ -428,7 +443,7 @@ def _render_review_form(base_url: str, snapshot: dict[str, Any]) -> None:
         reviewer = st.text_input("Reviewer", "reviewer@example.com")
         reason = st.text_area("Reason (bắt buộc cho not_incident)")
         feedback = st.text_area("Feedback (bắt buộc cho reanalyze)")
-        targets = st.multiselect("Target claim IDs", claim_ids)
+        targets = st.multiselect("Target claim IDs", claim_ids, default=claim_ids)
         edits = {
             "summary": st.text_area("Edit summary", report.get("summary", "")),
             "timeline": st.text_area("Edit timeline", _narrative(report, "timeline")),
@@ -444,15 +459,65 @@ def _render_review_form(base_url: str, snapshot: dict[str, Any]) -> None:
     if action == "not_incident":
         payload["reason"] = reason
     elif action == "reanalyze":
-        payload.update({"feedback": feedback, "target_claim_ids": targets})
+        try:
+            payload.update(_reanalyze_review_fields(feedback, targets))
+        except ValueError as exc:
+            st.error(str(exc))
+            return
     elif action == "edit":
         payload["edits"] = edits
-    _run_and_store(
+    _start_review_async(
         "POST",
         base_url,
         f"/api/v1/incidents/{snapshot['incident_id']}/review",
         payload,
     )
+
+
+def _start_review_async(
+    method: str,
+    base_url: str,
+    path: str,
+    payload: dict[str, Any],
+) -> bool:
+    if _review_request_in_progress():
+        st.warning("Yêu cầu review đang được xử lý. Vui lòng không nhấn lại.")
+        return False
+    action = str(payload.get("action") or "review")
+    st.session_state["review_action"] = action
+    st.session_state["review_future"] = _REQUEST_EXECUTOR.submit(
+        api_request,
+        method,
+        base_url,
+        path,
+        payload,
+    )
+    st.info(f"⏳ Đã gửi yêu cầu {_review_action_label(action).lower()}. Hệ thống đang xử lý…")
+    return True
+
+
+def _review_request_in_progress() -> bool:
+    future = st.session_state.get("review_future")
+    return isinstance(future, Future) and not future.done()
+
+
+def _review_action_label(action: str) -> str:
+    return {
+        "reanalyze": "Reanalyze claims",
+        "approve": "Approve incident",
+        "edit": "Cập nhật report",
+        "not_incident": "Đánh dấu not incident",
+    }.get(action, "Review incident")
+
+
+def _reanalyze_review_fields(feedback: str, target_claim_ids: list[str]) -> dict[str, Any]:
+    normalized_feedback = feedback.strip()
+    normalized_targets = list(dict.fromkeys(claim_id.strip() for claim_id in target_claim_ids if claim_id.strip()))
+    if not normalized_feedback:
+        raise ValueError("Feedback là bắt buộc khi reanalyze.")
+    if not normalized_targets:
+        raise ValueError("Hãy chọn ít nhất một claim để reanalyze.")
+    return {"feedback": normalized_feedback, "target_claim_ids": normalized_targets}
 
 
 def _narrative(report: dict[str, Any], field: str) -> str:

@@ -1,10 +1,13 @@
 import pytest
 
 from src.models.incidents import (
+    AnalysisMode,
     Claim,
+    EvidenceReference,
     IncidentWindow,
     LogEvidenceSummary,
     PromptSource,
+    VideoMemory,
 )
 from src.prompts.reanalysis import build_auto_reanalysis_prompt, build_human_reanalysis_prompt
 
@@ -36,21 +39,46 @@ def test_auto_reanalysis_contains_only_automatic_context() -> None:
 
 
 def test_human_reanalysis_contains_only_reviewer_context() -> None:
-    claim = Claim(claim_id="claim-1", text="The vehicle braked hard", timestamp_s=12.5)
+    claim = Claim(
+        claim_id="claim-1",
+        text="The vehicle braked hard",
+        timestamp_s=12.5,
+        evidence=[EvidenceReference(evidence_id="frame-1", timestamp_s=12.5)],
+    )
+    memory = VideoMemory(
+        global_scene="Road scene",
+        video_summary="Vehicle approaches a hazard.",
+        incident_window=IncidentWindow(t_start=11, t0=12.5, t_end=14),
+        claims=[claim],
+        analysis_mode=AnalysisMode.SINGLE_REQUEST,
+    )
     prompt = build_human_reanalysis_prompt(
         target_claim_ids=["claim-1"],
         feedback="Check whether the brake lights illuminate.",
-        current_claims=[claim],
+        current_memory=memory,
         version="human-v3",
     )
 
     assert prompt.source == PromptSource.HUMAN_PROVIDED
     assert prompt.version == "human-v3"
-    assert set(prompt.context) == {"target_claim_ids", "feedback", "current_claims"}
+    assert set(prompt.context) == {
+        "target_claim_ids",
+        "reviewer_feedback",
+        "target_claims",
+        "global_scene",
+        "video_summary",
+        "tracked_entities",
+        "incident_window",
+        "timeline",
+        "existing_evidence",
+        "verification_results",
+        "base_revision",
+    }
     assert "verification_reason" not in prompt.context
     assert "Check whether" not in prompt.text
-    assert prompt.context["feedback"] == "Check whether the brake lights illuminate."
-    assert "nội dung giải thích mới phải bằng tiếng Việt" in prompt.text
+    assert prompt.context["reviewer_feedback"] == "Check whether the brake lights illuminate."
+    assert prompt.context["existing_evidence"] == [{"evidence_id": "frame-1", "timestamp_s": 12.5}]
+    assert "không có video hoặc frame" in prompt.text
 
 
 def test_auto_and_human_prompts_are_deterministic_and_distinct() -> None:
@@ -64,12 +92,17 @@ def test_auto_and_human_prompts_are_deterministic_and_distinct() -> None:
     human_kwargs = {
         "target_claim_ids": ["claim-1"],
         "feedback": "Review this claim",
-        "current_claims": [claim],
+        "current_memory": VideoMemory(
+            global_scene="Road",
+            incident_window=IncidentWindow(t_start=1, t0=2, t_end=3),
+            claims=[claim],
+            analysis_mode=AnalysisMode.SINGLE_REQUEST,
+        ),
     }
 
     assert build_auto_reanalysis_prompt(**auto_kwargs) == build_auto_reanalysis_prompt(**auto_kwargs)
     assert build_human_reanalysis_prompt(**human_kwargs) == build_human_reanalysis_prompt(**human_kwargs)
-    assert build_auto_reanalysis_prompt(**auto_kwargs).text == build_human_reanalysis_prompt(**human_kwargs).text
+    assert build_auto_reanalysis_prompt(**auto_kwargs).text != build_human_reanalysis_prompt(**human_kwargs).text
     assert build_auto_reanalysis_prompt(**auto_kwargs).context != build_human_reanalysis_prompt(**human_kwargs).context
 
 
@@ -79,7 +112,12 @@ def test_human_reanalysis_rejects_blank_feedback(feedback: str) -> None:
         build_human_reanalysis_prompt(
             target_claim_ids=["claim-1"],
             feedback=feedback,
-            current_claims=[Claim(claim_id="claim-1", text="Claim")],
+            current_memory=VideoMemory(
+                global_scene="Road",
+                incident_window=IncidentWindow(t_start=1, t0=2, t_end=3),
+                claims=[Claim(claim_id="claim-1", text="Claim")],
+                analysis_mode=AnalysisMode.SINGLE_REQUEST,
+            ),
         )
 
 
@@ -88,5 +126,10 @@ def test_human_reanalysis_rejects_unknown_target_claim() -> None:
         build_human_reanalysis_prompt(
             target_claim_ids=["missing"],
             feedback="Review",
-            current_claims=[Claim(claim_id="claim-1", text="Claim")],
+            current_memory=VideoMemory(
+                global_scene="Road",
+                incident_window=IncidentWindow(t_start=1, t0=2, t_end=3),
+                claims=[Claim(claim_id="claim-1", text="Claim")],
+                analysis_mode=AnalysisMode.SINGLE_REQUEST,
+            ),
         )

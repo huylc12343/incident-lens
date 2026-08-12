@@ -85,8 +85,7 @@ def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointe
     async def manual_reanalyze(state: IncidentState) -> dict[str, object]:
         result = await manual_reanalyze_node(
             state,
-            media=dependencies.media,
-            workflow=dependencies.video_workflow,
+            reanalysis=dependencies.report,
             prompt_version=dependencies.reanalysis_prompt_version,
         )
         return _with_model_activities(state, result, dependencies.observability)

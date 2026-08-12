@@ -1,8 +1,9 @@
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
-from src.models.incidents import IncidentWindow
+from src.models.incidents import IncidentWindow, NativeVideoMetadata
 from src.services.media import MediaService, MediaServiceError
 
 SAMPLE_VIDEO = Path("data_mock/front_camera.mp4")
@@ -56,6 +57,45 @@ async def test_normalize_real_video(tmp_path: Path) -> None:
     assert artifact.metadata.height == 90
     assert artifact.metadata.fps == pytest.approx(5)
     assert artifact.metadata.size_bytes <= 10_000_000
+
+
+@pytest.mark.asyncio
+async def test_normalize_video_fits_qwen_base64_limit(tmp_path: Path) -> None:
+    service = MediaService(command_timeout_s=60)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    output = tmp_path / "qwen-base64.mp4"
+
+    metadata = NativeVideoMetadata(
+        duration_s=60,
+        width=512,
+        height=288,
+        fps=15,
+        size_bytes=5_000_000,
+    )
+    service.probe_video = AsyncMock(side_effect=[metadata, metadata])
+
+    async def create_output(*args: str) -> tuple[str, str]:
+        Path(args[-1]).write_bytes(b"normalized")
+        return "", ""
+
+    service._run_command = AsyncMock(side_effect=create_output)
+
+    artifact = await service.normalize_video(
+        str(source),
+        str(output),
+        width=512,
+        height=288,
+        fps=15,
+        codec="libx264",
+        pixel_format="yuv420p",
+        max_output_bytes=7_000_000,
+    )
+
+    assert artifact.metadata.size_bytes <= 7_000_000
+    command = service._run_command.await_args.args
+    assert command[command.index("-b:v") + 1] == "700k"
+    assert "-an" in command
 
 
 @pytest.mark.asyncio

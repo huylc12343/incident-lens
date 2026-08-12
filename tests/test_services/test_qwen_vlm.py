@@ -213,6 +213,38 @@ async def test_qwen_default_makes_only_one_request_for_invalid_structured_output
 
 
 @pytest.mark.asyncio
+async def test_qwen_discards_root_evidence_counter_without_retry() -> None:
+    payload = {
+        "global_scene": "Đường giao thông.",
+        "incident_window": {"t_start": 0, "t0": 1, "t_end": 2},
+        "evidence_id_counter": 0,
+    }
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
+    )
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=response)))
+    )
+    service = QwenNativeVideoVLMService(
+        model="qwen3-vl-flash",
+        client=client,
+        max_structured_output_retries=0,
+    )
+    request = NativeVideoAnalysisRequest(
+        incident_id="INC-QWEN-EVIDENCE-COUNTER",
+        prompt=PromptEnvelope(text="Phân tích video."),
+        normalized_video_uri="https://cdn.example.test/artifacts/video.mp4",
+        metadata=NativeVideoMetadata(duration_s=2, width=1280, height=720, fps=15, size_bytes=100),
+    )
+
+    result = await service.analyze_video(request)
+
+    assert result.global_scene == payload["global_scene"]
+    assert "evidence_id_counter" not in result.model_dump()
+    assert client.chat.completions.create.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_qwen_classifies_exhausted_free_tier_quota() -> None:
     response = httpx.Response(
         403,

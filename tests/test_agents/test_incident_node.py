@@ -572,7 +572,7 @@ async def test_auto_reanalysis_stops_after_one_attempt(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_manual_native_reanalysis_reuses_remote_handle(tmp_path: Path) -> None:
+async def test_manual_reanalysis_uses_memory_only_without_video_or_frames(tmp_path: Path) -> None:
     memory = _claim_memory(AnalysisMode.NATIVE_VIDEO)
     handle = RemoteMediaHandle(
         provider=VLMProvider.QWEN,
@@ -581,31 +581,11 @@ async def test_manual_native_reanalysis_reuses_remote_handle(tmp_path: Path) -> 
         mime_type="video/mp4",
         local_artifact_uri=str(tmp_path / "normalized.mp4"),
     )
-    service = _service(VLMInputMode.NATIVE_VIDEO, memory)
-    service.reanalyze_claims.return_value = VideoMemoryPatch(
+    reanalysis = SimpleNamespace(reanalyze_claims=AsyncMock(return_value=VideoMemoryPatch(
         target_claim_ids=["claim-1"],
-        claims=[Claim(claim_id="claim-1", text="Human-reviewed claim")],
-        remote_media_handles=[handle],
+        claims=[Claim(claim_id="claim-1", text="Human-reviewed claim", timestamp_s=2)],
         base_revision=1,
-    )
-    workflow = VideoMemoryWorkflow(
-        vlm=service,
-        config=VideoMemoryWorkflowConfig(artifact_dir=str(tmp_path)),
-    )
-    manifest = VideoSequenceManifest(
-        frames=[
-            TimestampedFrame(
-                frame_id="frame-000001",
-                sequence_index=0,
-                timestamp_s=2,
-                delta_from_previous_s=0,
-                image_uri=str(tmp_path / "frame-000001.jpg"),
-            )
-        ],
-        source_video_uri="video.mp4",
-        duration_s=3,
-    )
-    media = SimpleNamespace(sample_frames=AsyncMock(return_value=manifest))
+    )))
 
     result = await manual_reanalyze_node(
         {
@@ -618,18 +598,116 @@ async def test_manual_native_reanalysis_reuses_remote_handle(tmp_path: Path) -> 
             "review_feedback": "Inspect the braking claim again",
             "manual_reanalysis_count": 0,
         },
-        media=media,
-        workflow=workflow,
+        reanalysis=reanalysis,
         prompt_version="v1",
     )
 
     assert result["status"] == "running"
     assert result["manual_reanalysis_count"] == 1
-    media.sample_frames.assert_awaited_once()
-    request = service.reanalyze_claims.await_args.args[0]
+    assert result["manual_reanalysis_changed_claim_ids"] == ["claim-1"]
+    request = reanalysis.reanalyze_claims.await_args.args[0]
     assert request.prompt.source == PromptSource.HUMAN_PROVIDED
-    assert request.remote_media_handles == [handle]
-    assert request.normalized_video_uri == str(tmp_path / "normalized.mp4")
+    assert request.frame_manifest is None
+    assert request.normalized_video_uri is None
+    assert request.remote_media_handles == []
+
+
+@pytest.mark.asyncio
+async def test_manual_reanalysis_verifies_only_changed_claims_and_merges_old_results(tmp_path: Path) -> None:
+    log = tmp_path / "vehicle.csv"
+    log.write_text("timestamp,speed_kmh\n1.0,10\n2.0,0\n", encoding="utf-8")
+    memory = VideoMemory(
+        global_scene="Road",
+        incident_window=IncidentWindow(t_start=0, t0=1, t_end=2),
+        claims=[
+            Claim(claim_id="claim-1", text="Changed", timestamp_s=1),
+            Claim(
+                claim_id="claim-2",
+                text="Unchanged",
+                timestamp_s=2,
+                verification_status=VerificationStatus.SUPPORTED,
+            ),
+        ],
+        analysis_mode=AnalysisMode.SINGLE_REQUEST,
+    )
+    previous = VerificationResult(
+        results=[
+            ClaimVerification(
+                claim_id="claim-1",
+                status=VerificationStatus.CONTRADICTED,
+                reason="Old result",
+            ),
+            ClaimVerification(
+                claim_id="claim-2",
+                status=VerificationStatus.SUPPORTED,
+                reason="Keep this result",
+                evidence_ids=["log-row:2"],
+            ),
+        ]
+    )
+    updated = VerificationResult(
+        results=[
+            ClaimVerification(
+                claim_id="claim-1",
+                status=VerificationStatus.SUPPORTED,
+                reason="New result",
+                evidence_ids=["log-row:1"],
+            )
+        ]
+    )
+    verifier = SimpleNamespace(verify=AsyncMock(return_value=updated))
+
+    result = await align_and_verify_claims_node(
+        {
+            "incident_id": "INC-MEMORY-VERIFY",
+            "video_memory": memory,
+            "log_uri": str(log),
+            "log_evidence_summary": LogEvidenceSummary(),
+            "verification": previous,
+            "last_review_action": "reanalyze",
+            "manual_reanalysis_changed_claim_ids": ["claim-1"],
+        },
+        verification=verifier,
+        timestamp_tolerance_s=0.1,
+    )
+
+    request = verifier.verify.await_args.args[0]
+    assert [claim.claim_id for claim in request.claims] == ["claim-1"]
+    assert [item.claim_id for item in result["verification"].results] == ["claim-1", "claim-2"]
+    assert result["verification"].results[1].reason == "Keep this result"
+    assert result["claims"][1].verification_status == VerificationStatus.SUPPORTED
+
+
+@pytest.mark.asyncio
+async def test_manual_reanalysis_skips_verifier_when_no_claim_changed() -> None:
+    memory = _claim_memory(AnalysisMode.SINGLE_REQUEST)
+    previous = VerificationResult(
+        results=[
+            ClaimVerification(
+                claim_id="claim-1",
+                status=VerificationStatus.SUPPORTED,
+                reason="Keep result",
+            )
+        ]
+    )
+    verifier = SimpleNamespace(verify=AsyncMock())
+
+    result = await align_and_verify_claims_node(
+        {
+            "incident_id": "INC-NO-CHANGE",
+            "video_memory": memory,
+            "log_uri": "unused.csv",
+            "log_evidence_summary": LogEvidenceSummary(),
+            "verification": previous,
+            "last_review_action": "reanalyze",
+            "manual_reanalysis_changed_claim_ids": [],
+        },
+        verification=verifier,
+        timestamp_tolerance_s=0.1,
+    )
+
+    verifier.verify.assert_not_awaited()
+    assert result["verification"] == previous
 
 
 @pytest.mark.asyncio

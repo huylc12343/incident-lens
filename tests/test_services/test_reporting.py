@@ -8,9 +8,12 @@ from src.models.incidents import (
     Claim,
     EvidenceReference,
     IncidentWindow,
+    PromptEnvelope,
+    ReanalysisRequest,
     ReportModelOutput,
     ReportRequest,
     VideoMemory,
+    VideoMemoryPatch,
 )
 from src.services.reporting import OpenAIReportService, ReportServiceError
 
@@ -71,6 +74,40 @@ async def test_gpt5_report_omits_unsupported_temperature() -> None:
     call = client.responses.parse.await_args.kwargs
     assert "temperature" not in call
     assert [message["role"] for message in call["input"]] == ["system", "user"]
+
+
+@pytest.mark.asyncio
+async def test_memory_reanalysis_uses_text_only_structured_request() -> None:
+    memory = _request().video_memory
+    patch = VideoMemoryPatch(
+        target_claim_ids=["claim-1"],
+        claims=[memory.claims[0].model_copy(update={"text": "Xe đã phanh."})],
+        base_revision=memory.revision,
+    )
+    client = SimpleNamespace(
+        responses=SimpleNamespace(parse=AsyncMock(return_value=SimpleNamespace(output_parsed=patch)))
+    )
+    service = OpenAIReportService(model="gpt-test", client=client)
+
+    result = await service.reanalyze_claims(
+        ReanalysisRequest(
+            incident_id="INC-REPORT",
+            prompt=PromptEnvelope(
+                text="Memory-only rules",
+                context={"reviewer_feedback": "Sửa claim"},
+            ),
+            target_claim_ids=["claim-1"],
+            incident_window=memory.incident_window,
+            current_memory=memory,
+        )
+    )
+
+    assert result == patch
+    call = client.responses.parse.await_args.kwargs
+    assert call["text_format"] is VideoMemoryPatch
+    assert [message["role"] for message in call["input"]] == ["system", "user"]
+    assert "input_image" not in str(call["input"])
+    assert "video_url" not in str(call["input"])
 
 
 @pytest.mark.asyncio

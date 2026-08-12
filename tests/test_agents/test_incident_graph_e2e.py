@@ -66,8 +66,9 @@ def _video_memory(*, with_claim: bool = True) -> VideoMemory:
 @pytest.mark.asyncio
 async def test_real_graph_edit_manual_reanalysis_restart_and_approve(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
-    vlm_client = _client(
-        SimpleNamespace(output_parsed=_video_memory()),
+    vlm_client = _client(SimpleNamespace(output_parsed=_video_memory()))
+    report_client = _client(
+        SimpleNamespace(output_parsed=_narrative()),
         SimpleNamespace(
             output_parsed=VideoMemoryPatch(
                 target_claim_ids=["claim-1"],
@@ -75,9 +76,6 @@ async def test_real_graph_edit_manual_reanalysis_restart_and_approve(tmp_path: P
                 base_revision=1,
             )
         ),
-    )
-    report_client = _client(
-        SimpleNamespace(output_parsed=_narrative()),
         SimpleNamespace(output_parsed=_narrative("Reanalyzed")),
     )
     clients = ProviderClients(
@@ -114,7 +112,8 @@ async def test_real_graph_edit_manual_reanalysis_restart_and_approve(tmp_path: P
         assert edited.draft_report.summary == "Human-edited summary"
         assert reanalyzed.status == "awaiting_review"
         assert reanalyzed.manual_reanalysis_count == 1
-        assert report_client.responses.parse.await_count == 2
+        assert vlm_client.responses.parse.await_count == 1
+        assert report_client.responses.parse.await_count == 3
 
     restart_clients = ProviderClients(
         openai_vlm=_client(),

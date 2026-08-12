@@ -610,6 +610,7 @@ def _prepare_qwen_payload(
     if output_model not in {VideoMemory, VideoMemoryPatch}:
         return prepared
 
+    prepared.pop("evidence_id_counter", None)
     claims = prepared.get("claims")
     if not isinstance(claims, list):
         return prepared

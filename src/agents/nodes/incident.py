@@ -8,11 +8,14 @@ from typing import Protocol
 
 from src.agents.incident_state import IncidentState
 from src.models.incidents import (
+    Claim,
+    ClaimVerification,
     DraftReport,
     IncidentWindow,
     LogAnalysisResult,
     LogEvent,
     LogEvidenceSummary,
+    MemoryReanalysisService,
     NativeVideoAnalysisRequest,
     NativeVideoMetadata,
     PromptEnvelope,
@@ -43,6 +46,7 @@ from src.services.media import NormalizedVideoArtifact
 from src.services.video_memory import (
     VideoMemoryWorkflow,
     VideoMemoryWorkflowConfig,
+    merge_memory_only_patch,
     merge_video_memory_patch,
     reconcile_native_video_evidence,
     reconcile_video_memory_patch_evidence,
@@ -334,23 +338,67 @@ async def align_and_verify_claims_node(
             "error_message": "incident_id, video_memory, log_uri, and log_evidence_summary are required",
         }
     try:
+        changed_ids = (
+            state.get("manual_reanalysis_changed_claim_ids")
+            if state.get("last_review_action") == "reanalyze"
+            else None
+        )
+        if changed_ids == []:
+            return {
+                "status": "running",
+                "verification": state.get("verification"),
+                "video_memory": memory,
+                "claims": memory.claims,
+                "claim_log_summaries": state.get("claim_log_summaries", []),
+            }
+        claims_to_verify = (
+            [claim for claim in memory.claims if claim.claim_id in set(changed_ids)]
+            if changed_ids is not None
+            else memory.claims
+        )
         claim_log_summaries = build_claim_log_summaries(
             log_uri,
-            memory.claims,
+            claims_to_verify,
             timestamp_tolerance_s=timestamp_tolerance_s,
             sample_radius=sample_radius,
         )
         result = await verification.verify(
             VerificationRequest(
                 incident_id=incident_id,
-                claims=memory.claims,
+                claims=claims_to_verify,
                 claim_log_summaries=claim_log_summaries,
                 timestamp_tolerance_s=timestamp_tolerance_s,
             )
         )
+        if changed_ids is not None:
+            previous_results = state.get("verification")
+            result_by_claim_id = {
+                item.claim_id: item
+                for item in (previous_results.results if previous_results is not None else [])
+                if item.claim_id not in set(changed_ids)
+            }
+            result_by_claim_id.update({item.claim_id: item for item in result.results})
+            result = VerificationResult(
+                results=[
+                    result_by_claim_id[claim.claim_id]
+                    for claim in memory.claims
+                    if claim.claim_id in result_by_claim_id
+                ]
+            )
+            previous_summaries = {
+                summary.claim_id: summary for summary in state.get("claim_log_summaries", [])
+            }
+            previous_summaries.update({summary.claim_id: summary for summary in claim_log_summaries})
+            claim_log_summaries = [
+                previous_summaries[claim.claim_id]
+                for claim in memory.claims
+                if claim.claim_id in previous_summaries
+            ]
         status_by_claim_id = {item.claim_id: item.status for item in result.results}
         verified_claims = [
-            claim.model_copy(update={"verification_status": status_by_claim_id[claim.claim_id]})
+            claim.model_copy(
+                update={"verification_status": status_by_claim_id.get(claim.claim_id, claim.verification_status)}
+            )
             for claim in memory.claims
         ]
         memory = memory.model_copy(update={"claims": verified_claims})
@@ -366,6 +414,31 @@ async def align_and_verify_claims_node(
             f"{getattr(exc, 'code', 'CLAIM_VERIFICATION_FAILED')}: verification unavailable; "
             "processing continued without a verification result."
         )
+        if state.get("last_review_action") == "reanalyze":
+            changed_ids = set(state.get("manual_reanalysis_changed_claim_ids", []))
+            previous = state.get("verification")
+            preserved = [
+                item for item in (previous.results if previous is not None else [])
+                if item.claim_id not in changed_ids
+            ]
+            preserved.extend(
+                ClaimVerification(
+                    claim_id=claim.claim_id,
+                    status=VerificationStatus.UNVERIFIED,
+                    reason="Không thể xác thực lại claim sau manual reanalysis.",
+                    evidence_ids=[],
+                )
+                for claim in memory.claims
+                if claim.claim_id in changed_ids
+            )
+            fallback_verification = VerificationResult(results=preserved)
+            return {
+                "status": "running",
+                "verification": fallback_verification,
+                "video_memory": memory,
+                "claims": memory.claims,
+                "warnings": list(dict.fromkeys([*state.get("warnings", []), warning])),
+            }
         return {
             "status": "running",
             "verification": None,
@@ -426,8 +499,7 @@ async def auto_reanalyze_node(
 async def manual_reanalyze_node(
     state: IncidentState,
     *,
-    media: MediaWorkflowService,
-    workflow: VideoMemoryWorkflow,
+    reanalysis: MemoryReanalysisService,
     prompt_version: str,
 ) -> dict[str, object]:
     memory = state.get("video_memory")
@@ -439,26 +511,44 @@ async def manual_reanalyze_node(
         prompt = build_human_reanalysis_prompt(
             target_claim_ids=target_ids,
             feedback=feedback,
-            current_claims=memory.claims,
+            current_memory=memory,
+            current_verification=state.get("verification"),
             version=prompt_version,
         )
-        merged, artifact_uris = await _reanalyze(
-            state,
-            media=media,
-            workflow=workflow,
-            prompt=prompt,
-            target_claim_ids=target_ids,
+        patch = await reanalysis.reanalyze_claims(
+            ReanalysisRequest(
+                incident_id=state.get("incident_id", ""),
+                prompt=prompt,
+                target_claim_ids=target_ids,
+                incident_window=memory.incident_window,
+                current_memory=memory,
+            )
         )
+        merged = merge_memory_only_patch(memory, patch, target_ids)
+        previous_claims = {claim.claim_id: claim for claim in memory.claims}
+        changed_claim_ids = [
+            claim_id
+            for claim_id in target_ids
+            if _claim_content_changed(
+                previous_claims[claim_id],
+                next(claim for claim in merged.claims if claim.claim_id == claim_id),
+            )
+        ]
         return {
             "status": "running",
             "video_memory": merged,
             "claims": merged.claims,
-            "remote_media_handles": merged.remote_media_handles,
-            "artifact_uris": artifact_uris,
+            "manual_reanalysis_changed_claim_ids": changed_claim_ids,
             "manual_reanalysis_count": state.get("manual_reanalysis_count", 0) + 1,
         }
     except Exception as exc:
         return _failure(getattr(exc, "code", "MANUAL_REANALYSIS_FAILED"), str(exc))
+
+
+def _claim_content_changed(previous: Claim, current: Claim) -> bool:
+    return previous.model_dump(exclude={"verification_status"}) != current.model_dump(
+        exclude={"verification_status"}
+    )
 
 
 async def build_draft_report_node(

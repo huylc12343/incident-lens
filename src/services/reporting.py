@@ -8,7 +8,13 @@ from typing import Any
 from openai import AsyncOpenAI
 from pydantic import ValidationError
 
-from src.models.incidents import PromptEnvelope, ReportModelOutput, ReportRequest
+from src.models.incidents import (
+    PromptEnvelope,
+    ReanalysisRequest,
+    ReportModelOutput,
+    ReportRequest,
+    VideoMemoryPatch,
+)
 from src.prompts.reporting import build_report_prompt
 from src.services.model_observability import ModelActivityRegistry
 
@@ -100,6 +106,59 @@ class OpenAIReportService:
         if activity_id is not None:
             self._observability.complete(activity_id, response)
         return narrative
+
+    async def reanalyze_claims(self, request: ReanalysisRequest) -> VideoMemoryPatch:
+        """Reanalyze reviewer-selected claims using text context only."""
+        activity_id = None
+        response = None
+        if self._observability is not None:
+            activity_id = self._observability.start(
+                incident_id=request.incident_id,
+                step="reanalysis",
+                operation="memory_only_claim_reanalysis",
+                description="Hiệu chỉnh claim từ VideoMemory và feedback, không gửi video/frame.",
+                provider="openai",
+                model=self._model,
+                metadata={
+                    "input_mode": "memory_only",
+                    "target_claim_ids": request.target_claim_ids,
+                },
+            )
+        try:
+            request_kwargs: dict[str, Any] = {
+                "model": self._model,
+                "input": [
+                    {"role": "system", "content": request.prompt.text},
+                    {"role": "user", "content": _prompt_context_text(request.prompt)},
+                ],
+                "text_format": VideoMemoryPatch,
+                "timeout": self._timeout_s,
+            }
+            if not self._model.startswith("gpt-5"):
+                request_kwargs["temperature"] = self._temperature
+            response = await self._client.responses.parse(**request_kwargs)
+            parsed = getattr(response, "output_parsed", None)
+            if parsed is None:
+                parsed = json.loads(getattr(response, "output_text", ""))
+            patch = VideoMemoryPatch.model_validate(parsed)
+        except (ValidationError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            if activity_id is not None:
+                self._observability.fail(activity_id, "REANALYSIS_STRUCTURED_OUTPUT_INVALID", response)
+            raise ReportServiceError(
+                "REANALYSIS_STRUCTURED_OUTPUT_INVALID",
+                "reanalysis model returned invalid VideoMemoryPatch",
+            ) from exc
+        except Exception as exc:
+            if activity_id is not None:
+                self._observability.fail(activity_id, "OPENAI_REANALYSIS_FAILED", response)
+            raise ReportServiceError(
+                "OPENAI_REANALYSIS_FAILED",
+                "OpenAI memory-only reanalysis failed",
+                retryable=True,
+            ) from exc
+        if activity_id is not None:
+            self._observability.complete(activity_id, response)
+        return patch
 
 
 def _prompt_context_text(prompt: PromptEnvelope) -> str:

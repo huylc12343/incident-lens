@@ -1,5 +1,8 @@
+from concurrent.futures import Future
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
+
+import pytest
 
 import main_test
 
@@ -135,3 +138,62 @@ def test_claim_status_rows_leave_reason_empty_when_verification_is_unavailable()
     )
 
     assert rows[0]["reason"] == ""
+
+
+def test_reanalyze_review_fields_require_target_claims() -> None:
+    with pytest.raises(ValueError, match="ít nhất một claim"):
+        main_test._reanalyze_review_fields("Kiểm tra lại claim", [])
+
+
+def test_reanalyze_review_fields_normalize_valid_input() -> None:
+    assert main_test._reanalyze_review_fields(
+        "  Kiểm tra lại claim  ",
+        ["claim-1", "claim-1", " claim-2 "],
+    ) == {
+        "feedback": "Kiểm tra lại claim",
+        "target_claim_ids": ["claim-1", "claim-2"],
+    }
+
+
+def test_review_request_is_submitted_once_while_future_is_running() -> None:
+    running = Future()
+    streamlit = SimpleNamespace(
+        session_state={},
+        info=Mock(),
+        warning=Mock(),
+    )
+    executor = SimpleNamespace(submit=Mock(return_value=running))
+    payload = {"action": "reanalyze", "feedback": "Review", "target_claim_ids": ["claim-1"]}
+    with patch("main_test.st", streamlit), patch("main_test._REQUEST_EXECUTOR", executor):
+        first = main_test._start_review_async(
+            "POST",
+            "http://localhost:8000",
+            "/api/v1/incidents/INC-1/review",
+            payload,
+        )
+        second = main_test._start_review_async(
+            "POST",
+            "http://localhost:8000",
+            "/api/v1/incidents/INC-1/review",
+            payload,
+        )
+
+    assert first is True
+    assert second is False
+    executor.submit.assert_called_once_with(
+        main_test.api_request,
+        "POST",
+        "http://localhost:8000",
+        "/api/v1/incidents/INC-1/review",
+        payload,
+    )
+    streamlit.warning.assert_called_once()
+
+
+def test_review_request_in_progress_ends_when_future_completes() -> None:
+    completed = Future()
+    completed.set_result({"status": "awaiting_review"})
+    streamlit = SimpleNamespace(session_state={"review_future": completed})
+
+    with patch("main_test.st", streamlit):
+        assert main_test._review_request_in_progress() is False

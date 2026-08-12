@@ -90,3 +90,23 @@ def test_registry_enforces_hard_provider_request_budget() -> None:
         registry.start(**kwargs, metadata={"attempt": 3})
 
     assert exc_info.value.code == "PROVIDER_REQUEST_BUDGET_EXCEEDED"
+
+
+def test_registry_grants_budget_for_one_manual_reanalysis_cycle() -> None:
+    registry = ModelActivityRegistry(max_provider_requests_per_incident=1)
+    kwargs = {
+        "incident_id": "INC-REANALYZE",
+        "step": "vlm",
+        "operation": "claim_reanalysis",
+        "description": "Manual re-analysis.",
+        "provider": "qwen",
+        "model": "qwen-test",
+    }
+    registry.start(**kwargs)
+    registry.grant_additional_requests("INC-REANALYZE", 3)
+
+    for _ in range(3):
+        registry.start(**kwargs)
+
+    with pytest.raises(ModelRequestBudgetError):
+        registry.start(**kwargs)

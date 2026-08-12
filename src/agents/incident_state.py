@@ -49,6 +49,7 @@ class IncidentState(TypedDict, total=False):
     manual_reanalysis_count: int
     review_target_claim_ids: list[str]
     review_feedback: str
+    manual_reanalysis_changed_claim_ids: list[str]
     last_review_action: Literal["approve", "edit", "reanalyze", "not_incident"]
     review_audit: list[ReviewAuditEntry]
     model_activities: list[ModelActivity]

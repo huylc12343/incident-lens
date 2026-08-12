@@ -24,9 +24,10 @@ def build_verification_prompt(
                 "claim_id": claim.claim_id,
                 "text": claim.text,
                 "timestamp_s": claim.timestamp_s,
-                "log_summary": summary.summary,
+                "log_summary": _compact_log_summary(summary.summary),
             },
             "within_tolerance": summary.within_tolerance,
+            "available_signals": summary.available_signals,
             "allowed_evidence_ids": summary.allowed_evidence_ids,
         }
         for claim, summary in zip(claims, claim_log_summaries, strict=True)
@@ -46,6 +47,12 @@ def build_verification_prompt(
         "được tương ứng trực tiếp. Vì vậy đối chiếu ở mức khắt khe vừa phải: chỉ kết luận contradicted khi có "
         "bằng chứng đo lường trực tiếp, rõ ràng, không cần suy diễn; khi không chắc, ưu tiên supported (cho "
         "phần kiểm tra được) hoặc unverified.",
+
+        "Quy ước signal dùng chung cho mọi claim: timestamp là giây tính từ đầu log; speed_kmh "
+        "[0,+∞), 0 là đứng yên; acceleration m/s² âm là giảm tốc, dương là tăng tốc; brake "
+        "[0,1], 0 là không phanh và 1 là phanh hết cỡ; throttle [0,1], 0 là không ga và 1 là ga "
+        "hết cỡ; steering [-1,1], âm là rẽ trái, 0 là thẳng, dương là rẽ phải; yaw đo "
+        "bằng độ có wrap. available_signals cho biết các signal thực sự có trong từng claim.",
 
         "Trả về chính xác một kết quả cho mỗi claim_id theo thứ tự; status chỉ nhận "
         "supported, contradicted hoặc unverified; reason phải ngắn gọn bằng tiếng Việt.",
@@ -120,3 +127,51 @@ def build_verification_prompt(
         ]
     )
     return PromptEnvelope(text=text, source=PromptSource.SYSTEM, version=version, context=context)
+
+
+def _compact_log_summary(summary: str) -> str:
+    """Remove metadata already represented by structured verification fields."""
+    sections = []
+    for section in summary.split("\n\n"):
+        lines = section.splitlines()
+        if not lines or lines[0] in {"Log có thể kiểm tra", "Kết luận ghép thời gian"}:
+            continue
+        filtered = [
+            line
+            for line in lines
+            if not line.startswith(
+                (
+                    "Claim timestamp:",
+                    "Số mẫu đại diện tối đa trong mỗi bảng:",
+                    "Trong tolerance:",
+                )
+            )
+        ]
+        if len(filtered) == 1 and filtered[0] == "Đối chiếu thời gian":
+            continue
+        if filtered:
+            sections.append("\n".join(_compact_signal_tables(filtered)))
+    return "\n\n".join(sections)
+
+
+def _compact_signal_tables(lines: list[str]) -> list[str]:
+    compacted = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if line.startswith("| Timestamp |") and line.endswith("|"):
+            label = line.removeprefix("| Timestamp |").removesuffix("|").strip()
+            index += 2  # Skip the table separator.
+            values = []
+            while index < len(lines) and lines[index].startswith("|"):
+                cells = [cell.strip() for cell in lines[index].strip("|").split("|")]
+                if len(cells) == 2:
+                    values.append(f"{cells[0]}={cells[1]}")
+                index += 1
+            if compacted and compacted[-1].endswith("các mẫu đại diện phân bố đều:"):
+                compacted.pop()
+            compacted.append(f"Mẫu {label}: {'; '.join(values)}")
+            continue
+        compacted.append(line)
+        index += 1
+    return compacted

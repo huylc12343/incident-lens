@@ -116,6 +116,7 @@ class ChartWorkflowService(Protocol):
         *,
         window: IncidentWindow,
         events: list[LogEvent],
+        claims: list[Claim],
     ) -> list[str]: ...
 
 
@@ -298,6 +299,7 @@ async def analyze_log_node(
             str(artifact_root / "charts"),
             window=memory.incident_window,
             events=result.events,
+            claims=memory.claims,
         )
         artifact_uris = {
             **state.get("artifact_uris", {}),

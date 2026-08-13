@@ -123,11 +123,11 @@ def test_claim_status_rows_include_verification_reason_and_hide_raw_evidence() -
 
     assert rows == [
         {
-            "claim_id": "claim-1",
-            "timestamp_s": 18.25,
-            "claim": "Xe ego va chạm bụi cây",
-            "status": "supported",
-            "reason": "Tốc độ giảm về gần 0 km/h đúng thời điểm claim.",
+            "ID": "claim-1",
+            "Thời điểm": "18.25s",
+            "Nhận định": "Xe ego va chạm bụi cây",
+            "Trạng thái": "Được log hỗ trợ",
+            "Lý do": "Tốc độ giảm về gần 0 km/h đúng thời điểm claim.",
         }
     ]
 
@@ -137,7 +137,57 @@ def test_claim_status_rows_leave_reason_empty_when_verification_is_unavailable()
         [{"claim_id": "claim-1", "text": "Claim", "timestamp_s": 1.0}]
     )
 
-    assert rows[0]["reason"] == ""
+    assert rows[0]["Lý do"] == ""
+
+
+def test_claim_status_rows_uses_verification_result_as_status_source() -> None:
+    rows = main_test._claim_status_rows(
+        [{"claim_id": "claim-1", "text": "Xe ego dừng lại.", "timestamp_s": 2}],
+        {
+            "results": [
+                {
+                    "claim_id": "claim-1",
+                    "status": "contradicted",
+                    "reason": "Tốc độ vẫn tăng.",
+                }
+            ]
+        },
+    )
+
+    assert rows[0]["Trạng thái"] == "Mâu thuẫn với log"
+
+
+def test_unified_report_uses_embedded_verification_and_deduplicates_warnings() -> None:
+    report = {
+        "alignment": {"verification": {"results": [{"claim_id": "claim-1"}]}},
+        "evidence_and_warnings": {"warnings": ["Log không đầy đủ.", "Cảnh báo video."]},
+    }
+    snapshot = {"warnings": ["Log không đầy đủ."]}
+
+    assert main_test._report_verification(snapshot, report) == report["alignment"]["verification"]
+    assert main_test._report_warnings(snapshot, report) == ["Log không đầy đủ.", "Cảnh báo video."]
+
+
+def test_unified_report_formats_timeline_as_readable_rows() -> None:
+    rows = main_test._timeline_rows(
+        {
+            "events": [
+                {
+                    "timestamp_s": 7.5,
+                    "description": "Xe ego bắt đầu giảm tốc.",
+                    "evidence_ids": ["frame-1", "log-row:7.5"],
+                }
+            ]
+        }
+    )
+
+    assert rows == [
+        {
+            "Thời điểm": "7.5s",
+            "Diễn biến": "Xe ego bắt đầu giảm tốc.",
+            "Bằng chứng": "frame-1, log-row:7.5",
+        }
+    ]
 
 
 def test_reanalyze_review_fields_require_target_claims() -> None:

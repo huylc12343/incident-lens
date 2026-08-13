@@ -54,6 +54,17 @@ def test_video_analysis_prompt_is_deterministic() -> None:
     assert build_native_video_instruction() == build_native_video_instruction()
 
 
+def test_video_analysis_prompt_keeps_no_incident_window_schema_valid() -> None:
+    prompt = build_video_analysis_prompt(
+        analysis_prompt="Xác định có tai nạn hay không.",
+        input_mode=VLMInputMode.NATIVE_VIDEO,
+    )
+
+    assert "incident_window.t_end bằng thời lượng video" in prompt.text
+    assert "bắt buộc lớn hơn 0" in prompt.text
+    assert "Tuyệt đối không đặt incident_window.t_end = 0" in prompt.text
+
+
 def test_video_analysis_rejects_blank_analyst_request() -> None:
     with pytest.raises(ValueError, match="analysis_prompt must not be blank"):
         build_video_analysis_prompt(analysis_prompt="  ", input_mode=VLMInputMode.NATIVE_VIDEO)

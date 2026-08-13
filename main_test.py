@@ -53,8 +53,8 @@ def api_request(
 
 
 def main() -> None:
-    st.set_page_config(page_title="Incident Agent Test Client", layout="wide")
-    st.title("Incident Agent — End-to-end test client")
+    st.set_page_config(page_title="Báo cáo sự cố giao thông", layout="wide")
+    st.title("Phân tích sự cố giao thông")
     base_url = st.sidebar.text_input("FastAPI base URL", "http://localhost:8000")
     if st.session_state.get("history_base_url") != base_url:
         st.session_state.history_base_url = base_url
@@ -71,7 +71,7 @@ def main() -> None:
         video_file = st.file_uploader("Video", type=["mp4", "mov", "avi", "mkv", "webm"])
         log_file = st.file_uploader("Log CSV (tùy chọn)", type=["csv"])
         analysis_prompt = st.text_area("Analysis prompt", "Phân tích sự cố giao thông trong video.")
-        submitted = st.form_submit_button("Start incident")
+        submitted = st.form_submit_button("Bắt đầu phân tích")
     if submitted:
         if video_file is None:
             st.error("Bạn phải chọn một file video.")
@@ -79,7 +79,7 @@ def main() -> None:
             _upload_and_start_async(base_url, incident_id, analysis_prompt, video_file, log_file)
 
     active_id = st.session_state.get("incident_id", "")
-    if st.button("Refresh status") and active_id:
+    if st.button("Làm mới trạng thái") and active_id:
         _run_and_store("GET", base_url, f"/api/v1/incidents/{active_id}")
 
     _render_live_incident(base_url, active_id)
@@ -283,61 +283,263 @@ def _render_live_incident(base_url: str, incident_id: str) -> None:
 
 
 def _render_snapshot(snapshot: dict[str, Any]) -> None:
-    st.subheader(f"{snapshot.get('incident_id')} — {snapshot.get('status')}")
-    _render_model_activity(snapshot.get("model_activities", []))
-    if snapshot.get("video_summary"):
-        st.subheader("Video summary")
-        st.info(snapshot["video_summary"])
-    artifacts = snapshot.get("artifact_uris", {})
-    if isinstance(artifacts, dict):
-        columns = st.columns(2)
-        for key in ("normalized_video", "incident_clip"):
-            if artifacts.get(key):
-                columns[0].caption(key)
-                columns[0].video(artifacts[key])
-        if artifacts.get("representative_frame"):
-            columns[1].caption("representative_frame")
-            columns[1].image(artifacts["representative_frame"])
-        chart_keys = sorted(key for key in artifacts if key.startswith("chart_"))
-        for index, key in enumerate(chart_keys):
-            columns[index % 2].caption(key)
-            columns[index % 2].image(artifacts[key])
-
     report = snapshot.get("draft_report") or snapshot.get("final_report")
-    if isinstance(report, dict):
-        st.subheader("Báo cáo 10 mục")
-        labels = [
-            ("1. Thông tin chung", "general_information"),
-            ("2. Khoảng thời gian sự cố", "incident_window"),
-            ("3. Tóm tắt sự cố", "summary"),
-            ("4. Timeline", "timeline"),
-            ("5. Quan sát từ video", "video_observations"),
-            ("6. Kết quả log", "log_findings"),
-            ("7. Đối chiếu video và log", "alignment"),
-            ("8. Nguyên nhân giả thuyết", "hypothesized_causes"),
-            ("9. Bằng chứng và cảnh báo", "evidence_and_warnings"),
-            ("10. Trạng thái review", "review_status"),
-        ]
-        for label, key in labels:
-            with st.expander(label, expanded=key in {"summary", "evidence_and_warnings"}):
-                _render_report_value(report.get(key))
-
-    verification = snapshot.get("verification")
-    if not isinstance(verification, dict) and isinstance(report, dict):
-        alignment = report.get("alignment")
-        if isinstance(alignment, dict):
-            verification = alignment.get("verification")
-
-    st.subheader("Trạng thái xác thực claims")
-    st.dataframe(
-        _claim_status_rows(snapshot.get("claims", []), verification),
-        use_container_width=True,
-        hide_index=True,
-    )
-    for warning in snapshot.get("warnings", []):
-        st.warning(warning)
+    report = report if isinstance(report, dict) else {}
+    verification = _report_verification(snapshot, report)
     if snapshot.get("error_message"):
         st.error(f"{snapshot.get('error_code')}: {snapshot.get('error_message')}")
+
+    _render_unified_report(snapshot, report, verification)
+
+    with st.expander("Chi tiết kỹ thuật và mức sử dụng model"):
+        _render_model_activity(snapshot.get("model_activities", []))
+
+
+def _render_unified_report(
+    snapshot: dict[str, Any],
+    report: dict[str, Any],
+    verification: dict[str, Any] | None,
+) -> None:
+    with st.container(border=True):
+        st.header("Báo cáo sự cố")
+        general = report.get("general_information")
+        general = general if isinstance(general, dict) else {}
+        columns = st.columns(4)
+        columns[0].metric("Incident ID", snapshot.get("incident_id") or general.get("incident_id") or "—")
+        columns[1].metric("Trạng thái", _status_label(snapshot.get("status")))
+        columns[2].metric("Review", _review_status_label(report.get("review_status")))
+        has_log = general.get("has_log", snapshot.get("has_log"))
+        columns[3].metric("Dữ liệu log", "Có" if has_log is True else "Không" if has_log is False else "—")
+
+        st.markdown("### 1. Tóm tắt video (VLM)")
+        st.write(snapshot.get("video_summary") or report.get("summary") or "VLM chưa trả về tóm tắt video.")
+
+        _render_incident_media(snapshot.get("artifact_uris"))
+
+        st.markdown("### 2. Khoảng thời gian sự cố")
+        _render_incident_window(report.get("incident_window"))
+
+        st.markdown("### 3. Diễn biến theo thời gian")
+        timeline = report.get("timeline")
+        _render_section_narrative(timeline)
+        _render_timeline(timeline)
+
+        st.markdown("### 4. Đối chiếu từng nhận định (claim)")
+        _render_claim_details(snapshot.get("claims"), verification)
+
+        st.markdown("### 5. Nhận định tổng quát (LLM)")
+        observations = report.get("video_observations")
+        if isinstance(observations, dict) and observations.get("narrative"):
+            st.write(observations["narrative"])
+        else:
+            st.caption("Report LLM chưa trả về nhận định tổng quát.")
+
+        st.markdown("### 6. Nguyên nhân giả thuyết")
+        st.write(report.get("hypothesized_causes") or "Chưa có kết luận về nguyên nhân.")
+
+        warnings = _report_warnings(snapshot, report)
+        if warnings:
+            st.markdown("#### Cảnh báo cần lưu ý")
+            for warning in warnings:
+                st.warning(warning)
+
+
+def _render_incident_media(artifacts: Any) -> None:
+    if not isinstance(artifacts, dict):
+        return
+    has_media = any(artifacts.get(key) for key in ("normalized_video", "incident_clip", "representative_frame"))
+    chart_keys = sorted(key for key in artifacts if key.startswith("chart_") and artifacts.get(key))
+    if not has_media and not chart_keys:
+        return
+    st.markdown("#### Video và hình ảnh đại diện")
+    columns = st.columns(2)
+    video_uri = artifacts.get("incident_clip") or artifacts.get("normalized_video")
+    if video_uri:
+        columns[0].video(video_uri)
+    if artifacts.get("representative_frame"):
+        columns[1].image(artifacts["representative_frame"], caption="Khung hình đại diện")
+    if chart_keys:
+        st.markdown("#### Biểu đồ telemetry")
+        chart_columns = st.columns(2)
+        for index, key in enumerate(chart_keys):
+            chart_columns[index % 2].image(artifacts[key])
+
+
+def _render_timeline(value: Any) -> None:
+    events = value.get("events") if isinstance(value, dict) else None
+    if not isinstance(events, list) or not events:
+        st.caption("Chưa có mốc timeline.")
+        return
+    for index, event in enumerate(events, start=1):
+        if not isinstance(event, dict):
+            continue
+        with st.container(border=True):
+            st.markdown(f"**Mốc {index} · {_seconds(event.get('timestamp_s'))}**")
+            st.write(event.get("description") or "Không có mô tả.")
+            evidence_ids = event.get("evidence_ids")
+            if isinstance(evidence_ids, list) and evidence_ids:
+                st.caption(f"Bằng chứng: {', '.join(str(item) for item in evidence_ids)}")
+
+
+def _render_claim_details(claims: Any, verification: Any) -> None:
+    if not isinstance(claims, list) or not claims:
+        st.caption("Chưa có nhận định để xác thực.")
+        return
+
+    verification_by_id = {
+        item.get("claim_id"): item
+        for item in (verification.get("results", []) if isinstance(verification, dict) else [])
+        if isinstance(item, dict) and isinstance(item.get("claim_id"), str)
+    }
+    for index, claim in enumerate(claims, start=1):
+        if not isinstance(claim, dict):
+            continue
+        claim_id = claim.get("claim_id")
+        verified = verification_by_id.get(claim_id, {})
+        status = verified.get("status", claim.get("verification_status", "unverified"))
+        with st.container(border=True):
+            st.markdown(f"#### Claim {index} · `{claim_id or '—'}`")
+            metadata = st.columns(2)
+            metadata[0].markdown(f"**Thời điểm:** {_seconds(claim.get('timestamp_s'))}")
+            metadata[1].markdown(f"**Trạng thái:** {_verification_status_label(status)}")
+
+            st.markdown("**Nhận định**")
+            st.write(claim.get("text") or "Không có nội dung claim.")
+
+            st.markdown("**Lý do xác thực**")
+            st.write(verified.get("reason") or "Chưa có kết quả xác thực từ log.")
+
+            evidence_ids = verified.get("evidence_ids")
+            if isinstance(evidence_ids, list) and evidence_ids:
+                st.caption(f"Evidence verification: {', '.join(str(item) for item in evidence_ids)}")
+
+
+def _render_incident_window(value: Any) -> None:
+    if not isinstance(value, dict):
+        st.caption("Chưa xác định khoảng thời gian sự cố.")
+        return
+    columns = st.columns(3)
+    columns[0].metric("Bắt đầu", _seconds(value.get("t_start")))
+    columns[1].metric("Sự kiện chính", _seconds(value.get("t0")))
+    columns[2].metric("Kết thúc", _seconds(value.get("t_end")))
+
+
+def _render_section_narrative(value: Any) -> None:
+    if isinstance(value, dict):
+        narrative = value.get("narrative")
+        if narrative:
+            st.write(narrative)
+    elif value:
+        st.write(value)
+
+
+def _timeline_rows(value: Any) -> list[dict[str, Any]]:
+    events = value.get("events") if isinstance(value, dict) else None
+    if not isinstance(events, list):
+        return []
+    return [
+        {
+            "Thời điểm": _seconds(event.get("timestamp_s")),
+            "Diễn biến": event.get("description"),
+            "Bằng chứng": ", ".join(event.get("evidence_ids", [])),
+        }
+        for event in events
+        if isinstance(event, dict)
+    ]
+
+
+def _observation_rows(value: Any) -> list[dict[str, Any]]:
+    observations = value.get("observations") if isinstance(value, dict) else None
+    if not isinstance(observations, list):
+        return []
+    return [
+        {
+            "Thời điểm": _seconds(item.get("timestamp_s")),
+            "Quan sát": item.get("text"),
+            "Bằng chứng": ", ".join(item.get("evidence_ids", [])),
+        }
+        for item in observations
+        if isinstance(item, dict)
+    ]
+
+
+def _render_log_summary(value: Any) -> None:
+    summary = value.get("summary") if isinstance(value, dict) else None
+    if not isinstance(summary, dict):
+        return
+    if summary.get("summary"):
+        st.text(summary["summary"])
+    metrics = summary.get("metrics")
+    if isinstance(metrics, dict) and metrics:
+        st.dataframe(
+            [{"Chỉ số": key, "Giá trị": metric} for key, metric in metrics.items()],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+
+def _evidence_rows(value: Any) -> list[dict[str, Any]]:
+    evidence = value.get("evidence") if isinstance(value, dict) else None
+    if not isinstance(evidence, list):
+        return []
+    return [
+        {"Evidence ID": item.get("evidence_id"), "Thời điểm": _seconds(item.get("timestamp_s"))}
+        for item in evidence
+        if isinstance(item, dict)
+    ]
+
+
+def _report_verification(snapshot: dict[str, Any], report: dict[str, Any]) -> dict[str, Any] | None:
+    verification = snapshot.get("verification")
+    if isinstance(verification, dict):
+        return verification
+    alignment = report.get("alignment")
+    if isinstance(alignment, dict) and isinstance(alignment.get("verification"), dict):
+        return alignment["verification"]
+    return None
+
+
+def _report_warnings(snapshot: dict[str, Any], report: dict[str, Any]) -> list[str]:
+    warnings = snapshot.get("warnings")
+    combined = [item for item in warnings if isinstance(item, str)] if isinstance(warnings, list) else []
+    evidence = report.get("evidence_and_warnings")
+    report_warnings = evidence.get("warnings") if isinstance(evidence, dict) else None
+    if isinstance(report_warnings, list):
+        combined.extend(item for item in report_warnings if isinstance(item, str))
+    return list(dict.fromkeys(combined))
+
+
+def _seconds(value: Any) -> str:
+    return f"{value:g}s" if isinstance(value, (int, float)) else "—"
+
+
+def _status_label(value: Any) -> str:
+    return {
+        "queued": "Đang chờ",
+        "running": "Đang phân tích",
+        "awaiting_review": "Chờ review",
+        "approved": "Đã duyệt",
+        "not_incident": "Không phải sự cố",
+        "failed": "Thất bại",
+        "cancelled": "Đã hủy",
+    }.get(value, str(value or "—"))
+
+
+def _review_status_label(value: Any) -> str:
+    return {
+        "pending": "Chờ review",
+        "approved": "Đã duyệt",
+        "edited": "Đã chỉnh sửa",
+        "not_incident": "Không phải sự cố",
+    }.get(value, str(value or "—"))
+
+
+def _verification_status_label(value: Any) -> str:
+    return {
+        "supported": "Được log hỗ trợ",
+        "contradicted": "Mâu thuẫn với log",
+        "unverified": "Chưa xác thực",
+    }.get(value, str(value or "—"))
 
 
 def _claim_status_rows(claims: Any, verification: Any = None) -> list[dict[str, Any]]:
@@ -345,6 +547,7 @@ def _claim_status_rows(claims: Any, verification: Any = None) -> list[dict[str, 
         return []
 
     reasons_by_claim_id: dict[str, str] = {}
+    statuses_by_claim_id: dict[str, str] = {}
     if isinstance(verification, dict) and isinstance(verification.get("results"), list):
         for result in verification["results"]:
             if not isinstance(result, dict):
@@ -353,14 +556,19 @@ def _claim_status_rows(claims: Any, verification: Any = None) -> list[dict[str, 
             reason = result.get("reason")
             if isinstance(claim_id, str) and isinstance(reason, str):
                 reasons_by_claim_id[claim_id] = reason
+            status = result.get("status")
+            if isinstance(claim_id, str) and isinstance(status, str):
+                statuses_by_claim_id[claim_id] = status
 
     return [
         {
-            "claim_id": claim.get("claim_id"),
-            "timestamp_s": claim.get("timestamp_s"),
-            "claim": claim.get("text"),
-            "status": claim.get("verification_status", "unverified"),
-            "reason": reasons_by_claim_id.get(claim.get("claim_id"), ""),
+            "ID": claim.get("claim_id"),
+            "Thời điểm": _seconds(claim.get("timestamp_s")),
+            "Nhận định": claim.get("text"),
+            "Trạng thái": _verification_status_label(
+                statuses_by_claim_id.get(claim.get("claim_id"), claim.get("verification_status", "unverified"))
+            ),
+            "Lý do": reasons_by_claim_id.get(claim.get("claim_id"), ""),
         }
         for claim in claims
         if isinstance(claim, dict)

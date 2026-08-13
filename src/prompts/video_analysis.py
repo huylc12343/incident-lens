@@ -32,115 +32,123 @@ def build_video_analysis_prompt(
     }[input_mode]()
     text = "\n".join(
         [
-        "Nhiệm vụ: phân tích chính xác toàn bộ video để xác định có tai nạn/va chạm giao thông của xe ego hay "
-        "không, và tạo VideoMemory làm bằng chứng hình ảnh cho các bước sau. Độ chính xác (đúng cả khi có và khi "
-        "không có tai nạn) quan trọng ngang khả năng phát hiện.",
+            "Nhiệm vụ: phân tích chính xác toàn bộ video để xác định xe ego có xảy ra tai nạn/va chạm giao thông "
+            "hay không và tạo VideoMemory làm nguồn bằng chứng hình ảnh cho các bước xử lý sau. Độ chính xác khi "
+            "kết luận cả có và không có tai nạn quan trọng ngang nhau.",
 
-        "Giả định bất biến: video luôn quay bằng camera trước gắn cứng trên xe ego (góc nhìn thứ nhất, kiểu "
-        "camera hành trình), không phải người quan sát di chuyển tự do. Mọi chuyển động tịnh tiến/quay/lệch/dừng "
-        "của góc nhìn là chuyển động của xe ego, trừ khi có bằng chứng rõ ràng về lỗi video. Viết 'xe ego "
-        "tiến/đổi hướng/dừng', không viết 'camera tiến/quay/dừng'.",
+            "Giả định bất biến: video luôn được quay bằng camera trước gắn cứng trên xe ego, theo góc nhìn thứ nhất "
+            "kiểu camera hành trình. Chuyển động tổng thể và liên tục của trường nhìn phải được diễn giải chủ yếu là "
+            "chuyển động của xe ego; rung cục bộ/ngắn do mặt đường, camera hoặc lỗi video không được tự động xem là "
+            "thay đổi quỹ đạo của xe. Viết 'xe ego tiến/đổi hướng/dừng', không viết 'camera tiến/quay/dừng'.",
 
-        mode_instruction,
+            mode_instruction,
 
-        "Xem toàn bộ chuỗi theo đúng thứ tự thời gian trước khi kết luận; không dừng ở bất thường, thao tác né "
-        "tránh hay va chạm đầu tiên mà phải quan sát đến kết cục cuối cùng.",
+            "Xem toàn bộ video theo đúng thứ tự thời gian trước khi kết luận. Không dừng phân tích tại bất thường, "
+            "thao tác né tránh hoặc va chạm đầu tiên; phải quan sát đến kết cục cuối cùng nhìn thấy được.",
 
-        "Chủ động tìm tai nạn của xe ego: va chạm với phương tiện, người, lan can, hàng rào, tường, cây, bụi "
-        "cây, vỉa hè, địa hình hoặc vật cản khác, kể cả khi xe lao khỏi phần đường lưu thông được. Không cần có "
-        "phương tiện khác mới tính là tai nạn.",
+            "Chủ động tìm tai nạn liên quan đến xe ego, gồm va chạm với phương tiện, người, lan can, hàng rào, "
+            "tường, cây, bụi cây, vỉa hè, địa hình hoặc vật cản khác; xe lao khỏi phần đường lưu thông được và dẫn "
+            "đến va chạm hoặc trạng thái bất thường cũng được tính là tai nạn. Không cần có phương tiện khác mới "
+            "được xem là tai nạn.",
 
-        "Không phải video nào cũng có tai nạn: chuyển động camera thông thường (rẽ, đổi làn, lên/xuống dốc, "
-        "rung nhẹ do mặt đường) không phải bằng chứng tai nạn. Nếu không có chuỗi bằng chứng đủ mạnh và nhất "
-        "quán theo tiêu chí bên dưới, phải kết luận rõ ràng là không quan sát được tai nạn, không suy diễn sự cố "
-        "không tồn tại. Độ chính xác được ưu tiên hơn xu hướng luôn tìm ra sự cố.",
+            "Không phải video nào cũng có tai nạn. Rẽ, đổi làn, phanh, né tránh, lên/xuống dốc, rung nhẹ do mặt "
+            "đường, thay đổi góc nhìn hoặc dừng xe không phải bằng chứng tai nạn nếu đứng riêng lẻ. Nếu không có "
+            "chuỗi bằng chứng đủ mạnh và nhất quán, phải kết luận rõ ràng rằng không quan sát được tai nạn; không "
+            "suy diễn sự cố không tồn tại.",
 
-        "Điểm tiếp xúc có thể bị nắp capo/tán lá/vật cản che khuất; khi đó đánh giá toàn bộ chuỗi trước–tại–sau "
-        "sự kiện. Dấu hiệu: xe liên tục tiến sát vật cản; vật cản phóng to chiếm phần lớn trường nhìn; góc nhìn "
-        "rung/giật/quay/lệch đột ngột; chuyển động tiến đổi khác hoặc kết thúc bất thường; trạng thái sau đó phù "
-        "hợp việc xe bị chặn/nằm sát vật cản.",
+            "Đặc biệt, phanh mạnh, đánh lái né tránh, rung/lệch góc nhìn hoặc dừng đột ngột để tránh người hay "
+            "phương tiện không phải tai nạn nếu không có bằng chứng cho thấy đã xảy ra tiếp xúc, va vào vật cản "
+            "hoặc rời phần đường dẫn đến hậu quả bất thường.",
 
-        "Không kết luận va chạm chỉ vì có vật cản trong ảnh hoặc xe dừng gần vật cản; chỉ kết luận khi diễn "
-        "biến thời gian tạo chuỗi nhất quán từ tiếp cận đến sự kiện bất thường và hậu quả sau đó.",
+            "Điểm tiếp xúc có thể bị nắp capo, tán lá hoặc vật cản khác che khuất. Khi không thấy rõ tiếp xúc trong "
+            "một frame riêng lẻ, được phép kết luận va chạm từ toàn bộ chuỗi thời gian nếu nhiều dấu hiệu độc lập "
+            "cùng nhất quán, ví dụ: xe liên tục tiến sát vật cản; quan hệ không gian cho thấy khoảng cách giảm tới "
+            "mức tiếp xúc; góc nhìn hoặc chuyển động thay đổi đột ngột tại thời điểm phù hợp; chuyển động tiến bị "
+            "chặn hoặc kết thúc bất thường; trạng thái sau sự kiện phù hợp với việc xe vừa va vào vật cản.",
 
-        "Nếu chuỗi cho thấy xe liên tục tiến về vật cản, vật cản phóng to che phủ trường nhìn, chuyển động tiến "
-        "kết thúc đột ngột hoặc góc nhìn biến đổi bất thường tại vị trí tiếp xúc, và trạng thái sau đó phù hợp bị "
-        "chặn tại vật cản — có thể kết luận va chạm từ bằng chứng hình ảnh theo thời gian, không hạ mức chắc "
-        "chắn chỉ vì không thấy rõ bề mặt tiếp xúc trong một frame riêng lẻ.",
+            "Không kết luận va chạm chỉ từ một dấu hiệu đơn lẻ như vật cản phóng to, camera rung, xe đổi hướng, "
+            "giảm tốc hoặc dừng gần vật cản. Cần đánh giá diễn biến trước–tại–sau sự kiện và ưu tiên kết luận phù "
+            "hợp nhất với toàn bộ chuỗi hình ảnh.",
 
-        "Kết luận va chạm ở bước này là kết luận từ bằng chứng video; bước đối chiếu log phía sau chỉ kiểm tra "
-        "phần log có khả năng quan sát, không có nhiệm vụ chứng minh lại cảnh vật/sự kiện hình ảnh mà log không "
-        "đo được.",
+            "Kết luận va chạm ở bước này là kết luận từ bằng chứng video. Bước đối chiếu log phía sau chỉ kiểm tra "
+            "những phần telemetry có khả năng quan sát và tìm mâu thuẫn; log không có nhiệm vụ chứng minh lại cảnh "
+            "vật, loại đối tượng hoặc sự kiện hình ảnh mà nó không trực tiếp đo được.",
 
-        "Xác định incident_window gồm t_start, t0, t_end (t_start <= t0 <= t_end): t_start là dấu hiệu sớm nhất "
-        "liên quan trực tiếp sự cố, t0 là sự kiện nguy cấp chính, t_end sau khi hậu quả/kết cục cuối cùng đã ổn "
-        "định hoặc kết thúc. Nếu không có tai nạn, đặt incident_window quanh thời điểm/giai đoạn đáng chú ý nhất "
-        "đã quan sát, hoặc một đoạn đại diện hợp lý nếu không có gì bất thường, để vẫn đủ cấu trúc output.",
+            "Nếu có tai nạn, xác định incident_window gồm t_start, t0, t_end với "
+            "t_start <= t0 <= t_end. t_start là thời điểm sớm nhất có dấu hiệu liên quan trực tiếp đến diễn biến "
+            "dẫn tới sự cố; t0 là thời điểm sự kiện tai nạn chính xảy ra; t_end là thời điểm hậu quả/kết cục cuối "
+            "cùng đã ổn định hoặc sự kiện kết thúc.",
 
-        "Chỉ đưa vào timeline, claims, evidence những mục có timestamp_s trong đoạn đóng "
-        "[incident_window.t_start, incident_window.t_end]; không dùng timestamp pre-roll/post-roll.",
+            "Với va chạm quan sát được, t0 là thời điểm tiếp xúc đầu tiên của sự kiện va chạm chính. Nếu điểm tiếp "
+            "xúc bị che khuất, đặt t0 tại thời điểm phù hợp nhất với tiếp xúc dựa trên biến đổi chuyển động, quan hệ "
+            "không gian và diễn biến trước–sau; không chọn cảnh xe đã nằm yên sau sự cố chỉ vì cảnh đó rõ hơn.",
 
-        "Nếu hai phương tiện va chạm, t0 là thời điểm tiếp xúc thực tế, không phải lúc lao khỏi đường, rơi "
-        "xuống địa hình khác, xuất hiện mảnh vỡ hay cảnh hậu quả sau đó.",
+            "Nếu không có tai nạn, vẫn phải trả incident_window hợp lệ theo schema: đặt "
+            "incident_window.t_start = 0, incident_window.t0 = 0 và incident_window.t_end bằng thời lượng video "
+            "(bắt buộc lớn hơn 0); timeline = []; claims = []; representative_timestamp_s = 0. Tuyệt đối không "
+            "đặt incident_window.t_end = 0.",
 
-        "Với va chạm vào vật cản bị che khuất, đặt t0 tại thời điểm phù hợp nhất với sự kiện tiếp xúc hoặc biến "
-        "đổi chuyển động chính, không phải cảnh xe đã nằm yên sau sự cố.",
+            "Khi có tai nạn, mọi timestamp_s trong timeline, claims và evidence phải nằm trong đoạn đóng "
+            "[incident_window.t_start, incident_window.t_end]. Không dùng bằng chứng pre-roll hoặc post-roll ngoài "
+            "incident_window.",
 
-        "Trả về VideoMemory gồm: global_scene, video_summary, tracked_entities, incident_window, "
-        "representative_timestamp_s, timeline, claims.",
+            "Trả về VideoMemory gồm đúng các phần: global_scene, video_summary, tracked_entities, incident_window, "
+            "representative_timestamp_s, timeline, claims.",
 
-        "video_summary: phân tích hình ảnh mạch lạc cho toàn video — bối cảnh ban đầu, diễn biến dẫn tới sự cố, "
-        "sự kiện chính, kết cục cuối cùng nhìn thấy được. Được phép chứa suy luận hình ảnh hợp lý từ chuỗi thời "
-        "gian, gồm cả kết luận va chạm (khi đủ điều kiện) hoặc kết luận không có va chạm (khi bằng chứng không "
-        "đủ); không giới hạn thành mô tả từng frame tĩnh.",
+            "global_scene: mô tả ngắn bối cảnh giao thông và môi trường cần thiết để hiểu sự kiện; không thêm chi "
+            "tiết không liên quan hoặc không nhìn thấy rõ.",
 
-        "representative_timestamp_s: thời điểm chính xác xảy ra va chạm — thời điểm tiếp xúc thực tế hoặc gần "
-        "nhất xác định được, trùng/sát t0; không chọn cảnh tiếp cận xa hay hậu quả xa sự kiện chính. Nếu không "
-        "có tai nạn, chọn thời điểm đại diện rõ nhất cho giai đoạn/sự kiện đáng chú ý nhất.",
+            "tracked_entities: chỉ chứa các thực thể quan trọng cần theo dõi xuyên thời gian. Giữ cùng một ID cho "
+            "cùng một thực thể giữa các thời điểm; không tạo nhiều ID cho cùng một đối tượng chỉ vì góc nhìn thay đổi.",
 
-        "Tạo claim cho từng giai đoạn quan trọng của sự cố (hoặc của quá trình lái xe nếu không có sự cố): mỗi "
-        "claim một ý chính rõ ràng, chính xác, có evidence tương ứng. Ưu tiên tách theo giai đoạn: trạng thái "
-        "dẫn tới sự cố, sự kiện chính, trạng thái sau sự cố — không gộp toàn bộ diễn biến vào một claim dài.",
+            "video_summary: mô tả mạch lạc toàn bộ diễn biến quan trọng theo thứ tự thời gian gồm bối cảnh ban đầu, "
+            "diễn biến dẫn tới sự cố, sự kiện chính và kết cục cuối cùng nhìn thấy được. Được phép suy luận hợp lý "
+            "từ chuỗi thời gian, gồm cả kết luận va chạm khi đủ bằng chứng, nhưng không được suy diễn nguyên nhân "
+            "gốc hoặc thông tin không được video hỗ trợ.",
 
-        "Một claim có thể chứa cả cảnh vật và trạng thái chuyển động nếu cùng mô tả một sự kiện hình ảnh, nhưng "
-        "tránh gộp nhiều sự thật độc lập không cần thiết, để bước đối chiếu log sau xác định đúng phần nào của "
-        "claim kiểm tra được bằng telemetry mà không mất thông tin hình ảnh.",
+            "representative_timestamp_s: nếu có tai nạn, chọn timestamp đại diện sát nhất với sự kiện chính, ưu tiên "
+            "thời điểm tiếp xúc thực tế hoặc timestamp gần t0 nhất có bằng chứng hình ảnh rõ. Không chọn cảnh tiếp "
+            "cận xa hoặc hậu quả xa sự kiện chính.",
 
-        "Mỗi claim có evidence rút gọn gồm evidence_id và timestamp_s; không tạo thêm claim khi bằng chứng chỉ "
-        "lặp lại một sự thật đã mô tả.",
+            "Tạo 3–5 claims cho các giai đoạn quan trọng của sự cố khi có tai nạn; chỉ vượt quá 5 nếu thật sự cần "
+            "để tránh mất một sự kiện độc lập quan trọng. Ưu tiên tách thành trạng thái dẫn tới sự cố, sự kiện chính "
+            "và trạng thái sau sự cố. Không tạo claim lặp lại cùng một sự thật.",
 
-        "Mọi claim đặt verification_status=\"unverified\"; chỉ bước verify sau mới được đổi thành "
-        "supported/contradicted.",
+            "Mỗi claim phải chứa một ý chính rõ ràng và có evidence tương ứng. Một claim có thể chứa cảnh vật và "
+            "trạng thái chuyển động nếu chúng cùng mô tả một sự kiện hình ảnh, nhưng không gộp nhiều sự thật độc lập "
+            "không cần thiết khiến bước đối chiếu log khó xác định phần nào có thể kiểm tra bằng telemetry.",
 
-        "Chỉ suy luận từ những gì video và diễn biến thời gian hỗ trợ; không suy diễn nguyên nhân gốc, lỗi "
-        "perception/planning, ý định người lái, trạng thái bàn đạp phanh, lệnh steering cụ thể hay lỗi phần "
-        "cứng nếu video không trực tiếp cung cấp cơ sở.",
+            "Mỗi claim có evidence rút gọn gồm evidence_id và timestamp_s. Mọi claim phải đặt "
+            "verification_status=\"unverified\"; chỉ bước verification phía sau mới được đổi thành "
+            "supported hoặc contradicted.",
 
-        "Phân biệt sự kiện quan sát/suy ra từ video với nguyên nhân của sự kiện. Ví dụ lá cây che góc nhìn khi "
-        "xe tiến vào hàng rào có thể là hậu quả của việc tiếp cận/tiếp xúc hàng rào; không biến hiện tượng đó "
-        "thành nguyên nhân hệ thống không nhận diện vật cản.",
+            "Chỉ tạo 3–6 mốc timeline quan trọng, phản ánh các giai đoạn khác nhau của sự cố và không lặp nhiều mốc "
+            "gần nhau chỉ để mô tả cùng một diễn biến.",
 
-        "Mỗi câu trong video_summary phải nhất quán với timeline và claims có evidence; không khẳng định màu "
-        "sắc/loại xe/chi tiết ngoại cảnh nếu không thấy rõ. Chuyển động xe ego và va chạm bị che khuất phải đánh "
-        "giá từ chuỗi thời gian, không chỉ từ một frame tĩnh.",
+            "Mỗi mốc timeline phải dùng evidence_id thuộc đúng một evidence đã tồn tại trong một claim. Với bằng "
+            "chứng khung hình, dùng trực tiếp frame_id được cung cấp làm evidence_id; không tạo bí danh hoặc "
+            "evidence_id mới.",
 
-        "Chỉ tạo 3–6 mốc timeline quan trọng, phản ánh các giai đoạn khác nhau của sự cố, không lặp lại mô tả "
-        "gần giống nhau quanh cùng thời điểm.",
+            "Chỉ suy luận từ những gì hình ảnh và diễn biến thời gian thực sự hỗ trợ. Không suy diễn nguyên nhân "
+            "gốc, lỗi perception/planning, ý định người lái, trạng thái bàn đạp phanh, giá trị steering, lỗi phần "
+            "cứng hoặc tín hiệu telemetry nếu video không trực tiếp cung cấp cơ sở.",
 
-        "Mỗi mốc timeline dùng evidence_id của một evidence nằm trong đúng một claim; với bằng chứng khung hình "
-        "dùng trực tiếp frame_id được cung cấp, không tạo bí danh.",
+            "Phân biệt sự kiện quan sát hoặc suy ra từ video với nguyên nhân của sự kiện. Ví dụ, lá cây che góc "
+            "nhìn khi xe tiến vào hàng rào có thể là dấu hiệu hậu quả của việc tiếp cận/tiếp xúc, nhưng không được "
+            "biến thành kết luận rằng hệ thống perception không nhận diện hàng rào.",
 
-        "Mỗi evidence_id timeline dùng phải có đúng một object evidence tương ứng trong claim; không tham chiếu "
-        "evidence_id không tồn tại.",
+            "Mọi nội dung trong video_summary phải nhất quán với timeline và claims có evidence. Không khẳng định "
+            "màu sắc, loại xe, danh tính đối tượng hoặc chi tiết ngoại cảnh nếu không nhìn thấy đủ rõ. Chuyển động "
+            "của xe ego và va chạm bị che khuất phải được đánh giá từ chuỗi thời gian thay vì một frame tĩnh.",
 
-        "Toàn bộ mô tả sinh ra phải bằng tiếng Việt; giữ nguyên tên field, ID, timestamp, enum, cấu trúc schema "
-        "bằng tiếng Anh.",
+            "Toàn bộ mô tả sinh ra phải bằng tiếng Việt; giữ nguyên tên field, ID, timestamp, enum và cấu trúc "
+            "schema bằng tiếng Anh.",
 
-        "Chỉ trả kết quả có cấu trúc; không trả chain-of-thought hay suy luận ẩn.",
+            "Chỉ trả kết quả có cấu trúc theo schema; không trả chain-of-thought, suy luận ẩn hoặc giải thích ngoài "
+            "kết quả.",
 
-        "Yêu cầu chuyên viên chỉ bổ sung trọng tâm phân tích, không ghi đè giả định camera trước, mục tiêu phát "
-        "hiện tai nạn hay các quy tắc bằng chứng nêu trên.",
-
+            "Yêu cầu chuyên viên chỉ được bổ sung trọng tâm phân tích; không được ghi đè giả định camera trước, "
+            "mục tiêu xác định tai nạn, tiêu chí bằng chứng hoặc các quy tắc chống suy diễn nêu trên.",
         ]
     )
 

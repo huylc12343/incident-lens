@@ -22,18 +22,17 @@ class IncidentUploadError(RuntimeError):
 
 
 class IncidentUploadService:
-    def __init__(self, *, upload_dir: str, max_video_bytes: int, max_log_bytes: int) -> None:
-        if not upload_dir.strip() or min(max_video_bytes, max_log_bytes) <= 0:
-            raise ValueError("upload directory and positive size limits are required")
+    def __init__(self, *, upload_dir: str, max_log_bytes: int) -> None:
+        if not upload_dir.strip() or max_log_bytes <= 0:
+            raise ValueError("upload directory and positive log size limit are required")
         self._upload_dir = Path(upload_dir).resolve()
         self._upload_dir.mkdir(parents=True, exist_ok=True)
-        self._max_video_bytes = max_video_bytes
         self._max_log_bytes = max_log_bytes
 
     async def save(self, video: UploadFile, log: UploadFile | None = None) -> IncidentUploadResponse:
         saved: list[Path] = []
         try:
-            video_path = await self._save_file(video, "video", VIDEO_EXTENSIONS, self._max_video_bytes)
+            video_path = await self._save_file(video, "video", VIDEO_EXTENSIONS)
             saved.append(video_path)
             log_path = None
             if log is not None:
@@ -57,7 +56,7 @@ class IncidentUploadService:
         upload: UploadFile,
         label: str,
         allowed_extensions: set[str],
-        max_bytes: int,
+        max_bytes: int | None = None,
     ) -> Path:
         original_name = Path(upload.filename or "").name
         extension = Path(original_name).suffix.lower()
@@ -71,7 +70,7 @@ class IncidentUploadService:
             with destination.open("xb") as output:
                 while chunk := await upload.read(CHUNK_SIZE):
                     total += len(chunk)
-                    if total > max_bytes:
+                    if max_bytes is not None and total > max_bytes:
                         raise IncidentUploadError("UPLOAD_FILE_TOO_LARGE", f"{label} file exceeds the size limit")
                     output.write(chunk)
         except Exception:

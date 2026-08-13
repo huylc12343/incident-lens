@@ -48,7 +48,7 @@ Khi đối chiếu claim với log, `LOG_CLAIM_SAMPLE_RADIUS` quy định số m
 
 Qwen native video dùng `VLM_PROVIDER=qwen`, `VLM_INPUT_MODE=native_video` và `DASHSCOPE_API_KEY`. Video được resize/pad theo `VLM_VIDEO_TARGET_WIDTH`, `VLM_VIDEO_TARGET_HEIGHT` và chuẩn hóa FPS trước khi gửi. Video local nhỏ hơn `QWEN_BASE64_MAX_VIDEO_BYTES` (mặc định 7 MB) được gửi bằng Base64 Data URL. Video lớn hơn ngưỡng cần `QWEN_ARTIFACT_URL_BASE` công khai `ARTIFACT_DIR`. Qwen gọi `qwen3-vl-flash` qua DashScope chat completions.
 
-Streamlit upload file vào `INCIDENT_UPLOAD_DIR`; backend kiểm tra phần mở rộng, dung lượng, path root, file tồn tại và video không quá 60 giây. URL từ xa và external object storage không thuộc baseline.
+Streamlit upload file vào `INCIDENT_UPLOAD_DIR`; ngưỡng mặc định 200 MB của Streamlit được nâng lên 10 GB và backend không giới hạn dung lượng video. Backend vẫn kiểm tra phần mở rộng, path root, file tồn tại và video không quá 60 giây. File log vẫn chịu giới hạn `INCIDENT_MAX_LOG_BYTES`. URL từ xa và external object storage không thuộc baseline.
 
 ## Chạy backend và Streamlit
 

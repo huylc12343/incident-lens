@@ -18,7 +18,6 @@ async def lifespan(app: FastAPI):
     print(f"Starting {settings.app_name} in {settings.app_env} mode")
     app.state.incident_upload_service = IncidentUploadService(
         upload_dir=settings.incident_upload_dir,
-        max_video_bytes=settings.incident_max_video_bytes,
         max_log_bytes=settings.incident_max_log_bytes,
     )
     try:

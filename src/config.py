@@ -89,7 +89,6 @@ class Settings(BaseSettings):
 
     # Workflow and incident inputs
     human_prompt_max_length: int = Field(default=5000, gt=0)
-    incident_max_video_bytes: int = Field(default=250_000_000, gt=0)
     incident_max_log_bytes: int = Field(default=25_000_000, gt=0)
     incident_input_roots: str = "./data_mock"
     incident_upload_dir: str = "./data/uploads"

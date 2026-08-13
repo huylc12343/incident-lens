@@ -346,7 +346,7 @@ curl -X POST http://localhost:8000/api/v1/incidents \
   }'
 ```
 
-`video_uri` và `log_uri` phải nằm trong các root được cấu hình ở `INCIDENT_INPUT_ROOTS` hoặc upload directory. Video bị từ chối nếu quá giới hạn dung lượng hoặc dài hơn `INCIDENT_MAX_DURATION_S`.
+`video_uri` và `log_uri` phải nằm trong các root được cấu hình ở `INCIDENT_INPUT_ROOTS` hoặc upload directory. Video không bị giới hạn dung lượng nhưng vẫn bị từ chối nếu dài hơn `INCIDENT_MAX_DURATION_S`.
 
 ### 7.3. Lấy snapshot và review
 
@@ -425,7 +425,7 @@ OpenAI + `native_video` và Qwen + `timestamped_frames` bị từ chối khi boo
 | VLM              | `VLM_PROVIDER`, `VLM_INPUT_MODE`, `OPENAI_VLM_MODEL_NAME`, `DASHSCOPE_API_KEY`, `QWEN_VLM_MODEL_NAME`, `QWEN_BASE64_MAX_VIDEO_BYTES`, `QWEN_ARTIFACT_URL_BASE` |
 | VLM limits       | `VLM_TIMEOUT_S`, `VLM_MAX_RETRIES`, `VLM_FRAME_FPS`, `VLM_MAX_FRAMES`, `VLM_FRAME_OVERFLOW_STRATEGY`                                                               |
 | Model downstream | `VERIFICATION_MODEL_NAME`, `REPORT_MODEL_NAME`, timeout/temperature tương ứng                                                                                         |
-| Input            | `INCIDENT_INPUT_ROOTS`, `INCIDENT_UPLOAD_DIR`, `INCIDENT_MAX_VIDEO_BYTES`, `INCIDENT_MAX_LOG_BYTES`, `INCIDENT_MAX_DURATION_S`                                     |
+| Input            | `INCIDENT_INPUT_ROOTS`, `INCIDENT_UPLOAD_DIR`, `INCIDENT_MAX_LOG_BYTES`, `INCIDENT_MAX_DURATION_S`                                                                 |
 | Log              | `LOG_TIMESTAMP_TOLERANCE_S`, `LOG_BRAKE_RISE_THRESHOLD`, `LOG_STEERING_CHANGE_THRESHOLD`                                                                               |
 | Storage          | `ARTIFACT_DIR`, `INCIDENT_DATABASE_PATH`, `INCIDENT_CHECKPOINT_PATH`                                                                                                   |
 | Qwen video       | `QWEN_BASE_URL`, `QWEN_VIDEO_FPS`, `QWEN_ENABLE_THINKING`, `QWEN_THINKING_BUDGET`                                                                                    |

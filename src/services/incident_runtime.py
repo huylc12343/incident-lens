@@ -81,7 +81,7 @@ class ConfiguredIncidentInputValidator:
     async def validate(self, request: IncidentCreateRequest) -> None:
         if len(request.analysis_prompt) > self._settings.human_prompt_max_length:
             raise WorkflowError("ANALYSIS_PROMPT_TOO_LONG", "analysis prompt exceeds the configured limit")
-        video = self._validated_path(request.video_uri, "video", self._settings.incident_max_video_bytes)
+        video = self._validated_path(request.video_uri, "video")
         if request.log_uri is not None:
             self._validated_path(request.log_uri, "log", self._settings.incident_max_log_bytes)
         try:
@@ -91,13 +91,13 @@ class ConfiguredIncidentInputValidator:
         if metadata.duration_s > self._settings.incident_max_duration_s:
             raise WorkflowError("VIDEO_DURATION_EXCEEDED", "video duration exceeds 60 seconds")
 
-    def _validated_path(self, value: str, label: str, max_bytes: int) -> Path:
+    def _validated_path(self, value: str, label: str, max_bytes: int | None = None) -> Path:
         path = Path(value).resolve()
         if not any(path.is_relative_to(root) for root in self._roots):
             raise WorkflowError("INCIDENT_INPUT_OUTSIDE_ROOT", f"{label} input is outside configured roots")
         if not path.is_file():
             raise WorkflowError("INCIDENT_INPUT_NOT_FOUND", f"{label} input does not exist")
-        if path.stat().st_size > max_bytes:
+        if max_bytes is not None and path.stat().st_size > max_bytes:
             raise WorkflowError("INCIDENT_INPUT_TOO_LARGE", f"{label} input exceeds the configured size limit")
         return path
 

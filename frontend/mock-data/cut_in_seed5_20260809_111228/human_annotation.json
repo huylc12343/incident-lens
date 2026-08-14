@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0",
+  "annotation_id": "ANN_CUT_IN_SEED5_20260809_111228",
+  "incident_id": "INC_CUT_IN_SEED5_20260809_111228",
+  "label": "cut_in_collision",
+  "severity": "high",
+  "review_status": "confirmed",
+  "summary": "A vehicle in the adjacent lane was traveling close to Ego, then abruptly cut into Ego's lane with a very small gap. A collision occurred.",
+  "timeline": {
+    "t_start": 12.0,
+    "t0": 11.25,
+    "t_end": 45.0
+  },
+  "observations": [
+    "Adjacent vehicle was initially in a neighboring lane.",
+    "Vehicle performed abrupt lane intrusion ahead of Ego.",
+    "Ego performed emergency braking.",
+    "Minimum vehicle separation: 2.87 m."
+  ],
+  "event_explanation": "Unsafe cut-in reduced longitudinal clearance below a safe following distance.",
+  "hypothesis": {
+    "text": "Primary cause: unsafe lane change with insufficient gap.",
+    "confidence": 1.0
+  },
+  "evidence": [
+    {
+      "type": "video",
+      "file": "front_camera.mp4"
+    },
+    {
+      "type": "vehicle_state_log",
+      "file": "vehicle_state.csv"
+    },
+    {
+      "type": "collision_sensor",
+      "confirmed": true
+    }
+  ],
+  "quality": {
+    "video_usable": true,
+    "log_usable": true,
+    "timestamp_alignment": "good"
+  }
+}

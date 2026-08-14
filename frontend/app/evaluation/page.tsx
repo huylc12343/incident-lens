@@ -7,8 +7,8 @@ export default function EvaluationPage() {
       <Header />
       <main className="page-shell evaluation-shell">
         <div className="processing-title">
-          <div><p className="eyebrow">Evaluation metrics</p><h1>Disengagement Review Evaluation</h1></div>
-          <p>Operational metrics for the completed human-in-the-loop review.</p>
+          <div><p className="incident-breadcrumb">Incidents <span>›</span> Review outcome</p><h1>Decision evaluation</h1></div>
+          <p>Operational metrics for the completed human-in-the-loop workflow.</p>
         </div>
         <EvaluationContent />
       </main>

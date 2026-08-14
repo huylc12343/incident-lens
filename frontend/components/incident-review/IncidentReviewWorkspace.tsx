@@ -6,10 +6,13 @@ import { artifactUrl, getIncident, reviewIncident } from "../../lib/incidentApi"
 import { INCIDENT_KEYS } from "../../lib/incidentSession";
 import { loadUploadedVideo } from "../../lib/uploadStorage";
 import type { Claim, IncidentSnapshot, ReviewPayload } from "../../types/incident";
-import { VideoEvidencePlayer } from "../VideoEvidencePlayer";
 import { ProcessingPipeline } from "../ProcessingPipeline";
+import { VideoEvidencePlayer } from "../VideoEvidencePlayer";
+import { DecisionModal } from "./DecisionModal";
 import { EvidenceInspector } from "./EvidenceInspector";
 import { IncidentHeader } from "./IncidentHeader";
+import { IncidentClipPlayer } from "./IncidentClipPlayer";
+import { IncidentNavigationSidebar } from "./IncidentNavigationSidebar";
 import { IncidentTimeline } from "./IncidentTimeline";
 import { ReviewSidebar } from "./ReviewSidebar";
 import { TelemetryPanel } from "./TelemetryPanel";
@@ -23,6 +26,7 @@ export function IncidentReviewWorkspace() {
   const [videoName, setVideoName] = useState("front_camera.mp4");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [decisionOpen, setDecisionOpen] = useState(false);
 
   useEffect(() => {
     setVideoName(sessionStorage.getItem("vlens:video-name") ?? "front_camera.mp4");
@@ -42,51 +46,82 @@ export function IncidentReviewWorkspace() {
       try {
         const next = await getIncident(id);
         if (!active) return;
-        setSnapshot(next); sessionStorage.setItem(INCIDENT_KEYS.snapshot, JSON.stringify(next));
+        setSnapshot(next);
+        sessionStorage.setItem(INCIDENT_KEYS.snapshot, JSON.stringify(next));
         setSelectedClaimId((current) => current || next.claims[0]?.claim_id || "");
         if (["queued", "running"].includes(next.status)) timer = setTimeout(refresh, 1500);
-      } catch (cause) { if (active) { setError(cause instanceof Error ? cause.message : "Could not load incident."); timer = setTimeout(refresh, 3000); } }
+      } catch (cause) {
+        if (active) {
+          setError(cause instanceof Error ? cause.message : "Could not load incident.");
+          timer = setTimeout(refresh, 3000);
+        }
+      }
     };
     void refresh();
     return () => { active = false; clearTimeout(timer); };
   }, []);
 
   const selectedClaim = useMemo(() => snapshot?.claims.find((claim) => claim.claim_id === selectedClaimId) ?? snapshot?.claims[0], [snapshot, selectedClaimId]);
-  const selectClaim = (claim: Claim) => { setSelectedClaimId(claim.claim_id); if (videoRef.current) videoRef.current.currentTime = claim.timestamp_s; };
+  const selectClaim = (claim: Claim) => {
+    setSelectedClaimId(claim.claim_id);
+    if (videoRef.current) videoRef.current.currentTime = claim.timestamp_s;
+  };
   const submitReview = async (payload: ReviewPayload) => {
     if (!snapshot) return;
-    setBusy(true); setError("");
+    setBusy(true);
+    setError("");
     try {
       const next = await reviewIncident(snapshot.incident_id, payload);
-      setSnapshot(next); sessionStorage.setItem(INCIDENT_KEYS.snapshot, JSON.stringify(next));
+      setSnapshot(next);
+      sessionStorage.setItem(INCIDENT_KEYS.snapshot, JSON.stringify(next));
       if (["approved", "not_incident"].includes(next.status)) router.push("/evaluation");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Review request failed."); }
-    finally { setBusy(false); }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Review request failed.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const report = snapshot?.final_report ?? snapshot?.draft_report;
-  const fullVideo = originalVideoUrl || artifactUrl(snapshot?.artifact_uris.normalized_video);
+  // Prefer the browser-compatible normalized artifact. The IndexedDB upload is
+  // only a fallback because it may use an unsupported codec or belong to the
+  // most recently uploaded incident rather than the incident opened from history.
+  const fullVideo = artifactUrl(snapshot?.artifact_uris.normalized_video) || originalVideoUrl;
   const clip = artifactUrl(snapshot?.artifact_uris.incident_clip);
+  const telemetryCharts = snapshot ? Object.entries(snapshot.artifact_uris).filter(([key, uri]) => key.startsWith("chart_") && Boolean(uri)).sort(([left], [right]) => left.localeCompare(right)).map(([id, uri]) => ({ id, uri })) : [];
+
   return (
-    <>
-      <IncidentHeader snapshot={snapshot} />
-      {!snapshot ? <section className="workspace-panel"><p>{error || "Loading incident workspace…"}</p></section> : (
-        <div className="incident-review-workspace">
-          <main className="incident-evidence-column">
-            <VideoEvidencePlayer videoUrl={fullVideo} videoName={videoName} videoRef={videoRef} />
-            <IncidentTimeline claims={snapshot.claims} selectedId={selectedClaim?.claim_id ?? ""} onSelect={selectClaim} />
-            <TelemetryPanel summaries={snapshot.claim_log_summaries} selectedClaimId={selectedClaim?.claim_id ?? ""} hasLog={snapshot.has_log} />
-            <div className="evidence-detail-grid">
-              <section className="workspace-panel incident-clip-card"><div className="workspace-panel-heading"><div><p className="eyebrow">Detected window</p><h2>Incident clip</h2></div><span>{report?.incident_window ? `${report.incident_window.t_start.toFixed(1)}s–${report.incident_window.t_end.toFixed(1)}s` : "Pending"}</span></div>{clip ? <video controls preload="metadata" src={clip} /> : <p>Clip generation is in progress.</p>}</section>
-              <EvidenceInspector snapshot={snapshot} claim={selectedClaim} />
+    <div className="incident-review-frame">
+      <IncidentNavigationSidebar snapshot={snapshot} />
+      <section className="incident-review-content">
+        <IncidentHeader snapshot={snapshot} />
+        {!snapshot ? (
+          <section className={`workspace-panel workspace-state ${error ? "error-state" : "loading-state"}`} role={error ? "alert" : "status"}>
+            {!error && <span className="state-spinner" aria-hidden="true" />}
+            <div><strong>{error ? "Incident workspace unavailable" : "Preparing incident workspace"}</strong><p>{error || "Synchronizing the latest analysis and evidence…"}</p></div>
+          </section>
+        ) : (
+          <>
+            <div className="review-command-bar">
+              <div><span className="command-status-dot" /><strong>{snapshot.status === "awaiting_review" ? "Ready for engineer review" : `Workflow: ${snapshot.status}`}</strong><small>{snapshot.claims.length} AI observation(s) · {snapshot.has_log ? "Video + telemetry" : "Video only"}</small></div>
+              <div><a className="command-secondary" href="#selected-evidence">Inspect evidence</a><button type="button" className="command-decision" disabled={snapshot.status !== "awaiting_review" || busy} onClick={() => setDecisionOpen(true)}><span aria-hidden="true">☷</span> Make decision</button></div>
             </div>
-          </main>
-          <div className="incident-decision-column">
-            {["queued", "running"].includes(snapshot.status) && <ProcessingPipeline snapshot={snapshot} />}
-            <ReviewSidebar snapshot={snapshot} selectedClaim={selectedClaim} busy={busy} error={error} onReview={submitReview} />
-          </div>
-        </div>
-      )}
-    </>
+            <div className="incident-review-workspace" id="engineer-review">
+              <main className="incident-evidence-column">
+                <VideoEvidencePlayer videoUrl={fullVideo} videoName={videoName} videoRef={videoRef} />
+                <IncidentTimeline claims={snapshot.claims} selectedId={selectedClaim?.claim_id ?? ""} windowStart={report?.incident_window?.t_start} windowEnd={report?.incident_window?.t_end} focusTime={report?.incident_window?.t0} onSelect={selectClaim} />
+                <TelemetryPanel summaries={snapshot.claim_log_summaries} selectedClaimId={selectedClaim?.claim_id ?? ""} hasLog={snapshot.has_log} chartUris={telemetryCharts} />
+                <div className="evidence-presentation-stack" id="selected-evidence"><IncidentClipPlayer clipUrl={clip} start={report?.incident_window?.t_start} focus={report?.incident_window?.t0} end={report?.incident_window?.t_end} /><EvidenceInspector snapshot={snapshot} claim={selectedClaim} /></div>
+              </main>
+              <div className="incident-decision-column">
+                {["queued", "running"].includes(snapshot.status) && <div id="processing-status"><ProcessingPipeline snapshot={snapshot} /></div>}
+                <ReviewSidebar snapshot={snapshot} selectedClaim={selectedClaim} busy={busy} error={error} onSelectClaim={selectClaim} onReview={submitReview} />
+              </div>
+            </div>
+            <DecisionModal open={decisionOpen} snapshot={snapshot} selectedClaim={selectedClaim} busy={busy} onClose={() => setDecisionOpen(false)} onReview={submitReview} />
+          </>
+        )}
+      </section>
+    </div>
   );
 }

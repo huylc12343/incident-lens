@@ -6,21 +6,22 @@ export default function Home() {
   return (
     <>
       <Header />
-      <main className="page-shell">
+      <main className="page-shell dashboard-shell">
         <section className="hero" aria-labelledby="page-title">
-          <p className="eyebrow">Review workspace</p>
-          <h1 id="page-title">AI-Assisted Disengagement Review</h1>
-          <p className="hero-copy">
-            Review a recorded disengagement using synchronized video and
-            telemetry evidence. AI-generated observations remain subject to
-            engineer review.
-          </p>
-          <div className="flow" aria-label="Review workflow">
-            <span>Video + Telemetry + Timestamp</span>
+          <div className="hero-content">
+            <p className="eyebrow">Forensic incident workspace</p>
+            <h1 id="page-title">Review driving evidence with confidence.</h1>
+            <p className="hero-copy">
+              Analyze synchronized video and telemetry, inspect every AI observation,
+              and keep the engineer in control of the final decision.
+            </p>
+          </div>
+          <div className="workflow-card" aria-label="Review workflow">
+            <span><b>01</b> Evidence intake</span>
             <i aria-hidden="true">→</i>
-            <span>AI Analysis</span>
+            <span><b>02</b> AI analysis</span>
             <i aria-hidden="true">→</i>
-            <span>Engineer Review</span>
+            <span><b>03</b> Engineer decision</span>
           </div>
         </section>
         <AnalysisForm />

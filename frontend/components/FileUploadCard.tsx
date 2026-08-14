@@ -120,7 +120,12 @@ export function FileUploadCard({ kind, files, onChange }: Props) {
           onClick={() => input.current?.click()}
           role="button"
           tabIndex={0}
-          onKeyDown={(e) => e.key === "Enter" && input.current?.click()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              input.current?.click();
+            }
+          }}
         >
           <span className="upload-arrow">↑</span>
           <span>

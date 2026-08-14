@@ -63,10 +63,11 @@ export function AnalysisForm() {
   }
   return (
     <section className="workspace-card" aria-labelledby="analysis-title">
-      <div className="section-title">
+      <div className="section-title analysis-section-title">
         <div>
-          <p className="eyebrow">New review</p>
-          <h2 id="analysis-title">Prepare an analysis request</h2>
+          <p className="eyebrow">New analysis</p>
+          <h2 id="analysis-title">Upload incident evidence</h2>
+          <p className="section-description">Add the original recording and matching vehicle telemetry to begin a grounded review.</p>
         </div>
         <div className="automatic-timestamp" role="note">
           <strong>Automatic event detection</strong>

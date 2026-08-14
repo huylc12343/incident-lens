@@ -24,7 +24,7 @@ export function Header({
         </Link>
         <nav aria-label="Main navigation">
           <Link className={active === "home" ? "active" : ""} href="/">
-            Home
+            Dashboard
           </Link>
           <Link
             className={active === "history" ? "active" : ""}
@@ -38,7 +38,7 @@ export function Header({
         </nav>
         <div className="nav-actions">
           {processing && <span className="header-status">Incident Review</span>}
-          <button className="icon-button" aria-label="Notifications">
+          <button className="icon-button notification-button" aria-label="Notifications">
             <Icon>
               <path
                 d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"
@@ -48,6 +48,7 @@ export function Header({
                 strokeLinecap="round"
               />
             </Icon>
+            <span className="notification-dot" />
           </button>
           <button className="icon-button" aria-label="Help">
             <Icon>

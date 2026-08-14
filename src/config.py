@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     model_name: str = "gpt-5.6-luna"
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
 
+    # LangSmith tracing
+    langsmith_tracing: bool = False
+    langsmith_api_key: str = ""
+    langsmith_project: str = "incident-analysis-dev"
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    langsmith_workspace_id: str = ""
+    langsmith_tracing_sampling_rate: float = Field(default=1.0, ge=0.0, le=1.0)
+
     # Video-language model
     vlm_provider: VLMProvider = VLMProvider.OPENAI
     vlm_input_mode: VLMInputMode = VLMInputMode.TIMESTAMPED_FRAMES

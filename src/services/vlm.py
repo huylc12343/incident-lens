@@ -36,6 +36,7 @@ from src.models.incidents import (
     VLMInputMode,
     VLMProvider,
 )
+from src.services.langsmith_tracing import LangSmithTracing
 from src.services.model_observability import ModelActivityRegistry, ModelRequestBudgetError
 
 logger = logging.getLogger(__name__)
@@ -66,12 +67,23 @@ class OpenAIVLMService:
         temperature: float = 0.0,
         max_images_per_request: int = 120,
         observability: ModelActivityRegistry | None = None,
+        tracing: LangSmithTracing | None = None,
     ) -> None:
         if not model.strip():
             raise ValueError("model must not be blank")
         if timeout_s <= 0 or max_images_per_request <= 0:
             raise ValueError("timeout and image limit must be positive")
-        self._client = client if client is not None else AsyncOpenAI(api_key=api_key)
+        provider_client = client if client is not None else AsyncOpenAI(api_key=api_key)
+        self._client = (
+            tracing.wrap_openai_client(
+                provider_client,
+                name="OpenAI VLM",
+                provider="openai",
+                operation="vlm",
+            )
+            if tracing is not None
+            else provider_client
+        )
         self._model = model
         self._timeout_s = timeout_s
         self._temperature = temperature
@@ -284,6 +296,7 @@ class QwenNativeVideoVLMService:
         max_structured_output_retries: int = 0,
         max_network_retries: int = 0,
         observability: ModelActivityRegistry | None = None,
+        tracing: LangSmithTracing | None = None,
     ) -> None:
         if not model.strip() or not base_url.strip():
             raise ValueError("model and base_url must not be blank")
@@ -293,7 +306,17 @@ class QwenNativeVideoVLMService:
             raise ValueError("Qwen3-VL-Flash temperature must be 0")
         if min(max_structured_output_retries, max_network_retries) < 0:
             raise ValueError("structured output and network retries must be non-negative")
-        self._client = client if client is not None else AsyncOpenAI(api_key=api_key, base_url=base_url)
+        provider_client = client if client is not None else AsyncOpenAI(api_key=api_key, base_url=base_url)
+        self._client = (
+            tracing.wrap_openai_client(
+                provider_client,
+                name="Qwen VLM",
+                provider="qwen",
+                operation="vlm",
+            )
+            if tracing is not None
+            else provider_client
+        )
         self._model = model
         self._artifact_dir = Path(artifact_dir).resolve()
         self._artifact_url_base = artifact_url_base.rstrip("/")

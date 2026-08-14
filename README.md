@@ -66,6 +66,21 @@ streamlit run main_test.py
 
 Swagger: `http://localhost:8000/docs`.
 
+### LangSmith tracing
+
+Tracing là tùy chọn và không thay đổi routing, retry, checkpoint hoặc output của workflow. Để bật tracing, tạo API key trong LangSmith rồi cấu hình `.env`:
+
+```dotenv
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=lsv2_...
+LANGSMITH_PROJECT=incident-analysis-dev
+LANGSMITH_TRACING_SAMPLING_RATE=1.0
+```
+
+Nếu API key thuộc nhiều workspace, thêm `LANGSMITH_WORKSPACE_ID`. Khởi động lại backend sau khi đổi `.env`. Mỗi incident được gắn `thread_id=incident_id`; lần chạy đầu và các lần resume/reanalysis vì vậy xuất hiện trong cùng một LangSmith thread. Model calls từ OpenAI Responses API và Qwen OpenAI-compatible API được hiển thị dưới graph trace. Raw ảnh/video Base64, signed media URL và API key được lọc trước khi gửi.
+
+Để tắt hoàn toàn, đặt `LANGSMITH_TRACING=false`. Thiếu `LANGSMITH_API_KEY` cũng khiến integration tự tắt; lỗi gửi trace không làm incident workflow thất bại.
+
 Trong Streamlit, chọn video bằng nút **Browse files** và chọn log CSV nếu có; không cần nhập đường dẫn file.
 
 Workflow chạy đồng bộ đến Human Review nên VLM + verification + report có thể mất vài phút. Streamlit chờ tối đa 900 giây và hiển thị riêng lỗi kết nối, timeout hoặc response backend không phải JSON; xem terminal Uvicorn nếu backend báo HTTP 500.

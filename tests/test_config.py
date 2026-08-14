@@ -56,3 +56,17 @@ def test_claim_log_sample_radius_is_configurable() -> None:
 def test_claim_log_sample_radius_rejects_negative_values() -> None:
     with pytest.raises(ValidationError):
         Settings(_env_file=None, log_claim_sample_radius=-1)
+
+
+def test_langsmith_tracing_defaults_to_disabled() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.langsmith_tracing is False
+    assert settings.langsmith_project == "incident-analysis-dev"
+    assert settings.langsmith_tracing_sampling_rate == 1.0
+
+
+@pytest.mark.parametrize("sampling_rate", [-0.01, 1.01])
+def test_langsmith_sampling_rate_must_be_between_zero_and_one(sampling_rate: float) -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, langsmith_tracing_sampling_rate=sampling_rate)

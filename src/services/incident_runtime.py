@@ -20,6 +20,7 @@ from src.models.api import IncidentCreateRequest
 from src.models.incidents import VLMProvider
 from src.services.async_worker import AsyncWorker
 from src.services.charts import ChartService
+from src.services.langsmith_tracing import LangSmithTracing, build_langsmith_tracing
 from src.services.log_analysis import LogAnalysisService
 from src.services.media import MediaService
 from src.services.model_observability import ModelActivityRegistry
@@ -110,12 +111,13 @@ async def incident_workflow_service(
 ) -> AsyncIterator[WorkflowService]:
     clients = clients or ProviderClients()
     media = MediaService()
+    tracing = build_langsmith_tracing(settings)
     observability = ModelActivityRegistry(
         max_provider_requests_per_incident=settings.provider_request_limit_per_incident,
         max_activities_per_incident=settings.model_activity_max_per_incident,
         retention_hours=settings.model_activity_retention_hours,
     )
-    vlm = _build_vlm(settings, clients, observability)
+    vlm = _build_vlm(settings, clients, observability, tracing)
     video_workflow = VideoMemoryWorkflow(
         vlm=vlm,
         config=VideoMemoryWorkflowConfig(
@@ -163,6 +165,7 @@ async def incident_workflow_service(
         temperature=settings.verification_temperature,
         prompt_version=settings.verification_prompt_version,
         observability=observability,
+        tracing=tracing,
     )
     report = OpenAIReportService(
         model=settings.report_model_name,
@@ -172,6 +175,7 @@ async def incident_workflow_service(
         temperature=settings.report_temperature,
         prompt_version=settings.reporting_prompt_version,
         observability=observability,
+        tracing=tracing,
     )
     dependencies = IncidentGraphDependencies(
         media=media,
@@ -199,7 +203,7 @@ async def incident_workflow_service(
     try:
         await checkpoint_worker.call(checkpointer.setup)
         graph = build_incident_graph(dependencies=dependencies, checkpointer=checkpointer)
-        runner = LangGraphIncidentRunner(graph)
+        runner = LangGraphIncidentRunner(graph, tracing=tracing)
         repository = SQLiteReportRepository(settings.incident_database_path, initialize=False)
         await repository.ainitialize()
         service = WorkflowService(
@@ -229,6 +233,7 @@ def _build_vlm(
     settings: Settings,
     clients: ProviderClients,
     observability: ModelActivityRegistry | None = None,
+    tracing: LangSmithTracing | None = None,
 ) -> OpenAIVLMService | QwenNativeVideoVLMService:
     if settings.vlm_provider == VLMProvider.OPENAI:
         return OpenAIVLMService(
@@ -239,6 +244,7 @@ def _build_vlm(
             temperature=settings.vlm_temperature,
             max_images_per_request=settings.vlm_max_frames_per_request,
             observability=observability,
+            tracing=tracing,
         )
     if settings.vlm_provider == VLMProvider.QWEN:
         if clients.qwen is None and not settings.dashscope_api_key.strip():
@@ -259,6 +265,7 @@ def _build_vlm(
             max_structured_output_retries=settings.vlm_structured_output_retries,
             max_network_retries=settings.provider_network_retries,
             observability=observability,
+            tracing=tracing,
         )
     raise ValueError(f"unsupported VLM provider: {settings.vlm_provider.value}")
 

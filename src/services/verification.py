@@ -19,6 +19,7 @@ from pydantic import ValidationError
 
 from src.models.incidents import ClaimVerification, VerificationRequest, VerificationResult, VerificationStatus
 from src.prompts.verification import build_verification_prompt
+from src.services.langsmith_tracing import LangSmithTracing
 from src.services.model_observability import ModelActivityRegistry
 
 
@@ -40,6 +41,7 @@ class OpenAIVerificationService:
         temperature: float = 0.0,
         prompt_version: str = "v1",
         observability: ModelActivityRegistry | None = None,
+        tracing: LangSmithTracing | None = None,
     ) -> None:
         if not model.strip() or not prompt_version.strip():
             raise ValueError("model and prompt_version must not be blank")
@@ -47,7 +49,17 @@ class OpenAIVerificationService:
             raise ValueError("timeout_s must be positive")
         if not 0 <= temperature <= 2:
             raise ValueError("temperature must be between 0 and 2")
-        self._client = client if client is not None else AsyncOpenAI(api_key=api_key)
+        provider_client = client if client is not None else AsyncOpenAI(api_key=api_key)
+        self._client = (
+            tracing.wrap_openai_client(
+                provider_client,
+                name="OpenAI Verification",
+                provider="openai",
+                operation="claim_verification",
+            )
+            if tracing is not None
+            else provider_client
+        )
         self._model = model
         self._timeout_s = timeout_s
         self._temperature = temperature

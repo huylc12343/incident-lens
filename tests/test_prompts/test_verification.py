@@ -37,7 +37,7 @@ def test_verification_prompt_requires_one_result_per_claim() -> None:
     assert "supported, contradicted hoặc unverified" in prompt.text
     assert "Log chỉ đo lường trạng thái vận hành cơ khí" in prompt.text
     assert "Không suy ra va chạm" in prompt.text
-    assert "reason phải ngắn gọn bằng tiếng Việt" in prompt.text
+    assert "reason phải viết bằng tiếng Việt chuyên nghiệp" in prompt.text
     item = prompt.context["verification_items"][0]
     assert item["allowed_evidence_ids"] == ["log-row:12.5"]
     assert item["within_tolerance"] is True
@@ -89,7 +89,7 @@ def test_verification_prompt_compacts_representative_markdown_tables() -> None:
     )
 
     summary = prompt.context["verification_items"][0]["claim"]["log_summary"]
-    assert "Mẫu Speed (km/h): 1.0s=20; 2.0s=10; 3.0s=0" in summary
+    assert "Samples for Speed (km/h): 1.0s=20; 2.0s=10; 3.0s=0" in summary
     assert "| Timestamp |" not in summary
     assert "| --------:" not in summary
 

@@ -97,7 +97,7 @@ class OpenAIVLMService:
             "OPENAI_VIDEO_ANALYSIS_FAILED",
             incident_id=request.incident_id,
             operation="video_analysis",
-            description="Phân tích toàn bộ video và tạo VideoMemory có cấu trúc.",
+            description="Analyze the complete video and produce structured VideoMemory.",
             metadata={"image_count": len(request.manifest.frames), "input_mode": "timestamped_frames"},
         )
 
@@ -118,7 +118,7 @@ class OpenAIVLMService:
             "OPENAI_REANALYSIS_FAILED",
             incident_id=request.incident_id,
             operation="claim_reanalysis",
-            description="Phân tích lại các claim được chọn trong cửa sổ sự cố.",
+            description="Re-analyze selected claims within the incident window.",
             metadata={
                 "image_count": len(request.frame_manifest.frames),
                 "target_claim_ids": request.target_claim_ids,
@@ -318,7 +318,7 @@ class QwenNativeVideoVLMService:
         memory = await self._generate(
             incident_id=request.incident_id,
             operation="video_analysis",
-            description="Phân tích native video bằng Qwen3-VL-Flash và tạo VideoMemory có cấu trúc.",
+            description="Analyze native video with Qwen3-VL-Flash and produce structured VideoMemory.",
             video_uri=request.normalized_video_uri,
             system_prompt=request.prompt.text,
             user_prompt=_prompt_context_text(request.prompt.context),
@@ -334,7 +334,7 @@ class QwenNativeVideoVLMService:
         patch = await self._generate(
             incident_id=request.incident_id,
             operation="claim_reanalysis",
-            description="Phân tích lại các claim được chọn bằng Qwen3-VL-Flash.",
+            description="Re-analyze selected claims with Qwen3-VL-Flash.",
             video_uri=request.normalized_video_uri,
             system_prompt=request.prompt.text,
             user_prompt=_prompt_context_text(request.prompt.context),

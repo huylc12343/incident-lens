@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, DragEvent, useRef, useState } from "react";
+import { uiText as text } from "../lib/ui-copy";
 
 type Props = {
   kind: "video" | "telemetry";
@@ -19,7 +20,7 @@ export function FileUploadCard({ kind, files, onChange }: Props) {
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
   const isVideo = kind === "video";
-  const label = isVideo ? "Driving Video" : "Vehicle Telemetry";
+  const label = isVideo ? text("Driving Video", "Video hành trình") : text("Vehicle Telemetry", "Telemetry phương tiện");
   const accept = isVideo
     ? ".mp4,video/mp4"
     : ".csv,.txt,.json,.xls,.xlsx,text/csv,text/plain,application/json,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -33,7 +34,7 @@ export function FileUploadCard({ kind, files, onChange }: Props) {
     });
     if (validFiles.length !== candidates.length) {
       setError(
-        `${label} accepts ${isVideo ? "MP4" : "CSV, TXT, JSON, XLS, and XLSX"} files only.`,
+        text(`${label} accepts ${isVideo ? "MP4" : "CSV, TXT, JSON, XLS, and XLSX"} files only.`, `${label} chỉ chấp nhận tệp ${isVideo ? "MP4" : "CSV, TXT, JSON, XLS và XLSX"}.`),
       );
     } else {
       setError("");
@@ -75,8 +76,8 @@ export function FileUploadCard({ kind, files, onChange }: Props) {
           <h2>{label}</h2>
           <p>
             {isVideo
-              ? "Upload the recorded driving video associated with the disengagement."
-              : "Upload timestamped vehicle telemetry from the same driving session."}
+              ? text("Upload the recorded driving video associated with the disengagement.", "Tải lên video hành trình liên quan đến sự kiện disengagement.")
+              : text("Upload timestamped vehicle telemetry from the same driving session.", "Tải lên telemetry có mốc thời gian từ cùng phiên hành trình.")}
           </p>
         </div>
         <span className="format-badge">
@@ -99,12 +100,12 @@ export function FileUploadCard({ kind, files, onChange }: Props) {
                   setError("");
                 }}
               >
-                Remove
+                {text("Remove", "Xóa")}
               </button>
             </div>
           ))}
           <button className="add-more-files" type="button" onClick={() => input.current?.click()}>
-            {isVideo ? "Change video" : "+ Add more files"}
+            {isVideo ? text("Change video", "Đổi video") : text("+ Add more files", "+ Thêm tệp")}
           </button>
           <input ref={input} type="file" hidden multiple accept={accept} onChange={selectFile} aria-label={`Add more ${label} files`} />
         </div>
@@ -129,7 +130,7 @@ export function FileUploadCard({ kind, files, onChange }: Props) {
         >
           <span className="upload-arrow">↑</span>
           <span>
-            Drag and drop or <b>click to browse</b>
+            {text("Drag and drop or", "Kéo thả hoặc")} <b>{text("click to browse", "nhấn để chọn tệp")}</b>
           </span>
           <input
             ref={input}

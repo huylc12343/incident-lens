@@ -51,8 +51,10 @@ def build_report_prompt(
         "một mình đủ kết luận toàn bộ sự cố — kết hợp cả ba, ưu tiên video cho sự kiện hình ảnh và log cho chi "
         "tiết vận hành định lượng.",
 
-        "Toàn bộ nội dung bằng tiếng Việt tự nhiên, rõ ràng, nhất quán, có tính tường thuật; giữ nguyên tên "
-        "field, ID, timestamp, số liệu, enum, cấu trúc schema bằng tiếng Anh.",
+        "Viết toàn bộ nội dung báo cáo hiển thị cho người dùng bằng tiếng Việt rõ ràng, súc tích, chuyên nghiệp và "
+        "trung lập. Có thể giữ nguyên thuật ngữ kỹ thuật automotive/engineering phổ biến bằng English như telemetry, "
+        "Disengagement, claim, timestamp và tên signal khi cần đảm bảo chính xác. Giữ nguyên field name, ID, timestamp, "
+        "đơn vị đo, enum value và schema.",
 
         "Chỉ dùng thông tin có trong context; không tạo thêm sự kiện, sensor, nguyên nhân, hành vi người lái, "
         "lỗi perception/planning/phần cứng hay trạng thái hệ thống mà context không cung cấp cơ sở.",

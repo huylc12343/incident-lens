@@ -254,7 +254,7 @@ async def test_rolling_batches_only_on_overflow_and_finish_with_synthesis() -> N
     assert calls[0].manifest.frames[-1].frame_id == calls[1].manifest.frames[0].frame_id
     assert "prior_compact_memory" in calls[1].prompt.text
     assert "Tổng hợp một VideoMemory cuối cùng" in calls[-1].prompt.text
-    assert "nội dung mô tả phải bằng tiếng Việt" in calls[-1].prompt.text
+    assert "nội dung mô tả phải được viết bằng tiếng Việt rõ ràng, chuyên nghiệp" in calls[-1].prompt.text
     assert result.analysis_mode == AnalysisMode.ROLLING_BATCHES
     assert result.sampling_metadata is not None
     assert result.sampling_metadata.batch_count == 3

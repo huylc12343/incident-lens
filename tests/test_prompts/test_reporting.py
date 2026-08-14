@@ -43,7 +43,7 @@ def test_report_prompt_only_requests_three_model_owned_fields() -> None:
     assert "field tường thuật" in prompt.text
     assert "timeline, video_observations, hypothesized_causes" in prompt.text
     assert "Không sinh summary, log_findings, alignment, evidence_ids" in prompt.text
-    assert "Toàn bộ nội dung bằng tiếng Việt" in prompt.text
+    assert "bằng tiếng Việt rõ ràng, súc tích, chuyên nghiệp" in prompt.text
     assert "trạng thái review" in prompt.text
 
 

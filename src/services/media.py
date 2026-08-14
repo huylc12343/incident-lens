@@ -6,7 +6,7 @@ import asyncio
 import json
 import re
 import shutil
-from contextlib import suppress
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -282,26 +282,26 @@ class MediaService:
 
     async def _run_command(self, *command: str) -> tuple[str, str]:
         try:
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            # Windows' ProactorEventLoop creates overlapped named pipes for
+            # asyncio subprocesses. Some managed/sandboxed Windows runtimes
+            # deny those pipes with WinError 5 even though the executable is
+            # allowed to run. A regular subprocess in a worker thread avoids
+            # that platform-specific failure without blocking the event loop.
+            result = await asyncio.to_thread(
+                subprocess.run,
+                command,
+                capture_output=True,
+                timeout=self._command_timeout_s,
+                check=False,
             )
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=self._command_timeout_s)
-        except TimeoutError as exc:
-            if "process" in locals():
-                if process.returncode is None:
-                    with suppress(ProcessLookupError):
-                        process.kill()
-                with suppress(ProcessLookupError):
-                    await process.communicate()
+        except subprocess.TimeoutExpired as exc:
             raise MediaServiceError("MEDIA_COMMAND_TIMEOUT", "media command timed out") from exc
         except OSError as exc:
             raise MediaServiceError("MEDIA_COMMAND_FAILED", str(exc)) from exc
-        if process.returncode != 0:
-            detail = stderr.decode("utf-8", errors="replace").strip()
+        if result.returncode != 0:
+            detail = result.stderr.decode("utf-8", errors="replace").strip()
             raise MediaServiceError("MEDIA_COMMAND_FAILED", detail or "media command failed")
-        return stdout.decode("utf-8"), stderr.decode("utf-8", errors="replace")
+        return result.stdout.decode("utf-8"), result.stderr.decode("utf-8", errors="replace")
 
 
 def _bundled_tool(name: str) -> str | None:

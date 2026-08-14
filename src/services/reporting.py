@@ -66,7 +66,7 @@ class OpenAIReportService:
                 incident_id=request.incident_id,
                 step="report",
                 operation="report_generation",
-                description="Tổng hợp báo cáo sự cố bằng tiếng Việt từ VideoMemory và kết quả verification.",
+                description="Tạo báo cáo sự cố bằng tiếng Việt chuyên nghiệp từ VideoMemory và kết quả verification.",
                 provider="openai",
                 model=self._model,
                 metadata={"claim_count": len(request.video_memory.claims)},
@@ -116,7 +116,7 @@ class OpenAIReportService:
                 incident_id=request.incident_id,
                 step="reanalysis",
                 operation="memory_only_claim_reanalysis",
-                description="Hiệu chỉnh claim từ VideoMemory và feedback, không gửi video/frame.",
+                description="Revise claims from VideoMemory and reviewer feedback without resending video or frames.",
                 provider="openai",
                 model=self._model,
                 metadata={

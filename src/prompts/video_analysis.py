@@ -141,8 +141,10 @@ def build_video_analysis_prompt(
             "màu sắc, loại xe, danh tính đối tượng hoặc chi tiết ngoại cảnh nếu không nhìn thấy đủ rõ. Chuyển động "
             "của xe ego và va chạm bị che khuất phải được đánh giá từ chuỗi thời gian thay vì một frame tĩnh.",
 
-            "Toàn bộ mô tả sinh ra phải bằng tiếng Việt; giữ nguyên tên field, ID, timestamp, enum và cấu trúc "
-            "schema bằng tiếng Anh.",
+            "Mọi nội dung mô tả hiển thị cho người dùng phải được viết bằng tiếng Việt rõ ràng, chuyên nghiệp và "
+            "tự nhiên. Có thể giữ nguyên các thuật ngữ kỹ thuật automotive/engineering phổ biến bằng English như "
+            "ego vehicle, telemetry, Disengagement, claim, timestamp và tên signal khi dịch sẽ làm giảm độ chính xác. "
+            "Không dịch field name, ID, timestamp, enum value hoặc thay đổi schema.",
 
             "Chỉ trả kết quả có cấu trúc theo schema; không trả chain-of-thought, suy luận ẩn hoặc giải thích ngoài "
             "kết quả.",

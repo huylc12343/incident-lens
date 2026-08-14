@@ -48,7 +48,6 @@ export function ProcessingContent() {
           sessionStorage.setItem(INCIDENT_KEYS.timestamp, formatted);
         }
         sessionStorage.setItem(INCIDENT_KEYS.snapshot, JSON.stringify(next));
-        if (next.status === "awaiting_review") { router.push("/review"); return; }
         if (["approved", "not_incident"].includes(next.status)) { router.push("/evaluation"); return; }
         if (!['failed', 'cancelled'].includes(next.status)) timer = setTimeout(poll, 1500);
       } catch (cause) {
@@ -60,8 +59,10 @@ export function ProcessingContent() {
   }, [router]);
 
   const clip = artifactUrl(snapshot?.artifact_uris.incident_clip);
-  const playableVideo = clip || videoUrl;
+  const representativeFrame = artifactUrl(snapshot?.artifact_uris.representative_frame);
   const activeReport = snapshot?.draft_report ?? snapshot?.final_report;
+  const evidenceIds = [...new Set(snapshot?.claims.flatMap((claim) => claim.evidence.map((item) => item.evidence_id)) ?? [])];
+  const evidenceDirectory = snapshot?.artifact_uris.incident_frames;
   return (
     <>
       <section className="context-bar">
@@ -72,7 +73,19 @@ export function ProcessingContent() {
       </section>
       <div className="processing-layout">
         <div className="processing-main">
-          <VideoEvidencePlayer videoUrl={playableVideo} videoName={videoName} videoRef={videoRef} claims={snapshot?.claims} incidentWindow={activeReport?.incident_window} />
+          <VideoEvidencePlayer videoUrl={videoUrl} videoName={videoName} videoRef={videoRef} claims={snapshot?.claims} incidentWindow={activeReport?.incident_window} />
+          <section className="processing-panel incident-artifacts">
+            <div className="panel-heading"><p className="eyebrow">Incident evidence</p><h2>Agent-generated incident clip</h2><p>The clip below contains only the detected incident window. The player above always shows the complete original upload.</p></div>
+            {clip ? <video className="incident-clip-player" controls preload="metadata" src={clip} aria-label="Detected incident clip" /> : <p>The incident clip will appear after event detection completes.</p>}
+          </section>
+          <section className="processing-panel incident-artifacts">
+            <div className="panel-heading"><p className="eyebrow">Frame evidence</p><h2>Images referenced by agent claims</h2><p>Select a frame marker above or inspect the grounded images below.</p></div>
+            <div className="evidence-image-grid">
+              {representativeFrame && <figure><img src={representativeFrame} alt="Representative incident evidence" /><figcaption>Representative frame</figcaption></figure>}
+              {evidenceDirectory && evidenceIds.filter((id) => !snapshot?.artifact_uris.representative_frame?.includes(id)).map((id) => <figure key={id}><img src={artifactUrl(`${evidenceDirectory}/${id}.jpg`)} alt={`Evidence ${id}`} /><figcaption>{id}</figcaption></figure>)}
+              {!representativeFrame && !evidenceIds.length && <p>Evidence frames will appear when the agent publishes grounded claims.</p>}
+            </div>
+          </section>
           <section className="processing-panel"><div className="panel-heading"><p className="eyebrow">Visual observations</p><h2>Grounded evidence</h2><p>Claims generated from the uploaded recording and linked to timestamps.</p></div><div className="review-observations">
             {snapshot?.claims.length ? snapshot.claims.map((claim) => <article key={claim.claim_id}><div><strong>{claim.claim_id}</strong><span>{secondsToTimestamp(claim.timestamp_s)}</span></div><p>{claim.text}</p><small>Evidence: <b>{claim.evidence.map((item) => item.evidence_id).join(", ") || "Pending"}</b> · {claim.verification_status}</small></article>) : <article><div><strong>AI</strong><span>Working</span></div><p>Evidence analysis is in progress.</p><small>Claims will appear here as soon as they are available.</small></article>}
           </div></section>

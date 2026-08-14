@@ -4,9 +4,22 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.models.incidents import IncidentWindow, NativeVideoMetadata
-from src.services.media import MediaService, MediaServiceError
+from src.services.media import MediaService, MediaServiceError, bounded_incident_window
 
 SAMPLE_VIDEO = Path("data_mock/front_camera.mp4")
+
+
+def test_bounded_incident_window_clamps_model_end_to_video_duration() -> None:
+    bounded = bounded_incident_window(IncidentWindow(t_start=5, t0=12, t_end=60), 45)
+
+    assert bounded == IncidentWindow(t_start=5, t0=12, t_end=45)
+
+
+def test_bounded_incident_window_rejects_non_overlapping_window() -> None:
+    with pytest.raises(MediaServiceError) as exc_info:
+        bounded_incident_window(IncidentWindow(t_start=46, t0=47, t_end=50), 45)
+
+    assert exc_info.value.code == "CLIP_WINDOW_OUT_OF_RANGE"
 
 
 @pytest.mark.asyncio

@@ -42,7 +42,7 @@ from src.models.incidents import (
 from src.prompts.reanalysis import build_auto_reanalysis_prompt_for_conflicts, build_human_reanalysis_prompt
 from src.prompts.video_analysis import build_video_analysis_prompt
 from src.services.log_analysis import build_claim_log_summaries
-from src.services.media import NormalizedVideoArtifact
+from src.services.media import NormalizedVideoArtifact, bounded_incident_window
 from src.services.video_memory import (
     VideoMemoryWorkflow,
     VideoMemoryWorkflowConfig,
@@ -240,6 +240,9 @@ async def cut_incident_video_node(
             start_s=memory.incident_window.t_start,
             end_s=memory.incident_window.t_end,
         )
+        bounded_window = bounded_incident_window(memory.incident_window, frames.duration_s)
+        if bounded_window != memory.incident_window:
+            memory = memory.model_copy(update={"incident_window": bounded_window})
         if workflow.vlm.capabilities.input_mode == VLMInputMode.NATIVE_VIDEO:
             memory = reconcile_native_video_evidence(memory, frames.frames)
             validate_video_memory(
@@ -258,9 +261,12 @@ async def cut_incident_video_node(
             target_timestamp_s = _representative_timestamp(memory)
             representative = min(frames.frames, key=lambda frame: abs(frame.timestamp_s - target_timestamp_s))
             artifact_uris["representative_frame"] = representative.image_uri
-        output: dict[str, object] = {"status": "running", "artifact_uris": artifact_uris}
-        if workflow.vlm.capabilities.input_mode == VLMInputMode.NATIVE_VIDEO:
-            output.update({"video_memory": memory, "claims": memory.claims})
+        output: dict[str, object] = {
+            "status": "running",
+            "artifact_uris": artifact_uris,
+            "video_memory": memory,
+            "claims": memory.claims,
+        }
         return output
     except Exception as exc:
         return {

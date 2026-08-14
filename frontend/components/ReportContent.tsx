@@ -49,7 +49,7 @@ export function ReportContent() {
         <section className="report-card limitations"><p className="eyebrow">9. Evidence limitations</p><ul>{[...snapshot.warnings, ...(report.evidence_and_warnings?.warnings ?? [])].length ? [...new Set([...snapshot.warnings, ...(report.evidence_and_warnings?.warnings ?? [])])].map((warning) => <li key={warning}>{warning}</li>) : <li>No additional warnings were reported.</li>}</ul></section>
         <section className="report-card audit-card"><p className="eyebrow">10. Review audit</p><dl>{snapshot.review_audit.length ? snapshot.review_audit.map((entry, index) => <div key={`${entry.action}-${index}`}><dt>{entry.action}</dt><dd>{entry.reviewer}{entry.reason ? ` · ${entry.reason}` : ""}</dd></div>) : <div><dt>Status</dt><dd>Awaiting engineer review</dd></div>}</dl></section>
         <section className="report-card export-card"><p className="eyebrow">Export</p><h2>Complete agent response</h2><p>Download the same structured data returned by FastAPI.</p><button type="button" className="approve-action" onClick={exportJson}>Export JSON</button></section>
-        <Link className="return-review" href="/review">← Return to Review</Link>
+        <Link className="return-review" href="/processing#engineer-review">← Return to Review</Link>
       </aside>
     </div>
   </>;

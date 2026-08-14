@@ -9,6 +9,7 @@ import { loadUploadedVideo } from "../lib/uploadStorage";
 import type { IncidentSnapshot } from "../types/incident";
 import { VideoEvidencePlayer } from "./VideoEvidencePlayer";
 import { ProcessingPipeline } from "./ProcessingPipeline";
+import { ReviewContent } from "./ReviewContent";
 
 export function ProcessingContent() {
   const router = useRouter();
@@ -96,10 +97,16 @@ export function ProcessingContent() {
           <ProcessingPipeline snapshot={snapshot} />
           <section className="processing-panel sources-panel"><p className="eyebrow">Evidence sources</p><ul><li>✓ <span>Video loaded</span></li><li>{snapshot?.has_log ? "✓" : "○"} <span>Telemetry {snapshot?.has_log ? "loaded" : "not provided"}</span></li></ul></section>
           <Link className="back-home" href="/">← Back to Home</Link>
-          {snapshot?.status === "awaiting_review" && <Link className="approve-action processing-review-link" href="/review">Review structured summary →</Link>}
+          {snapshot?.status === "awaiting_review" && <Link className="approve-action processing-review-link" href="#engineer-review">Review structured summary →</Link>}
           <button type="button" className="background-button" onClick={() => window.location.assign("/")}>Run in background</button>
         </aside>
       </div>
+      {snapshot?.status === "awaiting_review" && (
+        <section id="engineer-review" className="combined-review-section">
+          <div className="processing-title"><div><p className="eyebrow">Engineer workspace</p><h1>Review agent results</h1></div><p>Review, edit, approve, reject, or request an AI re-analysis without leaving this page.</p></div>
+          <ReviewContent embedded />
+        </section>
+      )}
     </>
   );
 }

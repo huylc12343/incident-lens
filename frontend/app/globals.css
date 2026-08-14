@@ -953,6 +953,13 @@ td strong {
   font-weight: 700;
 }
 
+.combined-review-section {
+  margin-top: 40px;
+  padding-top: 24px;
+  border-top: 2px solid var(--line);
+  scroll-margin-top: 20px;
+}
+
 .video-panel,
 .processing-panel {
     padding: 21px;

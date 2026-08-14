@@ -7,7 +7,7 @@ import { artifactUrl, getIncident, reviewIncident } from "../lib/incidentApi";
 import { INCIDENT_KEYS, secondsToTimestamp } from "../lib/incidentSession";
 import type { IncidentSnapshot, ReviewPayload } from "../types/incident";
 
-export function ReviewContent() {
+export function ReviewContent({ embedded = false }: { embedded?: boolean }) {
   const router = useRouter();
   const startedAt = useRef(Date.now());
   const [snapshot, setSnapshot] = useState<IncidentSnapshot | null>(null);
@@ -68,7 +68,7 @@ export function ReviewContent() {
         <div><p>Recorded Disengagement</p><strong>{event}</strong><small>{snapshot.incident_id}</small></div>
         <div><p>Review Status</p><span className="status pending-review">{snapshot.status}</span></div>
         <div><p>Analysis window</p><strong>{start} <i>→</i> {end}</strong></div>
-        <Link href="/processing">← Back to Processing</Link>
+        {!embedded && <Link href="/processing">← Back to Processing</Link>}
       </section>
       <div className="review-layout">
         <div className="review-main">

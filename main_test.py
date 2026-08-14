@@ -45,7 +45,12 @@ def api_request(
         ) from exc
     if response.is_error:
         detail = data.get("detail", {}) if isinstance(data, dict) else {}
-        message = detail.get("message", "Yêu cầu API thất bại.") if isinstance(detail, dict) else str(detail)
+        if isinstance(detail, dict):
+            message = detail.get("message", "Yêu cầu API thất bại.")
+            if detail.get("code"):
+                message = f"{detail['code']}: {message}"
+        else:
+            message = str(detail)
         raise RuntimeError(message)
     if not isinstance(data, dict):
         raise RuntimeError("FastAPI trả về dữ liệu không hợp lệ.")

@@ -32,8 +32,8 @@ class MediaService:
         if command_timeout_s <= 0:
             raise ValueError("command_timeout_s must be positive")
         self._command_timeout_s = command_timeout_s
-        self._ffmpeg = shutil.which("ffmpeg") or get_ffmpeg_exe()
-        self._ffprobe = shutil.which("ffprobe")
+        self._ffmpeg = shutil.which("ffmpeg") or _bundled_tool("ffmpeg") or get_ffmpeg_exe()
+        self._ffprobe = shutil.which("ffprobe") or _bundled_tool("ffprobe")
 
     async def probe_video(self, video_uri: str) -> NativeVideoMetadata:
         source = _existing_file(video_uri)
@@ -303,6 +303,15 @@ class MediaService:
             detail = stderr.decode("utf-8", errors="replace").strip()
             raise MediaServiceError("MEDIA_COMMAND_FAILED", detail or "media command failed")
         return stdout.decode("utf-8"), stderr.decode("utf-8", errors="replace")
+
+
+def _bundled_tool(name: str) -> str | None:
+    """Find the repo-local FFmpeg tools used by Windows development setups."""
+    executable = f"{name}.exe" if name in {"ffmpeg", "ffprobe"} else name
+    tools_root = Path(__file__).resolve().parents[2] / ".tools" / "ffmpeg"
+    if not tools_root.is_dir():
+        return None
+    return next((str(path) for path in tools_root.glob(f"**/bin/{executable}") if path.is_file()), None)
 
 
 def _existing_file(uri: str) -> Path:

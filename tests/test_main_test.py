@@ -190,6 +190,11 @@ def test_unified_report_formats_timeline_as_readable_rows() -> None:
     ]
 
 
+def test_accident_type_uses_readable_vietnamese_label() -> None:
+    assert main_test._accident_type_label("roadside_collision") == "Va chạm môi trường ven đường / rời đường"
+    assert main_test._accident_type_label("no_incident") == "Không có tai nạn của ego"
+
+
 def test_reanalyze_review_fields_require_target_claims() -> None:
     with pytest.raises(ValueError, match="ít nhất một claim"):
         main_test._reanalyze_review_fields("Kiểm tra lại claim", [])

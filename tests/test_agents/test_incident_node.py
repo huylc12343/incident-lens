@@ -716,6 +716,7 @@ async def test_draft_report_marks_video_only_and_unresolved_conflict() -> None:
     contradicted = memory.claims[0].model_copy(update={"verification_status": VerificationStatus.CONTRADICTED})
     memory = memory.model_copy(update={"claims": [contradicted]})
     narrative = ReportModelOutput(
+        type_of_accident="other_unknown",
         timeline="Timeline",
         video_observations="Video findings",
         hypothesized_causes="Possible cause",
@@ -736,7 +737,8 @@ async def test_draft_report_marks_video_only_and_unresolved_conflict() -> None:
     assert result["status"] == "awaiting_review"
     assert result["report_narrative"].log_findings == "Không có dữ liệu log."
     assert result["draft_report"].log_findings.narrative == "Không có dữ liệu log."
-    assert len(type(result["draft_report"]).model_fields) == 10
+    assert len(type(result["draft_report"]).model_fields) == 11
+    assert result["draft_report"].type_of_accident == "other_unknown"
     assert "claim-1" in result["warnings"][0]
     report.build_narrative.assert_awaited_once()
 
@@ -760,6 +762,7 @@ async def test_draft_report_falls_back_to_vlm_video_summary() -> None:
 
     assert result["status"] == "awaiting_review"
     assert result["draft_report"].summary == memory.video_summary
+    assert result["draft_report"].type_of_accident == "other_unknown"
     assert result["draft_report"].alignment.verification is None
     assert any("report model unavailable" in warning for warning in result["warnings"])
 
@@ -783,6 +786,7 @@ async def test_draft_report_skips_model_when_log_verification_is_unavailable() -
 
     assert result["status"] == "awaiting_review"
     assert result["draft_report"].summary == "Whole-video VLM summary."
+    assert result["draft_report"].type_of_accident == "no_incident"
     assert any("Report model skipped" in warning for warning in result["warnings"])
     report.build_narrative.assert_not_awaited()
 
@@ -805,6 +809,7 @@ async def test_draft_report_uses_code_log_summary_and_verification_alignment() -
         evidence_ids=["log-evidence:2:brake_rise"],
     )
     narrative = ReportModelOutput(
+        type_of_accident="rear_end_collision",
         timeline="Timeline.",
         video_observations="Quan sát.",
         hypothesized_causes="Chưa xác định.",
@@ -823,6 +828,7 @@ async def test_draft_report_uses_code_log_summary_and_verification_alignment() -
     )
 
     draft = result["draft_report"]
+    assert draft.type_of_accident == "rear_end_collision"
     assert draft.summary == memory.global_scene
     assert draft.log_findings.narrative == log_summary.summary
     assert "claim-1 được log hỗ trợ" in draft.alignment.narrative

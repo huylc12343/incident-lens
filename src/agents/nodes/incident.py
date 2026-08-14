@@ -8,6 +8,7 @@ from typing import Protocol
 
 from src.agents.incident_state import IncidentState
 from src.models.incidents import (
+    AccidentType,
     Claim,
     ClaimVerification,
     DraftReport,
@@ -588,6 +589,7 @@ async def build_draft_report_node(
             model_output = ReportModelOutput.model_validate(narrative)
             has_log = state.get("log_evidence_summary") is not None
             narrative = ReportNarrative(
+                type_of_accident=model_output.type_of_accident,
                 summary=memory.video_summary or memory.global_scene,
                 timeline=model_output.timeline,
                 video_observations=model_output.video_observations,
@@ -627,6 +629,7 @@ async def build_draft_report_node(
             has_log=state.get("log_evidence_summary") is not None,
             log_uri=state.get("log_uri"),
         ),
+        type_of_accident=narrative.type_of_accident,
         incident_window=memory.incident_window,
         summary=narrative.summary,
         timeline=ReportTimelineSection(
@@ -758,6 +761,7 @@ def _fallback_report_narrative(memory: VideoMemory, *, has_log: bool) -> ReportN
     timeline = " ".join(f"Tại {item.timestamp_s:g} giây: {item.description}" for item in memory.timeline)
     claims = " ".join(item.text for item in memory.claims)
     return ReportNarrative(
+        type_of_accident=_fallback_accident_type(memory),
         summary=memory.video_summary or memory.global_scene,
         timeline=timeline or "Phân tích video không trả về sự kiện timeline có timestamp.",
         video_observations=claims or memory.global_scene,
@@ -772,6 +776,46 @@ def _fallback_report_narrative(memory: VideoMemory, *, has_log: bool) -> ReportN
         ),
         evidence_ids=[evidence.evidence_id for claim in memory.claims for evidence in claim.evidence],
     )
+
+
+def _fallback_accident_type(memory: VideoMemory) -> AccidentType:
+    text = " ".join(
+        [
+            memory.global_scene,
+            memory.video_summary or "",
+            *(event.description for event in memory.timeline),
+            *(claim.text for claim in memory.claims),
+        ]
+    ).lower()
+    no_incident_phrases = (
+        "không có tai nạn",
+        "không quan sát được tai nạn",
+        "không xảy ra va chạm",
+        "không có va chạm",
+        "no accident",
+        "no collision",
+    )
+    if any(phrase in text for phrase in no_incident_phrases):
+        return AccidentType.NO_INCIDENT
+
+    collision_terms = ("tai nạn", "va chạm", "đâm", "collision", "crash", "impact")
+    if not any(term in text for term in collision_terms):
+        return AccidentType.NO_INCIDENT
+    if any(term in text for term in ("đâm đuôi", "rear-end", "rear end")):
+        return AccidentType.REAR_END_COLLISION
+    if any(term in text for term in ("cắt ngang", "crossing collision")):
+        return AccidentType.CROSSING_COLLISION
+    if any(term in text for term in ("bên hông", "side collision", "đổi làn", "nhập làn")):
+        return AccidentType.SIDE_COLLISION
+    if any(term in text for term in ("đối đầu", "head-on", "head on")):
+        return AccidentType.HEAD_ON_COLLISION
+    if any(term in text for term in ("người đi bộ", "pedestrian")):
+        return AccidentType.PEDESTRIAN_COLLISION
+    if any(term in text for term in ("lan can", "hàng rào", "tường", "cây", "cột", "rời đường", "roadside")):
+        return AccidentType.ROADSIDE_COLLISION
+    if any(term in text for term in ("xe đỗ", "barrier", "vật cản", "static object")):
+        return AccidentType.STATIC_OBJECT_COLLISION
+    return AccidentType.OTHER_UNKNOWN
 
 
 def _verification_alignment(verification: VerificationResult | None) -> str:

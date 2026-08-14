@@ -27,7 +27,6 @@ def build_report_prompt(
         "incident_window": video_memory.incident_window.model_dump(mode="json"),
         "global_scene": video_memory.global_scene,
         "video_summary": video_memory.video_summary,
-        "tracked_entities": [entity.model_dump(mode="json") for entity in video_memory.tracked_entities],
         "timeline": [event.model_dump(mode="json") for event in video_memory.timeline],
         "claims": [claim.model_dump(mode="json") for claim in video_memory.claims],
         "verification": verification.model_dump(mode="json") if verification else None,

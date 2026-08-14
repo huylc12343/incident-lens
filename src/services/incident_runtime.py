@@ -151,7 +151,6 @@ async def incident_workflow_service(
             max_duration_s=settings.incident_max_duration_s,
             prompt_version=settings.video_analysis_prompt_version,
             limits=VideoMemoryLimits(
-                max_entities=settings.video_memory_max_entities,
                 max_timeline_events=min(settings.video_memory_max_timeline_events, 6),
                 max_claims=settings.video_memory_max_claims,
             ),

@@ -42,7 +42,7 @@ from src.models.incidents import (
 )
 from src.prompts.reanalysis import build_auto_reanalysis_prompt_for_conflicts, build_human_reanalysis_prompt
 from src.prompts.video_analysis import build_video_analysis_prompt
-from src.services.log_analysis import build_claim_log_summaries
+from src.services.log_analysis import LogAnalysisError, build_claim_log_summaries, build_log_attention_hint
 from src.services.media import NormalizedVideoArtifact
 from src.services.video_memory import (
     VideoMemoryWorkflow,
@@ -140,9 +140,18 @@ async def analyze_video_node(
     config = workflow.config
     artifact_root = Path(config.artifact_dir).resolve() / _safe_incident_id(incident_id)
     mode = workflow.vlm.capabilities.input_mode
+    log_attention_hint = ""
+    log_uri = (state.get("log_uri") or "").strip()
+    if log_uri:
+        try:
+            log_attention_hint = build_log_attention_hint(log_uri)
+        except LogAnalysisError:
+            # Log validation still runs in its existing workflow node; a hint must never block video analysis.
+            pass
     prompt = build_video_analysis_prompt(
         analysis_prompt=analysis_prompt,
         input_mode=mode,
+        log_attention_hint=log_attention_hint,
         version=config.prompt_version,
     )
     try:

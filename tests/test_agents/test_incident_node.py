@@ -96,8 +96,57 @@ async def test_analyze_video_node_builds_frame_request(tmp_path: Path) -> None:
     media.sample_frames.assert_awaited_once()
     media.normalize_video.assert_not_awaited()
     request = service.analyze_video.await_args.args[0]
-    assert request.prompt.context == {"input_mode": "timestamped_frames"}
+    assert request.prompt.context == {
+        "input_mode": "timestamped_frames",
+        "analyst_request": "Find the incident",
+    }
     assert "INC_001" in result["artifact_uris"]["frames"]
+
+
+@pytest.mark.asyncio
+async def test_analyze_video_node_adds_qualitative_log_attention_hint(tmp_path: Path) -> None:
+    log = tmp_path / "vehicle.csv"
+    log.write_text(
+        "timestamp_s,throttle,brake,steering_angle,acceleration_mps2\n"
+        "0.0,0.1,0.0,0.0,0.0\n"
+        "1.0,0.5,0.4,-0.5,-4.0\n",
+        encoding="utf-8",
+    )
+    manifest = VideoSequenceManifest(
+        frames=[
+            TimestampedFrame(
+                frame_id="frame-0",
+                sequence_index=0,
+                timestamp_s=0,
+                delta_from_previous_s=0,
+                image_uri="frame.jpg",
+            )
+        ],
+        source_video_uri="video.mp4",
+        duration_s=2,
+    )
+    media = SimpleNamespace(sample_frames=AsyncMock(return_value=manifest), normalize_video=AsyncMock())
+    service = _service(VLMInputMode.TIMESTAMPED_FRAMES, _memory(AnalysisMode.SINGLE_REQUEST, 2))
+    workflow = VideoMemoryWorkflow(vlm=service, config=VideoMemoryWorkflowConfig(artifact_dir=str(tmp_path)))
+
+    await analyze_video_node(
+        {
+            "incident_id": "INC-HINT",
+            "video_uri": "video.mp4",
+            "log_uri": str(log),
+            "analysis_prompt": "Phân tích toàn bộ video",
+        },
+        media=media,
+        workflow=workflow,
+    )
+
+    context = service.analyze_video.await_args.args[0].prompt.context
+    hint = context["log_attention_hint"]
+    assert "Tại giây thứ 1.0" in hint
+    assert "ga tăng đột ngột" in hint
+    assert "phanh tăng đột ngột" in hint
+    assert "-4.0" not in hint
+    assert "0.5" not in hint
 
 
 @pytest.mark.asyncio

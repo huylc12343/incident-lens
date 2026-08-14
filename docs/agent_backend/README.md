@@ -231,7 +231,7 @@ State chỉ nên giữ structured data và URI cần cho workflow. Không đưa 
 
 ### VideoMemory và evidence
 
-`VideoMemory` chỉ gồm `global_scene`, `video_summary`, `tracked_entities`, `incident_window`,
+`VideoMemory` chỉ gồm `global_scene`, `video_summary`, `incident_window`,
 `representative_timestamp_s`, `timeline`, `claims` và metadata kỹ thuật. Không còn các field VLM
 `observations`, `uncertainties`, `source_frame_ids` hoặc danh sách `evidence` toàn cục.
 

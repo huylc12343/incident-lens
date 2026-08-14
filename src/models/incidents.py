@@ -115,13 +115,9 @@ class RemoteMediaHandle(ContractModel):
     local_artifact_uri: str = Field(min_length=1)
 
 
-class TrackedEntity(ContractModel):
-    entity_id: str = Field(min_length=1)
-    label: str = Field(min_length=1)
-    description: str = ""
-
-
 class TimelineEvent(ContractModel):
+    """An important event in the full video, whether or not an accident occurs."""
+
     timestamp_s: float = Field(ge=0)
     description: str = Field(min_length=1)
     evidence_ids: list[str] = Field(default_factory=list)
@@ -135,6 +131,8 @@ class Observation(ContractModel):
 
 
 class Claim(ContractModel):
+    """An important, evidence-backed statement about the video's progression."""
+
     claim_id: str = Field(min_length=1)
     text: str = Field(min_length=1)
     timestamp_s: float | None = Field(default=None, ge=0)
@@ -157,7 +155,6 @@ class SamplingMetadata(ContractModel):
 class VideoMemory(ContractModel):
     global_scene: str = Field(min_length=1)
     video_summary: str | None = Field(default=None, min_length=1)
-    tracked_entities: list[TrackedEntity] = Field(default_factory=list)
     incident_window: IncidentWindow
     representative_timestamp_s: float | None = Field(default=None, ge=0)
     timeline: list[TimelineEvent] = Field(default_factory=list)

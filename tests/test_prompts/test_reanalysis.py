@@ -67,7 +67,6 @@ def test_human_reanalysis_contains_only_reviewer_context() -> None:
         "target_claims",
         "global_scene",
         "video_summary",
-        "tracked_entities",
         "incident_window",
         "timeline",
         "existing_evidence",

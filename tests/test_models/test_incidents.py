@@ -112,6 +112,17 @@ def test_video_memory_contract_is_provider_neutral() -> None:
     assert memory.revision == 1
 
 
+def test_video_memory_contract_has_no_tracked_entities() -> None:
+    assert "tracked_entities" not in VideoMemory.model_json_schema()["properties"]
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        VideoMemory(
+            global_scene="A road scene",
+            tracked_entities=[],  # type: ignore[call-arg]
+            incident_window=IncidentWindow(t_start=0, t0=0, t_end=3),
+            analysis_mode=AnalysisMode.NATIVE_VIDEO,
+        )
+
+
 def test_request_models_forbid_unknown_provider_payload_fields() -> None:
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         NativeVideoAnalysisRequest(

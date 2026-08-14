@@ -130,7 +130,7 @@ class OpenAIVLMService:
             "OPENAI_REANALYSIS_FAILED",
             incident_id=request.incident_id,
             operation="claim_reanalysis",
-            description="Phân tích lại các claim được chọn trong cửa sổ sự cố.",
+            description="Phân tích lại các claim được chọn trong cửa sổ video liên quan.",
             metadata={
                 "image_count": len(request.frame_manifest.frames),
                 "target_claim_ids": request.target_claim_ids,

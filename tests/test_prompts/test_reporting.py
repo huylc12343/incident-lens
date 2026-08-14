@@ -60,6 +60,7 @@ def test_report_prompt_excludes_provider_handles_and_artifact_locations() -> Non
 
     assert "remote_media_handles" not in prompt.context
     assert "sampling_metadata" not in prompt.context
+    assert "tracked_entities" not in prompt.context
     assert "private://" not in serialized
     assert "files/private-name" not in serialized
     assert prompt.context["claims"][0]["evidence"][0]["evidence_id"] == "frame-1"

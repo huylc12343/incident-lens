@@ -1,7 +1,21 @@
+from hashlib import sha256
+
 import pytest
 
 from src.models.incidents import Claim, ClaimLogSummary
 from src.prompts.verification import build_verification_prompt
+
+
+def test_verification_system_prompt_matches_approved_text_exactly() -> None:
+    prompt = build_verification_prompt(
+        claims=[],
+        claim_log_summaries=[],
+        timestamp_tolerance_s=0.5,
+    )
+
+    assert sha256(prompt.text.encode("utf-8")).hexdigest() == (
+        "3fa2e6c9e980dca8347cd53d2c1513f2638b0a706db2516fb43d1745dc5bd10c"
+    )
 
 
 def test_verification_prompt_requires_one_result_per_claim() -> None:

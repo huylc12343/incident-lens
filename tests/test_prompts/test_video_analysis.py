@@ -32,6 +32,10 @@ def test_video_analysis_prompt_selects_mode_instruction(
     assert "trước–tại–sau" in prompt.text
     assert "representative_timestamp_s" in prompt.text
     assert "VideoMemory" in prompt.text
+    assert "tracked_entities" not in prompt.text
+    assert "timeline = []; claims = []" not in prompt.text
+    assert "khẳng định quan trọng về diễn biến của video" in prompt.text
+    assert "Timeline các sự kiện quan trọng" in prompt.text
     assert 'verification_status="unverified"' in prompt.text
     assert "không trả chain-of-thought" in prompt.text
     assert "Identify the main traffic incident." not in prompt.text
@@ -63,6 +67,23 @@ def test_video_analysis_prompt_keeps_no_incident_window_schema_valid() -> None:
     assert "incident_window.t_end bằng thời lượng video" in prompt.text
     assert "bắt buộc lớn hơn 0" in prompt.text
     assert "Tuyệt đối không đặt incident_window.t_end = 0" in prompt.text
+    assert "không để trống timeline hoặc claims chỉ vì không có tai nạn" in prompt.text
+
+
+def test_video_analysis_prompt_treats_log_hint_as_attention_only() -> None:
+    hint = (
+        "Attention hint từ telemetry — chỉ gợi ý thời điểm cần xem kỹ, không phải bằng chứng:\n"
+        "- Tại giây thứ 12.5: ga giảm đột ngột; phanh tăng đột ngột."
+    )
+    prompt = build_video_analysis_prompt(
+        analysis_prompt="Phân tích toàn bộ diễn biến.",
+        input_mode=VLMInputMode.NATIVE_VIDEO,
+        log_attention_hint=hint,
+    )
+
+    assert prompt.context["log_attention_hint"] == hint
+    assert "không phải evidence" in prompt.text
+    assert "không được dùng để kết luận tai nạn" in prompt.text
 
 
 def test_video_analysis_rejects_blank_analyst_request() -> None:

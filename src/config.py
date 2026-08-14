@@ -78,7 +78,6 @@ class Settings(BaseSettings):
     vlm_frame_batch_size: int = Field(default=60, gt=0)
     vlm_frame_batch_overlap: int = Field(default=5, ge=0)
     vlm_frame_max_batches: int = Field(default=8, gt=0)
-    video_memory_max_entities: int = Field(default=50, gt=0)
     video_memory_max_timeline_events: int = Field(default=6, gt=0)
     video_memory_max_claims: int = Field(default=100, gt=0)
 

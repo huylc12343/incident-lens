@@ -48,6 +48,11 @@ CONTROL_ZERO_THRESHOLD = 0.01
 CONTROL_CHANGE_THRESHOLD = 0.1
 MAX_PLAUSIBLE_ABS_ACCELERATION_MPS2 = 15.0
 ACCELERATION_OUTLIER_WARNING = "LOG_ACCELERATION_OUTLIER_FILTERED"
+ATTENTION_THROTTLE_DELTA_THRESHOLD = 0.2
+ATTENTION_BRAKE_DELTA_THRESHOLD = 0.5
+ATTENTION_STEERING_DELTA_THRESHOLD = 0.3
+ATTENTION_ACCELERATION_THRESHOLD_MPS2 = 3.0
+MAX_LOG_ATTENTION_TIMESTAMPS = 20
 
 
 class LogAnalysisError(RuntimeError):
@@ -261,6 +266,81 @@ def load_log_records(log_uri: str) -> tuple[list[str], list[LogRecord]]:
 def acceleration_series(records: list[LogRecord]) -> list[float | None]:
     speed = [record.number(SPEED_ALIASES) for record in records]
     return _acceleration_series(records, speed)
+
+
+def build_log_attention_hint(log_uri: str) -> str:
+    """Return qualitative timestamps that guide video attention without exposing telemetry values."""
+    _, records = load_log_records(log_uri)
+    throttle = numeric_series(records, THROTTLE_ALIASES)
+    brake = numeric_series(records, BRAKE_ALIASES)
+    steering = numeric_series(records, STEERING_ALIASES)
+    acceleration, _ = _filter_acceleration_outliers(acceleration_series(records))
+    moments: dict[float, list[str]] = {}
+    moment_scores: dict[float, float] = {}
+
+    def add(timestamp_s: float, description: str, score: float) -> None:
+        descriptions = moments.setdefault(timestamp_s, [])
+        if description not in descriptions:
+            descriptions.append(description)
+        moment_scores[timestamp_s] = max(moment_scores.get(timestamp_s, 0.0), score)
+
+    control_rules = (
+        (throttle, ATTENTION_THROTTLE_DELTA_THRESHOLD, "ga"),
+        (brake, ATTENTION_BRAKE_DELTA_THRESHOLD, "phanh"),
+    )
+    for values, threshold, label in control_rules:
+        for index in range(1, len(records)):
+            previous, current = values[index - 1], values[index]
+            if previous is None or current is None:
+                continue
+            delta = current - previous
+            if abs(delta) > threshold:
+                direction = "tăng" if delta > 0 else "giảm"
+                add(records[index].timestamp_s, f"{label} {direction} đột ngột", abs(delta) / threshold)
+
+    for index in range(1, len(records)):
+        previous, current = steering[index - 1], steering[index]
+        if previous is None or current is None:
+            continue
+        delta = current - previous
+        if abs(delta) > ATTENTION_STEERING_DELTA_THRESHOLD:
+            direction = "phải" if delta > 0 else "trái"
+            add(
+                records[index].timestamp_s,
+                f"góc đánh lái thay đổi đột ngột sang {direction}",
+                abs(delta) / ATTENTION_STEERING_DELTA_THRESHOLD,
+            )
+
+    previous_acceleration_state = 0
+    for record, value in zip(records, acceleration, strict=True):
+        state = 0
+        if value is not None and abs(value) > ATTENTION_ACCELERATION_THRESHOLD_MPS2:
+            state = 1 if value > 0 else -1
+        if state and state != previous_acceleration_state:
+            add(
+                record.timestamp_s,
+                "gia tốc tăng mạnh" if state > 0 else "gia tốc giảm mạnh",
+                abs(value or 0.0) / ATTENTION_ACCELERATION_THRESHOLD_MPS2,
+            )
+        previous_acceleration_state = state
+
+    if not moments:
+        return ""
+    selected_timestamps = sorted(
+        sorted(moments, key=lambda timestamp_s: (-moment_scores[timestamp_s], timestamp_s))[
+            :MAX_LOG_ATTENTION_TIMESTAMPS
+        ]
+    )
+    lines = [
+        f"- Tại giây thứ {_format_timestamp_s(timestamp_s)}: {'; '.join(moments[timestamp_s])}."
+        for timestamp_s in selected_timestamps
+    ]
+    return "\n".join(
+        [
+            "Attention hint từ telemetry — chỉ gợi ý thời điểm cần xem kỹ, không phải bằng chứng:",
+            *lines,
+        ]
+    )
 
 
 def numeric_series(records: list[LogRecord], aliases: tuple[str, ...]) -> list[float | None]:

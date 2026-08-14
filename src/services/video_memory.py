@@ -37,12 +37,11 @@ class VideoMemoryError(RuntimeError):
 
 @dataclass(frozen=True)
 class VideoMemoryLimits:
-    max_entities: int = 50
     max_timeline_events: int = 6
     max_claims: int = 100
 
     def __post_init__(self) -> None:
-        if min(self.max_entities, self.max_timeline_events, self.max_claims) <= 0:
+        if min(self.max_timeline_events, self.max_claims) <= 0:
             raise ValueError("VideoMemory limits must be positive")
 
 
@@ -308,14 +307,11 @@ def validate_video_memory(
         raise VideoMemoryError("VLM_TIMESTAMP_OUT_OF_RANGE", "incident window exceeds source duration")
     if expected_analysis_mode is not None and memory.analysis_mode != expected_analysis_mode:
         raise VideoMemoryError("VLM_ANALYSIS_MODE_INVALID", "analysis mode does not match workflow path")
-    if len(memory.tracked_entities) > limits.max_entities:
-        raise VideoMemoryError("VLM_ENTITY_LIMIT_EXCEEDED", "VideoMemory contains too many entities")
     if len(memory.timeline) > limits.max_timeline_events:
         raise VideoMemoryError("VLM_TIMELINE_LIMIT_EXCEEDED", "VideoMemory contains too many timeline events")
     if len(memory.claims) > limits.max_claims:
         raise VideoMemoryError("VLM_CLAIM_LIMIT_EXCEEDED", "VideoMemory contains too many claims")
 
-    _require_unique([item.entity_id for item in memory.tracked_entities], "entity IDs")
     _require_unique([item.claim_id for item in memory.claims], "claim IDs")
     evidence_ids = [evidence.evidence_id for claim in memory.claims for evidence in claim.evidence]
     if require_claim_evidence:

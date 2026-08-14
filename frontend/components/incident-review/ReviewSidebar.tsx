@@ -18,6 +18,7 @@ export function ReviewSidebar({ snapshot, selectedClaim, busy, error, onReview }
 
   return (
     <aside className="incident-review-sidebar">
+      <div className="forensic-panel-title"><div><span>Forensic report</span><strong>AI-assisted evidence review</strong></div><span className="forensic-live-dot">LIVE</span></div>
       <section className="sidebar-section incident-information"><div className="sidebar-section-title"><p className="eyebrow">Incident information</p><span className={`status ${snapshot.status}`}>{snapshot.status}</span></div><dl><div><dt>Type</dt><dd>Disengagement</dd></div><div><dt>Severity</dt><dd>Not classified</dd></div><div><dt>Window</dt><dd>{secondsToTimestamp(window?.t_start ?? 0)} – {secondsToTimestamp(window?.t_end ?? 0)}</dd></div><div><dt>Sources</dt><dd>{snapshot.has_log ? "Video + telemetry" : "Video only"}</dd></div></dl></section>
 
       <section className="sidebar-section ai-observation"><div className="sidebar-section-title"><p className="eyebrow">AI observation</p><strong>{selectedClaim?.claim_id ?? "Select an event"}</strong></div><h3>{selectedClaim?.text ?? snapshot.video_summary}</h3><dl><div><dt>Timestamp</dt><dd>{secondsToTimestamp(selectedClaim?.timestamp_s ?? window?.t0 ?? 0)}</dd></div><div><dt>Evidence</dt><dd>{selectedClaim?.evidence.map((item) => item.evidence_id).join(", ") || "Pending"}</dd></div><div><dt>Confidence</dt><dd>Not numerically scored</dd></div></dl></section>

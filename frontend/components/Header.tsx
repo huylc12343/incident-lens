@@ -15,13 +15,11 @@ export function Header({
   return (
     <header className="topbar">
       <div className="nav-inner">
-        <Link className="brand" href="/" aria-label="VLens home">
-          <span className="brand-mark">
-            <span />
-          </span>
+        <Link className="brand" href="/" aria-label="IncidentLens home">
+          <span className="brand-mark incident-lens-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" fill="none" stroke="currentColor" strokeWidth="1.8"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg></span>
           <span>
-            <strong>VLens</strong>
-            <small>Disengagement Review Assistant</small>
+            <strong>IncidentLens</strong>
+            <small>Forensic Review Workspace</small>
           </span>
         </Link>
         <nav aria-label="Main navigation">
@@ -39,7 +37,7 @@ export function Header({
           </a>
         </nav>
         <div className="nav-actions">
-          {processing && <span className="header-status">Processing</span>}
+          {processing && <span className="header-status">Incident Review</span>}
           <button className="icon-button" aria-label="Notifications">
             <Icon>
               <path

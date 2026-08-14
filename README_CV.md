@@ -6,6 +6,8 @@ File chạy chính:
 src/agents/nodes/detect_and_blur.py
 ```
 
+<!-- CV blur note: comment-only marker for AI log testing. -->
+
 Hai model mặc định:
 
 ```text
@@ -110,5 +112,4 @@ python src/agents/nodes/detect_and_blur.py --source "D:\Videos\input.mp4"
 ```
 
 Chương trình sẽ dùng hai model trong `src/models/` và in đường dẫn tuyệt đối của file kết quả khi hoàn tất.
-
 

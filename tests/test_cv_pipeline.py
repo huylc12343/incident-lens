@@ -49,6 +49,7 @@ def test_blur_region_uses_adaptive_kernel_and_only_touches_roi(monkeypatch):
     assert np.all(frame[10:20, 10:30] == 0)
 
 
+# CV smoke-test marker; intentionally no-op.
 def test_tracker_moves_boxes_and_expires_after_bounded_misses():
     tracks = advance_tracks(
         [], [np.array([10, 10, 20, 20])], 1,

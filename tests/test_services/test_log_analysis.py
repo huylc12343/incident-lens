@@ -119,3 +119,25 @@ def test_accepts_time_sec_timestamp_column(tmp_path: Path) -> None:
     assert result.summary.metrics["speed_end"] == 7.056
     assert result.summary.metrics["max_brake"] == 0
     assert all(value is not None for value in result.summary.metrics.values())
+
+
+def test_analysis_filters_extreme_acceleration_and_records_warning(tmp_path: Path) -> None:
+    source = tmp_path / "outlier.csv"
+    source.write_text(
+        "timestamp_s,speed_kmh,brake\n"
+        "0.0,20,0\n"
+        "0.1,10,0\n"
+        "0.2,10,0\n",
+        encoding="utf-8",
+    )
+
+    result = LogAnalysisService().analyze(
+        str(source),
+        str(tmp_path / "slice.csv"),
+        window=IncidentWindow(t_start=0, t0=0.1, t_end=0.2),
+    )
+
+    assert result.summary.metrics["max_deceleration"] == 0
+    assert result.summary.metrics["acceleration_outlier_count"] == 1
+    assert "LOG_ACCELERATION_OUTLIER_FILTERED" in result.summary.warnings
+    assert "27.778" not in result.summary.summary

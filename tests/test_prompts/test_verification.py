@@ -65,7 +65,7 @@ def test_verification_prompt_is_deterministic() -> None:
     assert build_verification_prompt(**kwargs) == build_verification_prompt(**kwargs)
 
 
-def test_verification_prompt_compacts_representative_markdown_tables() -> None:
+def test_verification_prompt_keeps_every_allowed_log_row_when_compacting_tables() -> None:
     prompt = build_verification_prompt(
         claims=[Claim(claim_id="claim-1", text="Xe giảm tốc", timestamp_s=2)],
         claim_log_summaries=[
@@ -73,13 +73,22 @@ def test_verification_prompt_compacts_representative_markdown_tables() -> None:
                 claim_id="claim-1",
                 within_tolerance=True,
                 available_signals=["timestamp", "speed_kmh"],
+                allowed_evidence_ids=[
+                    "log-row:1",
+                    "log-row:1.5",
+                    "log-row:2",
+                    "log-row:2.5",
+                    "log-row:3",
+                ],
                 summary=(
                     "Chuyển động\n"
-                    "Tốc độ — các mẫu đại diện phân bố đều:\n"
+                    "Tốc độ — các dòng log được phép dùng:\n"
                     "| Timestamp | Speed (km/h) |\n"
                     "| --------: | -----------: |\n"
                     "| 1.0s | 20 |\n"
+                    "| 1.5s | 15 |\n"
                     "| 2.0s | 10 |\n"
+                    "| 2.5s | 5 |\n"
                     "| 3.0s | 0 |\n"
                     "Xe đã **giảm tốc mạnh** trong cửa sổ."
                 ),
@@ -89,7 +98,7 @@ def test_verification_prompt_compacts_representative_markdown_tables() -> None:
     )
 
     summary = prompt.context["verification_items"][0]["claim"]["log_summary"]
-    assert "Mẫu Speed (km/h): 1.0s=20; 2.0s=10; 3.0s=0" in summary
+    assert "Mẫu Speed (km/h): 1.0s=20; 1.5s=15; 2.0s=10; 2.5s=5; 3.0s=0" in summary
     assert "| Timestamp |" not in summary
     assert "| --------:" not in summary
 

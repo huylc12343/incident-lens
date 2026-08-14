@@ -46,6 +46,8 @@ NEAR_STOPPED_SPEED_KMH = 1.0
 STRONG_SPEED_DROP_KMH = 10.0
 CONTROL_ZERO_THRESHOLD = 0.01
 CONTROL_CHANGE_THRESHOLD = 0.1
+MAX_PLAUSIBLE_ABS_ACCELERATION_MPS2 = 15.0
+ACCELERATION_OUTLIER_WARNING = "LOG_ACCELERATION_OUTLIER_FILTERED"
 
 
 class LogAnalysisError(RuntimeError):
@@ -109,9 +111,13 @@ class LogAnalysisService:
         speed = [record.number(SPEED_ALIASES) for record in sliced]
         brake = [record.number(BRAKE_ALIASES) for record in sliced]
         steering = [record.number(STEERING_ALIASES) for record in sliced]
-        acceleration = _acceleration_series(sliced, speed)
+        acceleration, acceleration_outlier_count = _filter_acceleration_outliers(
+            _acceleration_series(sliced, speed)
+        )
         events = self._detect_events(sliced, brake, steering)
         warnings = _unique_text_values(sliced, WARNING_ALIASES)
+        if acceleration_outlier_count:
+            warnings.append(ACCELERATION_OUTLIER_WARNING)
         errors = _unique_text_values(sliced, ERROR_ALIASES)
 
         speed_values = [value for value in speed if value is not None]
@@ -127,6 +133,7 @@ class LogAnalysisService:
             "speed_min": min(speed_values) if speed_values else None,
             "speed_max": max(speed_values) if speed_values else None,
             "max_deceleration": max_deceleration,
+            "acceleration_outlier_count": acceleration_outlier_count or None,
             "max_brake": max(brake_values) if brake_values else None,
             "brake_rise_time": _first_event_time(events, "brake_rise"),
             "max_steering_change": max(steering_changes, default=None),
@@ -266,17 +273,25 @@ def build_claim_log_summaries(
     *,
     timestamp_tolerance_s: float,
     sample_radius: int = 3,
+    incident_window: IncidentWindow | None = None,
 ) -> list[ClaimLogSummary]:
     """Compute one deterministic, narrow log summary around each claim timestamp."""
     if timestamp_tolerance_s < 0 or sample_radius < 0:
         raise ValueError("timestamp_tolerance_s and sample_radius must be non-negative")
     _, records = load_log_records(log_uri)
+    if incident_window is not None:
+        records = [
+            record
+            for record in records
+            if incident_window.t_start <= record.timestamp_s <= incident_window.t_end
+        ]
     return [
         _claim_log_summary(
             records,
             claim,
             timestamp_tolerance_s=timestamp_tolerance_s,
             sample_radius=sample_radius,
+            incident_window=incident_window,
         )
         for claim in claims
     ]
@@ -288,6 +303,7 @@ def _claim_log_summary(
     *,
     timestamp_tolerance_s: float,
     sample_radius: int,
+    incident_window: IncidentWindow | None,
 ) -> ClaimLogSummary:
     if claim.timestamp_s is None:
         return ClaimLogSummary(
@@ -300,13 +316,38 @@ def _claim_log_summary(
                 "Không thể chọn cửa sổ log vì claim không có timestamp."
             ),
         )
+    if not records:
+        return _claim_log_summary_without_samples(claim, "Không có dòng log nào trong incident_window.")
     nearest_index = min(range(len(records)), key=lambda index: abs(records[index].timestamp_s - claim.timestamp_s))
     nearest = records[nearest_index]
     distance = abs(nearest.timestamp_s - claim.timestamp_s)
-    start = max(0, nearest_index - sample_radius)
-    end = min(len(records), nearest_index + sample_radius + 1)
-    samples = records[start:end]
-    within_tolerance = distance <= timestamp_tolerance_s
+    claim_in_window = (
+        incident_window is None
+        or incident_window.t_start <= claim.timestamp_s <= incident_window.t_end
+    )
+    eligible = [
+        record
+        for record in records
+        if abs(record.timestamp_s - claim.timestamp_s) <= timestamp_tolerance_s
+    ]
+    within_tolerance = claim_in_window and bool(eligible)
+    if within_tolerance:
+        eligible_nearest_index = min(
+            range(len(eligible)),
+            key=lambda index: abs(eligible[index].timestamp_s - claim.timestamp_s),
+        )
+        start = max(0, eligible_nearest_index - sample_radius)
+        end = min(len(eligible), eligible_nearest_index + sample_radius + 1)
+        samples = eligible[start:end]
+    else:
+        samples = []
+    if not samples:
+        return _claim_log_summary_without_samples(
+            claim,
+            "Mẫu gần nhất nằm ngoài tolerance hoặc incident_window; không dùng log để xác nhận hoặc bác bỏ claim.",
+            nearest_timestamp_s=nearest.timestamp_s,
+            timestamp_distance_s=distance,
+        )
     metrics, available_signals = _claim_metrics(samples, claim.timestamp_s)
     evidence = [
         ClaimLogEvidence(
@@ -316,11 +357,7 @@ def _claim_log_summary(
         )
         for record in samples
     ]
-    allowed_evidence_ids = [
-        item.evidence_id
-        for item in evidence
-        if abs(item.timestamp_s - claim.timestamp_s) <= timestamp_tolerance_s
-    ]
+    allowed_evidence_ids = [item.evidence_id for item in evidence]
     return ClaimLogSummary(
         claim_id=claim.claim_id,
         claim_timestamp_s=claim.timestamp_s,
@@ -342,6 +379,40 @@ def _claim_log_summary(
             samples,
             metrics,
             available_signals,
+        ),
+    )
+
+
+def _claim_log_summary_without_samples(
+    claim: Claim,
+    message: str,
+    *,
+    nearest_timestamp_s: float | None = None,
+    timestamp_distance_s: float | None = None,
+) -> ClaimLogSummary:
+    nearest = (
+        f"{_format_timestamp_s(nearest_timestamp_s)}s"
+        if nearest_timestamp_s is not None
+        else "Không có"
+    )
+    distance = (
+        f"{_format_timestamp_s(timestamp_distance_s)}s"
+        if timestamp_distance_s is not None
+        else "Không có"
+    )
+    return ClaimLogSummary(
+        claim_id=claim.claim_id,
+        claim_timestamp_s=claim.timestamp_s,
+        nearest_timestamp_s=nearest_timestamp_s,
+        timestamp_distance_s=timestamp_distance_s,
+        summary=(
+            "Đối chiếu thời gian\n"
+            f"Claim timestamp: {_format_timestamp_s(claim.timestamp_s)}s\n"
+            f"Mẫu log gần nhất: {nearest}\n"
+            f"Sai lệch timestamp: {distance}\n"
+            "Trong tolerance: **Không**\n\n"
+            "Log có thể kiểm tra\n"
+            f"{message}"
         ),
     )
 
@@ -448,12 +519,21 @@ def _max_deceleration(
         delta_t = records[index].timestamp_s - records[index - 1].timestamp_s
         if previous is not None and current is not None and delta_t > 0:
             candidates.append(( ((current - previous) / 3.6) / delta_t, records[index].timestamp_s))
+    filtered, outlier_count = _filter_acceleration_outliers([item[0] for item in candidates])
+    candidates = [
+        (value, candidates[index][1])
+        for index, value in enumerate(filtered)
+        if value is not None
+    ]
+    output: dict[str, float | int | str | bool | None] = {
+        "acceleration_outlier_count": outlier_count or None,
+    }
     if not candidates:
-        return {"max_deceleration": None, "max_deceleration_timestamp_s": None}
+        return {**output, "max_deceleration": None, "max_deceleration_timestamp_s": None}
     value, timestamp_s = min(candidates)
     if value >= 0:
-        return {"max_deceleration": 0.0, "max_deceleration_timestamp_s": None}
-    return {"max_deceleration": value, "max_deceleration_timestamp_s": timestamp_s}
+        return {**output, "max_deceleration": 0.0, "max_deceleration_timestamp_s": None}
+    return {**output, "max_deceleration": value, "max_deceleration_timestamp_s": timestamp_s}
 
 
 def _acceleration_at_timestamp(
@@ -470,6 +550,8 @@ def _acceleration_at_timestamp(
     if not candidates:
         return {"acceleration_at_claim": None, "acceleration_timestamp_s": None}
     _, timestamp_s, value = min(candidates, key=lambda item: item[0])
+    if abs(value) > MAX_PLAUSIBLE_ABS_ACCELERATION_MPS2:
+        return {"acceleration_at_claim": None, "acceleration_timestamp_s": None}
     return {"acceleration_at_claim": value, "acceleration_timestamp_s": timestamp_s}
 
 
@@ -567,7 +649,7 @@ def _build_claim_summary(
                 f"Log window: {_format_timestamp_s(records[0].timestamp_s)}s → "
                 f"{_format_timestamp_s(records[-1].timestamp_s)}s",
                 f"Số mẫu log trong cửa sổ: {len(records)}",
-                f"Số mẫu đại diện tối đa trong mỗi bảng: {min(len(records), 4)}",
+                f"Số dòng log model được phép dùng: {len(records)}",
                 f"Sai lệch timestamp: {_format_timestamp_s(distance_s)}s",
                 f"Trong tolerance: **{'Có' if within_tolerance else 'Không'}**",
             ]
@@ -588,10 +670,15 @@ def _build_claim_summary(
             f"Tốc độ tại giây thứ {_second_label(records[-1].timestamp_s)}: {float(speed['end']):g} km/h",
             f"Tốc độ nhỏ nhất: {float(speed['min']):g} km/h",
             f"Tốc độ lớn nhất: {float(speed['max']):g} km/h",
-            "Tốc độ — các mẫu đại diện phân bố đều:",
-            *_representative_signal_table(records, CLAIM_SPEED_ALIASES, "Speed (km/h)"),
+            "Tốc độ — các dòng log được phép dùng:",
+            *_allowed_signal_table(records, CLAIM_SPEED_ALIASES, "Speed (km/h)"),
         ]
         speed_lines.extend(_derived_speed_states(speed))
+        if speed.get("acceleration_outlier_count"):
+            speed_lines.append(
+                f"Đã loại {int(speed['acceleration_outlier_count'])} mẫu gia tốc bất thường "
+                f"vượt ngưỡng ±{MAX_PLAUSIBLE_ABS_ACCELERATION_MPS2:g} m/s²."
+            )
         sections.append("\n".join(speed_lines))
 
     brake = metrics.get("brake")
@@ -602,16 +689,16 @@ def _build_claim_summary(
             control_lines.extend(
                 [
                     _brake_statement(brake),
-                    "Brake — các mẫu đại diện phân bố đều:",
-                    *_representative_signal_table(records, CLAIM_BRAKE_ALIASES, "Brake"),
+                    "Brake — các dòng log được phép dùng:",
+                    *_allowed_signal_table(records, CLAIM_BRAKE_ALIASES, "Brake"),
                 ]
             )
         if throttle:
             control_lines.extend(
                 [
                     _throttle_statement(throttle),
-                    "Throttle — các mẫu đại diện phân bố đều:",
-                    *_representative_signal_table(records, CLAIM_THROTTLE_ALIASES, "Throttle"),
+                    "Throttle — các dòng log được phép dùng:",
+                    *_allowed_signal_table(records, CLAIM_THROTTLE_ALIASES, "Throttle"),
                 ]
             )
         if speed and speed.get("acceleration_at_claim") is not None:
@@ -640,8 +727,8 @@ def _build_claim_summary(
                 [
                     f"Steering thay đổi lớn nhất: {steer_change:g}",
                     _steering_direction_statement(records, claim_timestamp_s),
-                    "Steering — các mẫu đại diện phân bố đều:",
-                    *_representative_signal_table(records, CLAIM_STEER_ALIASES, "Steering"),
+                    "Steering — các dòng log được phép dùng:",
+                    *_allowed_signal_table(records, CLAIM_STEER_ALIASES, "Steering"),
                 ]
             )
         sections.append("\n".join(direction_lines))
@@ -663,24 +750,14 @@ def _second_label(value: float) -> str:
     return f"{value:g}"
 
 
-def _representative_signal_table(
+def _allowed_signal_table(
     records: list[LogRecord],
     aliases: tuple[str, ...],
     value_label: str,
-    max_samples: int = 4,
 ) -> list[str]:
-    if max_samples <= 0:
-        raise ValueError("max_samples must be positive")
-    sample_count = min(len(records), max_samples)
-    if sample_count == 1:
-        selected = records[:1]
-    else:
-        last_index = len(records) - 1
-        indexes = [round(position * last_index / (sample_count - 1)) for position in range(sample_count)]
-        selected = [records[index] for index in indexes]
     rows = [
         (record.timestamp_s, value)
-        for record in selected
+        for record in records
         if (value := record.number(aliases)) is not None
     ]
     return [
@@ -815,6 +892,20 @@ def _acceleration_series(
     return acceleration
 
 
+def _filter_acceleration_outliers(
+    values: list[float | None],
+) -> tuple[list[float | None], int]:
+    filtered: list[float | None] = []
+    outlier_count = 0
+    for value in values:
+        if value is not None and abs(value) > MAX_PLAUSIBLE_ABS_ACCELERATION_MPS2:
+            filtered.append(None)
+            outlier_count += 1
+        else:
+            filtered.append(value)
+    return filtered, outlier_count
+
+
 def _write_log_slice(output: Path, fieldnames: list[str], records: list[LogRecord]) -> None:
     with output.open("w", encoding="utf-8", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
@@ -867,6 +958,11 @@ def _build_summary(
         statements.append(", ".join(speeds) + ".")
     if metrics["max_deceleration"] is not None:
         statements.append(f"Mức giảm tốc lớn nhất là {abs(float(metrics['max_deceleration'])):.3f} m/s².")
+    if metrics["acceleration_outlier_count"] is not None:
+        statements.append(
+            f"Đã loại {int(metrics['acceleration_outlier_count'])} mẫu gia tốc bất thường vượt ngưỡng "
+            f"±{MAX_PLAUSIBLE_ABS_ACCELERATION_MPS2:g} m/s²."
+        )
     if metrics["max_brake"] is not None:
         statements.append(f"Giá trị brake lớn nhất là {metrics['max_brake']:g}.")
     if metrics["brake_rise_time"] is not None:

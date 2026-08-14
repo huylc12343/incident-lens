@@ -364,6 +364,7 @@ async def align_and_verify_claims_node(
             claims_to_verify,
             timestamp_tolerance_s=timestamp_tolerance_s,
             sample_radius=sample_radius,
+            incident_window=memory.incident_window,
         )
         result = await verification.verify(
             VerificationRequest(

@@ -389,6 +389,55 @@ async def test_align_and_verify_claims_builds_per_claim_log_summary(tmp_path: Pa
 
 
 @pytest.mark.asyncio
+async def test_align_and_verify_clips_claim_log_to_incident_window(tmp_path: Path) -> None:
+    memory = VideoMemory(
+        global_scene="Road scene",
+        incident_window=IncidentWindow(t_start=1.0, t0=1.5, t_end=2.0),
+        analysis_mode=AnalysisMode.SINGLE_REQUEST,
+        claims=[Claim(claim_id="claim-end", text="Sự kiện cuối đoạn", timestamp_s=1.9)],
+    )
+    log = tmp_path / "vehicle.csv"
+    log.write_text(
+        "timestamp,speed_kmh,brake\n"
+        "1.8,10,0\n"
+        "2.0,9,0\n"
+        "2.1,0,1\n",
+        encoding="utf-8",
+    )
+    verifier = SimpleNamespace(
+        verify=AsyncMock(
+            return_value=VerificationResult(
+                results=[
+                    ClaimVerification(
+                        claim_id="claim-end",
+                        status=VerificationStatus.SUPPORTED,
+                        reason="Log phù hợp.",
+                        evidence_ids=["log-row:2"],
+                    )
+                ]
+            )
+        )
+    )
+
+    await align_and_verify_claims_node(
+        {
+            "incident_id": "INC-WINDOW",
+            "video_memory": memory,
+            "log_uri": str(log),
+            "log_evidence_summary": LogEvidenceSummary(),
+        },
+        verification=verifier,
+        timestamp_tolerance_s=0.25,
+        sample_radius=3,
+    )
+
+    request = verifier.verify.await_args.args[0]
+    evidence = request.claim_log_summaries[0].evidence
+    assert [item.timestamp_s for item in evidence] == [1.8, 2.0]
+    assert all(item.timestamp_s <= memory.incident_window.t_end for item in evidence)
+
+
+@pytest.mark.asyncio
 async def test_video_claim_becomes_supported_only_after_log_verification(tmp_path: Path) -> None:
     provider_memory = VideoMemory(
         global_scene="Road scene",

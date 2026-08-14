@@ -168,7 +168,9 @@ def _compact_signal_tables(lines: list[str]) -> list[str]:
                 if len(cells) == 2:
                     values.append(f"{cells[0]}={cells[1]}")
                 index += 1
-            if compacted and compacted[-1].endswith("các mẫu đại diện phân bố đều:"):
+            if compacted and compacted[-1].endswith(
+                ("các mẫu đại diện phân bố đều:", "các dòng log được phép dùng:")
+            ):
                 compacted.pop()
             compacted.append(f"Mẫu {label}: {'; '.join(values)}")
             continue

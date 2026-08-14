@@ -1,6 +1,6 @@
 import pytest
 
-from src.models.incidents import Claim
+from src.models.incidents import Claim, IncidentWindow
 from src.services.log_analysis import build_claim_log_summaries
 
 
@@ -27,7 +27,7 @@ def test_claim_log_summary_uses_three_samples_each_side_and_precomputes_metrics(
     summary = build_claim_log_summaries(
         str(log),
         [Claim(claim_id="claim-1", text="Xe phanh", timestamp_s=0.21)],
-        timestamp_tolerance_s=0.011,
+        timestamp_tolerance_s=0.16,
     )[0]
 
     assert summary.sample_count == 7
@@ -36,11 +36,11 @@ def test_claim_log_summary_uses_three_samples_each_side_and_precomputes_metrics(
     assert summary.nearest_timestamp_s == 0.2
     assert summary.timestamp_distance_s == pytest.approx(0.01)
     assert summary.within_tolerance is True
-    assert summary.allowed_evidence_ids == ["log-row:0.2"]
+    assert summary.allowed_evidence_ids == [item.evidence_id for item in summary.evidence]
     assert summary.metrics["speed_kmh"]["start"] == 58
     assert summary.metrics["speed_kmh"]["end"] == 25
-    assert summary.metrics["speed_kmh"]["max_deceleration"] == pytest.approx(-55.555555, rel=1e-5)
-    assert summary.metrics["speed_kmh"]["max_deceleration_timestamp_s"] == 0.25
+    assert summary.metrics["speed_kmh"]["acceleration_outlier_count"] == 6
+    assert "max_deceleration" not in summary.metrics["speed_kmh"]
     assert summary.metrics["brake"]["strongest_increase"] == pytest.approx(0.4)
     assert summary.metrics["brake"]["strongest_increase_timestamp_s"] == 0.25
     assert summary.metrics["steer"]["max_change"] == pytest.approx(0.4)
@@ -64,7 +64,7 @@ def test_claim_log_summary_uses_configured_sample_radius(tmp_path) -> None:
     summary = build_claim_log_summaries(
         str(log),
         [Claim(claim_id="claim-1", text="Xe phanh", timestamp_s=0.21)],
-        timestamp_tolerance_s=0.011,
+        timestamp_tolerance_s=0.16,
         sample_radius=1,
     )[0]
 
@@ -127,7 +127,7 @@ def test_claim_log_summary_supports_ego_signal_column_names(tmp_path) -> None:
     summary = build_claim_log_summaries(
         str(log),
         [Claim(claim_id="claim-impact", text="Xe ego va chạm vật cản", timestamp_s=0.15)],
-        timestamp_tolerance_s=0.01,
+        timestamp_tolerance_s=0.2,
     )[0]
 
     assert summary.available_signals == ["timestamp", "speed_kmh", "throttle", "brake", "steer"]
@@ -141,7 +141,7 @@ def test_claim_log_summary_supports_ego_signal_column_names(tmp_path) -> None:
         for signal_metrics in summary.metrics.values()
         for value in signal_metrics.values()
     )
-    assert "Gia tốc tại 0.15s" in summary.summary
+    assert "Đã loại 4 mẫu gia tốc bất thường" in summary.summary
     assert "Trạng thái cuối cửa sổ: gần như đứng yên." in summary.summary
     assert "Xe đã **giảm tốc mạnh** trong cửa sổ." in summary.summary
     assert "Throttle: 1 → 0 => có sự nhả ga." in summary.summary
@@ -175,7 +175,8 @@ def test_claim_log_summary_formats_rule_derived_states_for_verification(tmp_path
     assert "Xe đã **giảm tốc mạnh** trong cửa sổ." in summary.summary
     assert "Brake: 0 → 1 => có sự ấn phanh trong cửa sổ." in summary.summary
     assert "Throttle: 0.6 → 0 => có sự nhả ga." in summary.summary
-    assert "Gia tốc tại 17.0s: -26.8981 m/s²" in summary.summary
+    assert "Gia tốc tại 17.0s: -26.8981 m/s²" not in summary.summary
+    assert "Đã loại 1 mẫu gia tốc bất thường" in summary.summary
     assert "Yaw thay đổi: 0.05°" in summary.summary
     assert "Steering tại 17.0s: 0.02 => xe có xu hướng rẽ phải." in summary.summary
     assert "| 17.0s | 0.65 |" in summary.summary
@@ -211,7 +212,7 @@ def test_claim_log_summary_formats_per_second_series_and_claim_acceleration(tmp_
             Claim(claim_id="claim-10", text="Xe giảm tốc", timestamp_s=10.0),
             Claim(claim_id="claim-10-5", text="Xe tiếp tục giảm tốc", timestamp_s=10.5),
         ],
-        timestamp_tolerance_s=0.1,
+        timestamp_tolerance_s=3.0,
         sample_radius=6,
     )
     summary = summaries[0]
@@ -219,13 +220,14 @@ def test_claim_log_summary_formats_per_second_series_and_claim_acceleration(tmp_
     assert summary.sample_count == 13
     assert "Log window: 7.0s → 13.0s" in summary.summary
     assert "Số mẫu log trong cửa sổ: 13" in summary.summary
-    assert "Số mẫu đại diện tối đa trong mỗi bảng: 4" in summary.summary
+    assert "Số dòng log model được phép dùng: 13" in summary.summary
     assert "brake [0, 1]: 0 là không phanh, 1 là đạp phanh hết cỡ;" in summary.summary
     assert "steering < 0 rẽ trái" in summary.summary
     assert "| Timestamp | Speed (km/h) |" in summary.summary
-    assert "| 7.0s | 28 |\n| 9.0s | 24 |\n| 11.0s | 10 |\n| 13.0s | 1.2 |" in summary.summary
+    for timestamp_s, speed, _, brake, _ in rows:
+        assert f"| {timestamp_s:.1f}s | {speed:g} |" in summary.summary
+        assert f"| {timestamp_s:.1f}s | {brake:g} |" in summary.summary
     assert "| Timestamp | Brake |" in summary.summary
-    assert "| 7.0s | 0.9 |\n| 9.0s | 0.58 |\n| 11.0s | 0.31 |\n| 13.0s | 0.17 |" in summary.summary
     assert "| Timestamp | Throttle |" in summary.summary
     assert "| Timestamp | Steering |" in summary.summary
     assert "Gia tốc tại 10.0s: -3.61111 m/s²" in summary.summary
@@ -235,7 +237,7 @@ def test_claim_log_summary_formats_per_second_series_and_claim_acceleration(tmp_
     assert summaries[1].metrics["speed_kmh"]["acceleration_at_claim"] == pytest.approx(-1.666667)
 
 
-def test_claim_log_summary_evenly_samples_a_subsecond_window(tmp_path) -> None:
+def test_claim_log_summary_includes_all_allowed_subsecond_rows(tmp_path) -> None:
     log = tmp_path / "subsecond-window.csv"
     rows = [
         (3.7 + index * 0.05, 20 + index, index / 20, index / 12, -0.3 + index * 0.05)
@@ -251,16 +253,100 @@ def test_claim_log_summary_evenly_samples_a_subsecond_window(tmp_path) -> None:
     summary = build_claim_log_summaries(
         str(log),
         [Claim(claim_id="claim-3", text="Xe thay đổi chuyển động", timestamp_s=4.0)],
-        timestamp_tolerance_s=0.1,
+        timestamp_tolerance_s=0.31,
         sample_radius=6,
     )[0]
 
     assert summary.sample_count == 13
     assert "Số mẫu log trong cửa sổ: 13" in summary.summary
-    assert "Số mẫu đại diện tối đa trong mỗi bảng: 4" in summary.summary
+    assert "Số dòng log model được phép dùng: 13" in summary.summary
     for value_label in ("Speed (km/h)", "Brake", "Throttle", "Steering"):
         table = summary.summary.split(f"| Timestamp | {value_label} |", 1)[1].split("\n\n", 1)[0]
-        assert "| 3.7s |" in table
-        assert "| 3.9s |" in table
-        assert "| 4.1s |" in table
-        assert "| 4.3s |" in table
+        for timestamp_s, *_ in rows:
+            formatted = f"{timestamp_s:.6f}".rstrip("0").rstrip(".")
+            if "." not in formatted:
+                formatted = f"{formatted}.0"
+            assert f"| {formatted}s |" in table
+
+
+def test_model_visible_rows_exactly_match_allowed_evidence(tmp_path) -> None:
+    log = tmp_path / "claim-window.csv"
+    log.write_text(
+        "timestamp,speed_kmh,brake,steer\n"
+        "7.6,22,0,-0.2\n"
+        "9.2,22,0,-0.2\n"
+        "9.6,22,0,-0.2\n"
+        "10.0,22,0,-0.2\n"
+        "10.4,22,0,-0.2\n"
+        "10.8,22,0,-0.2\n"
+        "12.4,22,0,-0.2\n",
+        encoding="utf-8",
+    )
+
+    summary = build_claim_log_summaries(
+        str(log),
+        [Claim(claim_id="claim-10", text="Xe đang rẽ", timestamp_s=10.0)],
+        timestamp_tolerance_s=0.5,
+        sample_radius=10,
+    )[0]
+
+    visible_ids = [item.evidence_id for item in summary.evidence]
+    assert visible_ids == ["log-row:9.6", "log-row:10", "log-row:10.4"]
+    assert summary.allowed_evidence_ids == visible_ids
+    assert summary.sample_start_s == 9.6
+    assert summary.sample_end_s == 10.4
+    for timestamp_s in (9.6, 10.0, 10.4):
+        assert f"| {timestamp_s:.1f}s |" in summary.summary
+    assert "7.6s" not in summary.summary
+    assert "12.4s" not in summary.summary
+
+
+def test_claim_evidence_is_clipped_to_incident_window(tmp_path) -> None:
+    log = tmp_path / "video-end.csv"
+    log.write_text(
+        "timestamp,speed_kmh,brake\n"
+        "44.70,10,0\n"
+        "44.75,10,0\n"
+        "44.80,10,0\n"
+        "44.85,10,0\n"
+        "44.90,10,0\n",
+        encoding="utf-8",
+    )
+
+    summary = build_claim_log_summaries(
+        str(log),
+        [Claim(claim_id="claim-end", text="Video kết thúc", timestamp_s=44.72)],
+        timestamp_tolerance_s=0.3,
+        sample_radius=10,
+        incident_window=IncidentWindow(t_start=40.0, t0=44.0, t_end=44.73),
+    )[0]
+
+    assert [item.timestamp_s for item in summary.evidence] == [44.7]
+    assert summary.allowed_evidence_ids == ["log-row:44.7"]
+    assert summary.sample_end_s == 44.7
+    assert "44.75" not in summary.summary
+
+
+def test_extreme_acceleration_is_filtered_from_claim_summary(tmp_path) -> None:
+    log = tmp_path / "acceleration-outlier.csv"
+    log.write_text(
+        "timestamp,speed_kmh,brake\n"
+        "0.0,20,0\n"
+        "0.1,10,0\n"
+        "0.2,10,0\n",
+        encoding="utf-8",
+    )
+
+    summary = build_claim_log_summaries(
+        str(log),
+        [Claim(claim_id="claim-no-crash", text="Xe chạy bình thường", timestamp_s=0.1)],
+        timestamp_tolerance_s=0.11,
+        sample_radius=3,
+    )[0]
+
+    speed = summary.metrics["speed_kmh"]
+    assert speed["acceleration_outlier_count"] == 1
+    assert "acceleration_at_claim" not in speed
+    assert speed["max_deceleration"] == 0
+    assert "-27.777" not in summary.summary
+    assert "Đã loại 1 mẫu gia tốc bất thường" in summary.summary

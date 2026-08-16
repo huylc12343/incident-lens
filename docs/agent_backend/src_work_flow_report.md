@@ -157,8 +157,7 @@ Dùng structured output `VideoMemory` (Pydantic model):
   "incident_window": { "t_start": 2.0, "t0": 4.5, "t_end": 7.0 },
   "timeline": [{"timestamp_s": 4.5, "description": "Va chạm xảy ra.", "evidence_ids": ["frame-000009"]}],
   "claims": [{"claim_id": "C1", "text": "Xe đạp phanh mạnh", "timestamp_s": 3.0, "evidence_ids": ["frame-000006"], "verification_status": "unverified"}],
-  "observations": [], "tracked_entities": [], "uncertainties": [], "evidence": [],
-  "source_frame_ids": [], "revision": 1, "analysis_mode": "native_video", "remote_media_handles": []
+  "revision": 1, "analysis_mode": "native_video", "remote_media_handles": []
 }
 ```
 

@@ -14,7 +14,6 @@ from src.models.incidents import (
     NativeVideoAnalysisRequest,
     PromptEnvelope,
     SamplingMetadata,
-    TimelineEvent,
     TimestampedFrame,
     TimestampedFramesAnalysisRequest,
     VerificationStatus,
@@ -37,12 +36,11 @@ class VideoMemoryError(RuntimeError):
 
 @dataclass(frozen=True)
 class VideoMemoryLimits:
-    max_entities: int = 50
     max_timeline_events: int = 6
     max_claims: int = 100
 
     def __post_init__(self) -> None:
-        if min(self.max_entities, self.max_timeline_events, self.max_claims) <= 0:
+        if min(self.max_timeline_events, self.max_claims) <= 0:
             raise ValueError("VideoMemory limits must be positive")
 
 
@@ -308,16 +306,14 @@ def validate_video_memory(
         raise VideoMemoryError("VLM_TIMESTAMP_OUT_OF_RANGE", "incident window exceeds source duration")
     if expected_analysis_mode is not None and memory.analysis_mode != expected_analysis_mode:
         raise VideoMemoryError("VLM_ANALYSIS_MODE_INVALID", "analysis mode does not match workflow path")
-    if len(memory.tracked_entities) > limits.max_entities:
-        raise VideoMemoryError("VLM_ENTITY_LIMIT_EXCEEDED", "VideoMemory contains too many entities")
     if len(memory.timeline) > limits.max_timeline_events:
         raise VideoMemoryError("VLM_TIMELINE_LIMIT_EXCEEDED", "VideoMemory contains too many timeline events")
     if len(memory.claims) > limits.max_claims:
         raise VideoMemoryError("VLM_CLAIM_LIMIT_EXCEEDED", "VideoMemory contains too many claims")
 
-    _require_unique([item.entity_id for item in memory.tracked_entities], "entity IDs")
     _require_unique([item.claim_id for item in memory.claims], "claim IDs")
-    evidence_ids = [evidence.evidence_id for claim in memory.claims for evidence in claim.evidence]
+    claim_evidence_ids = [evidence.evidence_id for claim in memory.claims for evidence in claim.evidence]
+    timeline_evidence_ids = [evidence_id for event in memory.timeline for evidence_id in event.evidence_ids]
     if require_claim_evidence:
         for claim in memory.claims:
             _require_unique(
@@ -326,6 +322,8 @@ def validate_video_memory(
             )
         if any(not claim.evidence for claim in memory.claims):
             raise VideoMemoryError("VLM_CLAIM_EVIDENCE_MISSING", "every claim must contain frame evidence")
+        for index, event in enumerate(memory.timeline):
+            _require_unique(event.evidence_ids, f"evidence IDs in timeline event {index}")
 
     for timestamp in [
         *(item for item in [memory.representative_timestamp_s] if item is not None),
@@ -335,16 +333,6 @@ def validate_video_memory(
     ]:
         if timestamp > source_duration_s:
             raise VideoMemoryError("VLM_TIMESTAMP_OUT_OF_RANGE", "VideoMemory timestamp exceeds source duration")
-    semantic_timestamps = [
-        *(item.timestamp_s for item in memory.timeline),
-        *(item.timestamp_s for item in memory.claims if item.timestamp_s is not None),
-        *(evidence.timestamp_s for claim in memory.claims for evidence in claim.evidence),
-    ]
-    if any(timestamp < window.t_start or timestamp > window.t_end for timestamp in semantic_timestamps):
-        raise VideoMemoryError(
-            "VLM_TIMESTAMP_OUTSIDE_INCIDENT_WINDOW",
-            "timeline, claim, and evidence timestamps must stay inside the incident window",
-        )
     if memory.representative_timestamp_s is not None and not (
         window.t_start <= memory.representative_timestamp_s <= window.t_end
     ):
@@ -354,8 +342,8 @@ def validate_video_memory(
         )
 
     if require_claim_evidence:
-        _validate_evidence_references(memory)
-        if source_frame_ids is not None and not set(evidence_ids).issubset(source_frame_ids):
+        referenced_frame_ids = {*claim_evidence_ids, *timeline_evidence_ids}
+        if source_frame_ids is not None and not referenced_frame_ids.issubset(source_frame_ids):
             raise VideoMemoryError("VLM_SOURCE_FRAME_INVALID", "VideoMemory references frames outside its input")
     return memory
 
@@ -393,7 +381,6 @@ def merge_video_memory_patch(
         )
     if any(not claim.evidence for claim in merged.claims):
         raise VideoMemoryError("VLM_CLAIM_EVIDENCE_MISSING", "every claim must contain frame evidence")
-    _validate_evidence_references(merged)
     return merged
 
 
@@ -425,13 +412,6 @@ def merge_memory_only_patch(
     for claim_id, claim in patch_claims.items():
         if claim_id not in requested_target_claim_ids:
             raise VideoMemoryError("VLM_PATCH_TARGET_MISMATCH", "patch modifies a claim outside requested targets")
-        if claim.timestamp_s is not None and not (
-            memory.incident_window.t_start <= claim.timestamp_s <= memory.incident_window.t_end
-        ):
-            raise VideoMemoryError(
-                "VLM_TIMESTAMP_OUTSIDE_INCIDENT_WINDOW",
-                "memory-only claim timestamp must stay inside the incident window",
-            )
         unknown_evidence = [
             evidence.evidence_id for evidence in claim.evidence if evidence.evidence_id not in existing_evidence
         ]
@@ -509,11 +489,10 @@ def reconcile_native_video_evidence(
     frames: list[TimestampedFrame],
 ) -> VideoMemory:
     """Replace provider-invented evidence IDs with sampled frame artifacts."""
-    if not memory.claims:
-        timeline = [event.model_copy(update={"evidence_ids": []}) for event in memory.timeline]
-        return memory.model_copy(update={"timeline": timeline})
     if not frames:
-        raise VideoMemoryError("VLM_NATIVE_EVIDENCE_FRAMES_MISSING", "native-video claims require sampled frames")
+        if not memory.claims and not memory.timeline:
+            return memory
+        raise VideoMemoryError("VLM_NATIVE_EVIDENCE_FRAMES_MISSING", "native-video events require sampled frames")
 
     frames_by_id = {frame.frame_id: frame for frame in frames}
     if len(frames_by_id) != len(frames):
@@ -535,7 +514,6 @@ def reconcile_native_video_evidence(
             )
         return frame
 
-    claimed_ids: set[str] = set()
     claims = []
     for claim in memory.claims:
         if claim.timestamp_s is None:
@@ -544,7 +522,6 @@ def reconcile_native_video_evidence(
                 f"claim {claim.claim_id} cannot be mapped without a timestamp",
             )
         frame = nearest_frame(claim.timestamp_s)
-        claimed_ids.add(frame.frame_id)
         claims.append(
             claim.model_copy(
                 update={
@@ -557,25 +534,9 @@ def reconcile_native_video_evidence(
     timeline = []
     for event in memory.timeline:
         frame = nearest_frame(event.timestamp_s)
-        if frame.frame_id not in claimed_ids:
-            target = min(
-                range(len(claims)),
-                key=lambda index: abs((claims[index].timestamp_s or event.timestamp_s) - event.timestamp_s),
-            )
-            claims[target] = claims[target].model_copy(
-                update={
-                    "evidence": [
-                        *claims[target].evidence,
-                        EvidenceReference(evidence_id=frame.frame_id, timestamp_s=frame.timestamp_s),
-                    ]
-                }
-            )
-            claimed_ids.add(frame.frame_id)
         timeline.append(event.model_copy(update={"evidence_ids": [frame.frame_id]}))
 
-    reconciled = memory.model_copy(update={"claims": claims, "timeline": timeline})
-    _validate_evidence_references(reconciled)
-    return reconciled
+    return memory.model_copy(update={"claims": claims, "timeline": timeline})
 
 
 def reconcile_video_memory_patch_evidence(
@@ -584,61 +545,22 @@ def reconcile_video_memory_patch_evidence(
     *,
     fallback_timestamp_s: float,
 ) -> VideoMemoryPatch:
-    """Canonicalize frame evidence aliases returned by a focused reanalysis call."""
+    """Map each reanalyzed claim timestamp to one canonical frame."""
     if patch.claims and not frames:
         raise VideoMemoryError("VLM_NATIVE_EVIDENCE_FRAMES_MISSING", "reanalysis claims require sampled frames")
-    frames_by_id = {frame.frame_id: frame for frame in frames}
-    evidence_by_id = {item.evidence_id: item for claim in patch.claims for item in claim.evidence}
-    items = patch.claims
-    reference_timestamps: dict[str, list[float]] = {}
-    for item in items:
-        if item.timestamp_s is None:
-            continue
-        for evidence_id in [evidence.evidence_id for evidence in item.evidence]:
-            reference_timestamps.setdefault(evidence_id, []).append(item.timestamp_s)
-
-    all_ids = set(evidence_by_id)
-    id_mapping: dict[str, str] = {}
-    for evidence_id in all_ids:
-        if evidence_id in frames_by_id:
-            canonical_id = evidence_id
-        else:
-            evidence = evidence_by_id.get(evidence_id)
-            timestamp_s = evidence.timestamp_s if evidence is not None else None
-            if timestamp_s is None and reference_timestamps.get(evidence_id):
-                timestamp_s = sum(reference_timestamps[evidence_id]) / len(reference_timestamps[evidence_id])
-            target_timestamp_s = timestamp_s if timestamp_s is not None else fallback_timestamp_s
-            canonical_id = min(frames, key=lambda item: abs(item.timestamp_s - target_timestamp_s)).frame_id
-        id_mapping[evidence_id] = canonical_id
-
-    def canonical_ids(values: list[str]) -> list[str]:
-        return list(dict.fromkeys(id_mapping.get(value, value) for value in values if value in id_mapping))
-
-    claims = [
-        claim.model_copy(
-            update={
-                "evidence": [
-                    EvidenceReference(evidence_id=evidence_id, timestamp_s=frames_by_id[evidence_id].timestamp_s)
-                    for evidence_id in (
-                        canonical_ids([item.evidence_id for item in claim.evidence])
-                        or (
-                            [
-                                min(
-                                    frames,
-                                    key=lambda frame: abs(
-                                        frame.timestamp_s
-                                        - (claim.timestamp_s if claim.timestamp_s is not None else fallback_timestamp_s)
-                                    ),
-                                ).frame_id
-                            ]
-                        )
-                    )
-                ],
-                "verification_status": VerificationStatus.UNVERIFIED,
-            }
+    claims = []
+    for claim in patch.claims:
+        target_timestamp_s = claim.timestamp_s if claim.timestamp_s is not None else fallback_timestamp_s
+        frame = min(frames, key=lambda item: abs(item.timestamp_s - target_timestamp_s))
+        claims.append(
+            claim.model_copy(
+                update={
+                    "timestamp_s": target_timestamp_s,
+                    "evidence": [EvidenceReference(evidence_id=frame.frame_id, timestamp_s=frame.timestamp_s)],
+                    "verification_status": VerificationStatus.UNVERIFIED,
+                }
+            )
         )
-        for claim in patch.claims
-    ]
     return patch.model_copy(update={"claims": claims})
 
 
@@ -674,83 +596,35 @@ def _representative_frames(frames: list[TimestampedFrame], limit: int) -> list[T
 
 
 def _reconcile_frame_evidence(memory: VideoMemory, frames: list[TimestampedFrame]) -> VideoMemory:
-    """Canonicalize evidence to supplied frames and attach every timeline reference to a claim."""
-    frames_by_id = {frame.frame_id: frame for frame in frames}
-    evidence_by_id = {item.evidence_id: item for claim in memory.claims for item in claim.evidence}
-    reference_timestamps: dict[str, list[float]] = {}
-    items = [*memory.timeline, *memory.claims]
-    for item in items:
-        timestamp_s = getattr(item, "timestamp_s", None)
-        if timestamp_s is None:
-            continue
-        evidence_ids = (
-            item.evidence_ids if isinstance(item, TimelineEvent) else [evidence.evidence_id for evidence in item.evidence]
-        )
-        for evidence_id in evidence_ids:
-            reference_timestamps.setdefault(evidence_id, []).append(timestamp_s)
+    """Map timeline and claim timestamps independently to canonical frames."""
+    if (memory.timeline or memory.claims) and not frames:
+        raise VideoMemoryError("VLM_EVIDENCE_FRAMES_MISSING", "video events require source frames")
 
-    all_ids = {
-        *evidence_by_id,
-        *(evidence_id for item in memory.timeline for evidence_id in item.evidence_ids),
-    }
-    id_mapping: dict[str, str] = {}
-    fallback_timestamp_s = (
-        memory.representative_timestamp_s
-        if memory.representative_timestamp_s is not None
-        else memory.incident_window.t0
-    )
-    for evidence_id in all_ids:
-        if evidence_id in frames_by_id:
-            canonical_id = evidence_id
-        else:
-            evidence = evidence_by_id.get(evidence_id)
-            timestamp_s = evidence.timestamp_s if evidence is not None else None
-            if timestamp_s is None and reference_timestamps.get(evidence_id):
-                timestamp_s = sum(reference_timestamps[evidence_id]) / len(reference_timestamps[evidence_id])
-            target_timestamp_s = timestamp_s if timestamp_s is not None else fallback_timestamp_s
-            frame = min(frames, key=lambda item: abs(item.timestamp_s - target_timestamp_s))
-            canonical_id = frame.frame_id
-        id_mapping[evidence_id] = canonical_id
+    def nearest_frame(timestamp_s: float) -> TimestampedFrame:
+        return min(frames, key=lambda item: abs(item.timestamp_s - timestamp_s))
 
-    def canonical_ids(values: list[str]) -> list[str]:
-        return list(dict.fromkeys(id_mapping[value] for value in values if value in id_mapping))
+    timeline = []
+    for event in memory.timeline:
+        frame = nearest_frame(event.timestamp_s)
+        timeline.append(event.model_copy(update={"evidence_ids": [frame.frame_id]}))
 
-    timeline = [item.model_copy(update={"evidence_ids": canonical_ids(item.evidence_ids)}) for item in memory.timeline]
-    claims = [
-        claim.model_copy(
-            update={
-                "evidence": [
-                    EvidenceReference(evidence_id=evidence_id, timestamp_s=frames_by_id[evidence_id].timestamp_s)
-                    for evidence_id in canonical_ids([item.evidence_id for item in claim.evidence])
-                ]
-            }
-        )
-        for claim in memory.claims
-    ]
-    claimed_ids = {evidence.evidence_id for claim in claims for evidence in claim.evidence}
-    for event in timeline:
-        for evidence_id in event.evidence_ids:
-            if evidence_id in claimed_ids or not claims:
-                continue
-            target = min(
-                range(len(claims)),
-                key=lambda index: abs((claims[index].timestamp_s or event.timestamp_s) - event.timestamp_s),
+    claims = []
+    for claim in memory.claims:
+        if claim.timestamp_s is None:
+            raise VideoMemoryError(
+                "VLM_CLAIM_TIMESTAMP_MISSING",
+                f"claim {claim.claim_id} cannot be mapped without a timestamp",
             )
-            claims[target] = claims[target].model_copy(
+        frame = nearest_frame(claim.timestamp_s)
+        claims.append(
+            claim.model_copy(
                 update={
-                    "evidence": [
-                        *claims[target].evidence,
-                        EvidenceReference(evidence_id=evidence_id, timestamp_s=frames_by_id[evidence_id].timestamp_s),
-                    ]
+                    "evidence": [EvidenceReference(evidence_id=frame.frame_id, timestamp_s=frame.timestamp_s)]
                 }
             )
-            claimed_ids.add(evidence_id)
-    return memory.model_copy(
-        update={
-            "timeline": timeline,
-            "claims": claims,
-        }
-    )
+        )
+
+    return memory.model_copy(update={"timeline": timeline, "claims": claims})
 
 
 def _batch_prompt(
@@ -810,17 +684,6 @@ def _manifest_fps(manifest: VideoSequenceManifest) -> float:
 def _require_unique(values: list[str], label: str) -> None:
     if len(values) != len(set(values)):
         raise VideoMemoryError("VLM_DUPLICATE_ID", f"VideoMemory contains duplicate {label}")
-
-
-def _validate_evidence_references(memory: VideoMemory) -> None:
-    known_evidence_ids = {evidence.evidence_id for claim in memory.claims for evidence in claim.evidence}
-    referenced_evidence_ids = {
-        evidence_id
-        for item in memory.timeline
-        for evidence_id in item.evidence_ids
-    }
-    if not referenced_evidence_ids.issubset(known_evidence_ids):
-        raise VideoMemoryError("VLM_EVIDENCE_REFERENCE_INVALID", "VideoMemory references unknown evidence IDs")
 
 
 def _merge_by_id(

@@ -34,7 +34,7 @@ from src.services.video_memory import (
 )
 
 
-def test_reconciliation_attaches_missing_timeline_evidence_to_a_claim() -> None:
+def test_timestamped_reconciliation_maps_timeline_and_claim_independently() -> None:
     frames = [
         TimestampedFrame(
             frame_id=f"frame-{index:06d}",
@@ -49,13 +49,13 @@ def test_reconciliation_attaches_missing_timeline_evidence_to_a_claim() -> None:
         global_scene="Đường giao thông.",
         incident_window=IncidentWindow(t_start=0, t0=1, t_end=2),
         analysis_mode=AnalysisMode.SINGLE_REQUEST,
-        timeline=[TimelineEvent(timestamp_s=1, description="Diễn biến chính.", evidence_ids=["frame-000001"])],
+        timeline=[TimelineEvent(timestamp_s=1, description="Diễn biến chính.", evidence_ids=["1.0"])],
         claims=[
             Claim(
                 claim_id="claim-1",
                 text="Có diễn biến chính.",
                 timestamp_s=0,
-                evidence=[EvidenceReference(evidence_id="frame-000000", timestamp_s=0)],
+                evidence=[EvidenceReference(evidence_id="0.0", timestamp_s=1)],
             )
         ],
     )
@@ -69,12 +69,11 @@ def test_reconciliation_attaches_missing_timeline_evidence_to_a_claim() -> None:
 
     assert [evidence.evidence_id for evidence in reconciled.claims[0].evidence] == [
         "frame-000000",
-        "frame-000001",
     ]
     assert reconciled.timeline[0].evidence_ids == ["frame-000001"]
 
 
-def test_native_video_reconciliation_attaches_timeline_evidence_by_timestamp() -> None:
+def test_native_video_reconciliation_maps_timeline_and_claim_independently() -> None:
     frames = [
         TimestampedFrame(
             frame_id=f"frame-{index:06d}",
@@ -94,8 +93,8 @@ def test_native_video_reconciliation_attaches_timeline_evidence_by_timestamp() -
             Claim(
                 claim_id="claim-1",
                 text="Xe đổi hướng.",
-                timestamp_s=2,
-                evidence=[EvidenceReference(evidence_id="frame-000006", timestamp_s=1.5)],
+                timestamp_s=1,
+                evidence=[EvidenceReference(evidence_id="frame-000006", timestamp_s=2)],
                 verification_status=VerificationStatus.SUPPORTED,
             )
         ],
@@ -110,7 +109,7 @@ def test_native_video_reconciliation_attaches_timeline_evidence_by_timestamp() -
     )
 
     evidence_ids = [item.evidence_id for item in reconciled.claims[0].evidence]
-    assert evidence_ids == ["frame-000002"]
+    assert evidence_ids == ["frame-000001"]
     assert reconciled.timeline[0].evidence_ids == ["frame-000002"]
     assert reconciled.claims[0].verification_status == VerificationStatus.UNVERIFIED
     assert set(evidence_ids).issubset({frame.frame_id for frame in frames})
@@ -271,8 +270,8 @@ def test_native_reanalysis_maps_patch_evidence_to_real_frames() -> None:
             Claim(
                 claim_id="claim-1",
                 text="Xe giảm tốc.",
-                timestamp_s=1,
-                evidence=[EvidenceReference(evidence_id="frame_7", timestamp_s=1)],
+                timestamp_s=2,
+                evidence=[EvidenceReference(evidence_id="frame_7", timestamp_s=0)],
                 verification_status=VerificationStatus.SUPPORTED,
             )
         ],
@@ -283,7 +282,7 @@ def test_native_reanalysis_maps_patch_evidence_to_real_frames() -> None:
     merged = merge_video_memory_patch(memory, patch)
 
     assert merged.timeline[0].evidence_ids == ["frame-000001"]
-    assert [item.evidence_id for item in merged.claims[0].evidence] == ["frame-000001"]
+    assert [item.evidence_id for item in merged.claims[0].evidence] == ["frame-000002"]
     assert merged.claims[0].verification_status == VerificationStatus.UNVERIFIED
 
 
@@ -325,11 +324,18 @@ def test_native_evidence_rejects_timestamp_outside_sampled_frames() -> None:
     assert exc_info.value.code == "VLM_NATIVE_EVIDENCE_MAPPING_FAILED"
 
 
-def test_validation_rejects_semantic_timestamp_outside_incident_window() -> None:
+def test_validation_accepts_semantic_timestamps_outside_incident_window_within_video() -> None:
     memory = VideoMemory(
         global_scene="Đường giao thông.",
         incident_window=IncidentWindow(t_start=2, t0=3, t_end=4),
         analysis_mode=AnalysisMode.SINGLE_REQUEST,
+        timeline=[
+            TimelineEvent(
+                timestamp_s=1,
+                description="Xe bắt đầu di chuyển.",
+                evidence_ids=["frame-000001"],
+            )
+        ],
         claims=[
             Claim(
                 claim_id="claim-1",
@@ -340,7 +346,8 @@ def test_validation_rejects_semantic_timestamp_outside_incident_window() -> None
         ],
     )
 
-    with pytest.raises(VideoMemoryError) as exc_info:
-        validate_video_memory(memory, source_duration_s=5, source_frame_ids={"frame-000001"})
+    result = validate_video_memory(memory, source_duration_s=5, source_frame_ids={"frame-000001"})
 
-    assert exc_info.value.code == "VLM_TIMESTAMP_OUTSIDE_INCIDENT_WINDOW"
+    assert result.incident_window == IncidentWindow(t_start=2, t0=3, t_end=4)
+    assert result.timeline[0].timestamp_s == 1
+    assert result.claims[0].timestamp_s == 1.5

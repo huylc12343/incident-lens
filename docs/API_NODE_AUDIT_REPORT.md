@@ -160,12 +160,6 @@ Tóm tắt structured output raw:
   "incident_window": {"t_start": 5.0, "t0": 7.0, "t_end": 17.0},
   "representative_timestamp_s": 7.0,
   "analysis_mode": "native_video (backend default injection)",
-  "tracked_entities": [
-    "ego_vehicle",
-    "truck",
-    "oncoming_vehicle_1",
-    "oncoming_vehicle_2"
-  ],
   "timeline": [
     {"timestamp_s": 5.0, "evidence_ids": ["frame_5"]},
     {"timestamp_s": 6.0, "evidence_ids": ["frame_6"]},

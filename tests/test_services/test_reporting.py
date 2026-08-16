@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.models.incidents import (
+    AccidentType,
     AnalysisMode,
     Claim,
     EvidenceReference,
@@ -39,6 +40,7 @@ def _request() -> ReportRequest:
 
 def _narrative() -> ReportModelOutput:
     return ReportModelOutput(
+        type_of_accident=AccidentType.REAR_END_COLLISION,
         timeline="The event occurred near 2 seconds.",
         video_observations="The vehicle appears to brake.",
         hypothesized_causes="A possible cause remains unconfirmed.",
@@ -114,6 +116,34 @@ async def test_memory_reanalysis_uses_text_only_structured_request() -> None:
 async def test_report_rejects_backend_owned_fields() -> None:
     payload = _narrative().model_dump()
     payload["summary"] = "Model must not own this field"
+    client = SimpleNamespace(
+        responses=SimpleNamespace(parse=AsyncMock(return_value=SimpleNamespace(output_parsed=payload)))
+    )
+
+    with pytest.raises(ReportServiceError) as exc_info:
+        await OpenAIReportService(model="gpt-test", client=client).build_narrative(_request())
+
+    assert exc_info.value.code == "REPORT_STRUCTURED_OUTPUT_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_report_rejects_accident_type_outside_taxonomy() -> None:
+    payload = _narrative().model_dump(mode="json")
+    payload["type_of_accident"] = "vehicle_collision"
+    client = SimpleNamespace(
+        responses=SimpleNamespace(parse=AsyncMock(return_value=SimpleNamespace(output_parsed=payload)))
+    )
+
+    with pytest.raises(ReportServiceError) as exc_info:
+        await OpenAIReportService(model="gpt-test", client=client).build_narrative(_request())
+
+    assert exc_info.value.code == "REPORT_STRUCTURED_OUTPUT_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_report_requires_accident_type() -> None:
+    payload = _narrative().model_dump(mode="json")
+    del payload["type_of_accident"]
     client = SimpleNamespace(
         responses=SimpleNamespace(parse=AsyncMock(return_value=SimpleNamespace(output_parsed=payload)))
     )

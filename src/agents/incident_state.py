@@ -24,6 +24,7 @@ class IncidentState(TypedDict, total=False):
     video_uri: str
     log_uri: str | None
     analysis_prompt: str
+    video_duration_s: float
     metadata: dict[str, Any]
     status: Literal[
         "queued",

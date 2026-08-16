@@ -333,6 +333,11 @@ def _render_unified_report(
         _render_claim_details(snapshot.get("claims"), verification)
 
         st.markdown("### 5. Nhận định tổng quát (LLM)")
+        accident_type = report.get("type_of_accident")
+        st.markdown(
+            f"**Loại tai nạn:** {_accident_type_label(accident_type)} "
+            f"(`{accident_type}`)" if accident_type else "**Loại tai nạn:** Chưa phân loại"
+        )
         observations = report.get("video_observations")
         if isinstance(observations, dict) and observations.get("narrative"):
             st.write(observations["narrative"])
@@ -545,6 +550,20 @@ def _verification_status_label(value: Any) -> str:
         "contradicted": "Mâu thuẫn với log",
         "unverified": "Chưa xác thực",
     }.get(value, str(value or "—"))
+
+
+def _accident_type_label(value: Any) -> str:
+    return {
+        "rear_end_collision": "Đâm xe phía trước",
+        "crossing_collision": "Va chạm xe cắt ngang",
+        "side_collision": "Va chạm bên hông / chuyển làn",
+        "head_on_collision": "Va chạm đối đầu",
+        "pedestrian_collision": "Va chạm người đi bộ",
+        "static_object_collision": "Va chạm vật thể tĩnh",
+        "roadside_collision": "Va chạm môi trường ven đường / rời đường",
+        "no_incident": "Không có tai nạn của ego",
+        "other_unknown": "Có tai nạn nhưng chưa xác định được loại",
+    }.get(value, "Chưa phân loại")
 
 
 def _claim_status_rows(claims: Any, verification: Any = None) -> list[dict[str, Any]]:

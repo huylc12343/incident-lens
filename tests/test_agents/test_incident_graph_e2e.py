@@ -10,6 +10,7 @@ import src.main as main_module
 from src.config import Settings
 from src.models.api import IncidentCreateRequest, ReviewDecision
 from src.models.incidents import (
+    AccidentType,
     AnalysisMode,
     Claim,
     ClaimVerification,
@@ -30,6 +31,7 @@ def _client(*responses: object) -> SimpleNamespace:
 
 def _narrative(label: str = "Initial") -> ReportModelOutput:
     return ReportModelOutput(
+        type_of_accident=AccidentType.OTHER_UNKNOWN,
         timeline=f"{label} timeline",
         video_observations=f"{label} observations",
         hypothesized_causes=f"{label} hypothesis",

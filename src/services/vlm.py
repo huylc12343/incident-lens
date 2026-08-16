@@ -36,6 +36,7 @@ from src.models.incidents import (
     VLMInputMode,
     VLMProvider,
 )
+from src.services.langsmith_tracing import LangSmithTracing
 from src.services.model_observability import ModelActivityRegistry, ModelRequestBudgetError
 
 logger = logging.getLogger(__name__)
@@ -66,12 +67,23 @@ class OpenAIVLMService:
         temperature: float = 0.0,
         max_images_per_request: int = 120,
         observability: ModelActivityRegistry | None = None,
+        tracing: LangSmithTracing | None = None,
     ) -> None:
         if not model.strip():
             raise ValueError("model must not be blank")
         if timeout_s <= 0 or max_images_per_request <= 0:
             raise ValueError("timeout and image limit must be positive")
-        self._client = client if client is not None else AsyncOpenAI(api_key=api_key)
+        provider_client = client if client is not None else AsyncOpenAI(api_key=api_key)
+        self._client = (
+            tracing.wrap_openai_client(
+                provider_client,
+                name="OpenAI VLM",
+                provider="openai",
+                operation="vlm",
+            )
+            if tracing is not None
+            else provider_client
+        )
         self._model = model
         self._timeout_s = timeout_s
         self._temperature = temperature
@@ -97,7 +109,7 @@ class OpenAIVLMService:
             "OPENAI_VIDEO_ANALYSIS_FAILED",
             incident_id=request.incident_id,
             operation="video_analysis",
-            description="Analyze the complete video and produce structured VideoMemory.",
+            description="Phân tích toàn bộ video và tạo VideoMemory có cấu trúc.",
             metadata={"image_count": len(request.manifest.frames), "input_mode": "timestamped_frames"},
         )
 
@@ -118,7 +130,7 @@ class OpenAIVLMService:
             "OPENAI_REANALYSIS_FAILED",
             incident_id=request.incident_id,
             operation="claim_reanalysis",
-            description="Re-analyze selected claims within the incident window.",
+            description="Phân tích lại các claim được chọn trong cửa sổ video liên quan.",
             metadata={
                 "image_count": len(request.frame_manifest.frames),
                 "target_claim_ids": request.target_claim_ids,
@@ -284,6 +296,7 @@ class QwenNativeVideoVLMService:
         max_structured_output_retries: int = 0,
         max_network_retries: int = 0,
         observability: ModelActivityRegistry | None = None,
+        tracing: LangSmithTracing | None = None,
     ) -> None:
         if not model.strip() or not base_url.strip():
             raise ValueError("model and base_url must not be blank")
@@ -293,7 +306,17 @@ class QwenNativeVideoVLMService:
             raise ValueError("Qwen3-VL-Flash temperature must be 0")
         if min(max_structured_output_retries, max_network_retries) < 0:
             raise ValueError("structured output and network retries must be non-negative")
-        self._client = client if client is not None else AsyncOpenAI(api_key=api_key, base_url=base_url)
+        provider_client = client if client is not None else AsyncOpenAI(api_key=api_key, base_url=base_url)
+        self._client = (
+            tracing.wrap_openai_client(
+                provider_client,
+                name="Qwen VLM",
+                provider="qwen",
+                operation="vlm",
+            )
+            if tracing is not None
+            else provider_client
+        )
         self._model = model
         self._artifact_dir = Path(artifact_dir).resolve()
         self._artifact_url_base = artifact_url_base.rstrip("/")
@@ -318,7 +341,7 @@ class QwenNativeVideoVLMService:
         memory = await self._generate(
             incident_id=request.incident_id,
             operation="video_analysis",
-            description="Analyze native video with Qwen3-VL-Flash and produce structured VideoMemory.",
+            description="Phân tích native video bằng Qwen3-VL-Flash và tạo VideoMemory có cấu trúc.",
             video_uri=request.normalized_video_uri,
             system_prompt=request.prompt.text,
             user_prompt=_prompt_context_text(request.prompt.context),
@@ -334,7 +357,7 @@ class QwenNativeVideoVLMService:
         patch = await self._generate(
             incident_id=request.incident_id,
             operation="claim_reanalysis",
-            description="Re-analyze selected claims with Qwen3-VL-Flash.",
+            description="Phân tích lại các claim được chọn bằng Qwen3-VL-Flash.",
             video_uri=request.normalized_video_uri,
             system_prompt=request.prompt.text,
             user_prompt=_prompt_context_text(request.prompt.context),
@@ -343,7 +366,11 @@ class QwenNativeVideoVLMService:
                 "target_claim_ids": request.target_claim_ids,
                 "base_revision": request.current_memory.revision,
             },
-            timestamp_bounds=(request.incident_window.t_start, request.incident_window.t_end),
+            timestamp_bounds=(
+                (0.0, request.source_duration_s)
+                if request.source_duration_s is not None
+                else (request.incident_window.t_start, request.incident_window.t_end)
+            ),
         )
         _validate_patch_targets(patch, request.target_claim_ids)
         return patch
@@ -367,8 +394,14 @@ class QwenNativeVideoVLMService:
         activity_id = None
         response = None
         try:
+            schema = output_model.model_json_schema()
+            if output_model in {VideoMemory, VideoMemoryPatch}:
+                definitions = schema.get("$defs", {})
+                definitions.get("Claim", {}).get("properties", {}).pop("evidence", None)
+                definitions.get("TimelineEvent", {}).get("properties", {}).pop("evidence_ids", None)
+                definitions.pop("EvidenceReference", None)
             output_schema = json.dumps(
-                output_model.model_json_schema(),
+                schema,
                 ensure_ascii=False,
                 separators=(",", ":"),
             )
@@ -384,8 +417,8 @@ class QwenNativeVideoVLMService:
                     f"- Video bắt đầu tại {timestamp_bounds[0]:g}s và kết thúc tại "
                     f"{timestamp_bounds[1]:g}s; không được trả timestamp ngoài khoảng này.\n"
                     "- Phải có t_start <= t0 <= t_end.\n"
-                    "- representative_timestamp_s, mọi timeline.timestamp_s, claim.timestamp_s và "
-                    "evidence.timestamp_s phải nằm trong [t_start, t_end].\n"
+                    "- representative_timestamp_s, mọi timeline.timestamp_s và claim.timestamp_s "
+                    "phải nằm trong khoảng thời gian video đã nêu.\n"
                     "- Timestamp là số giây tính từ đầu video, không phải số frame hay chuỗi thời gian."
                 )
             validation_feedback = ""
@@ -611,11 +644,25 @@ def _prepare_qwen_payload(
         return prepared
 
     prepared.pop("evidence_id_counter", None)
+    if output_model is VideoMemory:
+        timeline = prepared.get("timeline")
+        if isinstance(timeline, list):
+            prepared["timeline"] = [
+                {key: value for key, value in event.items() if key != "evidence_ids"}
+                if isinstance(event, dict)
+                else event
+                for event in timeline
+            ]
     claims = prepared.get("claims")
     if not isinstance(claims, list):
         return prepared
     prepared["claims"] = [
-        {**claim, "verification_status": "unverified"} if isinstance(claim, dict) else claim
+        {
+            **{key: value for key, value in claim.items() if key != "evidence"},
+            "verification_status": "unverified",
+        }
+        if isinstance(claim, dict)
+        else claim
         for claim in claims
     ]
     return prepared
@@ -662,21 +709,6 @@ def _validate_qwen_timestamp_bounds(result: BaseModel, minimum_s: float, maximum
                     "location": "representative_timestamp_s",
                     "type": "timestamp_outside_incident_window",
                     "message": "Representative timestamp must be inside incident_window",
-                }
-            )
-    if isinstance(result, VideoMemory):
-        window = result.incident_window
-        semantic_timestamps = [
-            *(item.timestamp_s for item in result.timeline),
-            *(item.timestamp_s for item in result.claims if item.timestamp_s is not None),
-            *(evidence.timestamp_s for claim in result.claims for evidence in claim.evidence),
-        ]
-        if any(timestamp < window.t_start or timestamp > window.t_end for timestamp in semantic_timestamps):
-            errors.append(
-                {
-                    "location": "timeline/claims/evidence.timestamp_s",
-                    "type": "timestamp_outside_incident_window",
-                    "message": "All semantic timestamps must be inside incident_window",
                 }
             )
     if errors:
@@ -736,16 +768,10 @@ def _stabilize_qwen_timestamps(
     ]
     representative_timestamp_s = normalize(result.representative_timestamp_s)
     window = result.incident_window
-    semantic_timestamps = [
-        *(item.timestamp_s for item in timeline),
-        *(claim.timestamp_s for claim in claims if claim.timestamp_s is not None),
-        *(evidence.timestamp_s for claim in claims for evidence in claim.evidence),
-        *([representative_timestamp_s] if representative_timestamp_s is not None else []),
-    ]
     normalized_window = IncidentWindow(
-        t_start=min([normalize(window.t_start), *semantic_timestamps]),
+        t_start=normalize(window.t_start),
         t0=normalize(window.t0),
-        t_end=max([normalize(window.t_end), *semantic_timestamps]),
+        t_end=normalize(window.t_end),
     )
     return result.model_copy(
         update={

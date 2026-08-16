@@ -44,7 +44,11 @@ INCIDENT_CHECKPOINT_PATH=./data/incident_checkpoints.sqlite3
 
 Incident clip mặc định có tối thiểu 5 giây, thêm 1 giây trước và 2 giây sau window do VLM xác định. Có thể điều chỉnh bằng `INCIDENT_CLIP_MIN_DURATION_S`, `INCIDENT_CLIP_PRE_ROLL_S` và `INCIDENT_CLIP_POST_ROLL_S`. Ảnh `representative_frame` được chọn gần `t0` thay vì lấy frame đầu tiên.
 
-Khi đối chiếu claim với log, `LOG_CLAIM_SAMPLE_RADIUS` quy định số mẫu lấy ở mỗi phía của mẫu gần nhất. Mặc định `3` tạo tối đa 7 mẫu (`3 trước + mẫu gần nhất + 3 sau`); đặt `0` để chỉ dùng mẫu gần nhất. Ở đầu hoặc cuối log, số mẫu thực tế có thể ít hơn.
+Khi incident có log, bước phân tích video nhận thêm một `log_attention_hint` định tính để biết timestamp nào cần xem kỹ. Hint chỉ mô tả ga thay đổi quá `0.2`, phanh thay đổi quá `0.5` hoặc góc đánh lái thay đổi quá `0.3`; tối đa 20 timestamp. Gia tốc không được dùng để tạo attention hint. VLM không nhận giá trị telemetry cụ thể, raw log hay evidence ID và không được dùng hint để kết luận tai nạn.
+
+Khi đối chiếu claim với log, backend trước tiên chỉ giữ các dòng đồng thời nằm trong `incident_window` và `±LOG_TIMESTAMP_TOLERANCE_S` quanh timestamp của claim. `LOG_CLAIM_SAMPLE_RADIUS` sau đó giới hạn số mẫu lấy ở mỗi phía của mẫu gần nhất; mặc định `3` tạo tối đa 7 mẫu. Các dòng model nhìn thấy và `allowed_evidence_ids` luôn là cùng một tập. Nếu không có dòng hợp lệ, claim được giữ ở trạng thái `unverified`.
+
+Gia tốc suy ra từ tốc độ có trị tuyệt đối lớn hơn `15 m/s²` được xem là outlier, không đưa vào metric verification. Backend ghi `LOG_ACCELERATION_OUTLIER_FILTERED` trong warnings để việc lọc không diễn ra âm thầm. Rule này chỉ lọc metric gia tốc bất thường, không tự kết luận có hoặc không có va chạm.
 
 Qwen native video dùng `VLM_PROVIDER=qwen`, `VLM_INPUT_MODE=native_video` và `DASHSCOPE_API_KEY`. Video được resize/pad theo `VLM_VIDEO_TARGET_WIDTH`, `VLM_VIDEO_TARGET_HEIGHT` và chuẩn hóa FPS trước khi gửi. Video local nhỏ hơn `QWEN_BASE64_MAX_VIDEO_BYTES` (mặc định 7 MB) được gửi bằng Base64 Data URL. Video lớn hơn ngưỡng cần `QWEN_ARTIFACT_URL_BASE` công khai `ARTIFACT_DIR`. Qwen gọi `qwen3-vl-flash` qua DashScope chat completions.
 
@@ -65,6 +69,21 @@ streamlit run main_test.py
 ```
 
 Swagger: `http://localhost:8000/docs`.
+
+### LangSmith tracing
+
+Tracing là tùy chọn và không thay đổi routing, retry, checkpoint hoặc output của workflow. Để bật tracing, tạo API key trong LangSmith rồi cấu hình `.env`:
+
+```dotenv
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=lsv2_...
+LANGSMITH_PROJECT=incident-analysis-dev
+LANGSMITH_TRACING_SAMPLING_RATE=1.0
+```
+
+Nếu API key thuộc nhiều workspace, thêm `LANGSMITH_WORKSPACE_ID`. Khởi động lại backend sau khi đổi `.env`. Mỗi incident được gắn `thread_id=incident_id`; lần chạy đầu và các lần resume/reanalysis vì vậy xuất hiện trong cùng một LangSmith thread. Model calls từ OpenAI Responses API và Qwen OpenAI-compatible API được hiển thị dưới graph trace. Raw ảnh/video Base64, signed media URL và API key được lọc trước khi gửi.
+
+Để tắt hoàn toàn, đặt `LANGSMITH_TRACING=false`. Thiếu `LANGSMITH_API_KEY` cũng khiến integration tự tắt; lỗi gửi trace không làm incident workflow thất bại.
 
 Trong Streamlit, chọn video bằng nút **Browse files** và chọn log CSV nếu có; không cần nhập đường dẫn file.
 

@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from src.models.incidents import IncidentWindow
-from src.services.log_analysis import LogAnalysisError, LogAnalysisService
+from src.services.log_analysis import LogAnalysisError, LogAnalysisService, build_log_attention_hint
 
 REAL_LOG = Path("data_mock/vehicle_state.csv")
 CONFLICT_LOG = Path("data_mock/vehicle_state_fake.csv")
@@ -119,3 +119,60 @@ def test_accepts_time_sec_timestamp_column(tmp_path: Path) -> None:
     assert result.summary.metrics["speed_end"] == 7.056
     assert result.summary.metrics["max_brake"] == 0
     assert all(value is not None for value in result.summary.metrics.values())
+
+
+def test_analysis_filters_extreme_acceleration_and_records_warning(tmp_path: Path) -> None:
+    source = tmp_path / "outlier.csv"
+    source.write_text(
+        "timestamp_s,speed_kmh,brake\n"
+        "0.0,20,0\n"
+        "0.1,10,0\n"
+        "0.2,10,0\n",
+        encoding="utf-8",
+    )
+
+    result = LogAnalysisService().analyze(
+        str(source),
+        str(tmp_path / "slice.csv"),
+        window=IncidentWindow(t_start=0, t0=0.1, t_end=0.2),
+    )
+
+    assert result.summary.metrics["max_deceleration"] == 0
+    assert result.summary.metrics["acceleration_outlier_count"] == 1
+    assert "LOG_ACCELERATION_OUTLIER_FILTERED" in result.summary.warnings
+    assert "27.778" not in result.summary.summary
+
+
+def test_build_log_attention_hint_contains_only_qualitative_changes(tmp_path: Path) -> None:
+    source = tmp_path / "attention.csv"
+    source.write_text(
+        "timestamp_s,throttle,brake,steering_angle,acceleration_mps2\n"
+        "0.0,0.1,0.0,0.0,0.0\n"
+        "1.0,0.5,0.6,-0.5,-4.0\n"
+        "2.0,0.5,0.6,-0.5,0.0\n",
+        encoding="utf-8",
+    )
+
+    hint = build_log_attention_hint(str(source))
+
+    assert "Tại giây thứ 1.0" in hint
+    assert "ga tăng đột ngột" in hint
+    assert "phanh tăng đột ngột" in hint
+    assert "góc đánh lái thay đổi đột ngột sang trái" in hint
+    assert "gia tốc" not in hint
+    for raw_value in ("0.1", "0.5", "0.6", "-0.5", "-4.0"):
+        assert raw_value not in hint
+    assert "evidence_id" not in hint
+
+
+def test_build_log_attention_hint_ignores_acceleration_entirely(tmp_path: Path) -> None:
+    source = tmp_path / "stable.csv"
+    source.write_text(
+        "timestamp_s,throttle,brake,steering_angle,acceleration_mps2\n"
+        "0.0,0.1,0.0,0.0,0.0\n"
+        "1.0,0.1,0.0,0.0,-4.0\n"
+        "2.0,0.1,0.0,0.0,-25.87\n",
+        encoding="utf-8",
+    )
+
+    assert build_log_attention_hint(str(source)) == ""

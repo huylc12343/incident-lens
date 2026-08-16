@@ -19,6 +19,7 @@ from pydantic import ValidationError
 
 from src.models.incidents import ClaimVerification, VerificationRequest, VerificationResult, VerificationStatus
 from src.prompts.verification import build_verification_prompt
+from src.services.langsmith_tracing import LangSmithTracing
 from src.services.model_observability import ModelActivityRegistry
 
 
@@ -40,6 +41,7 @@ class OpenAIVerificationService:
         temperature: float = 0.0,
         prompt_version: str = "v1",
         observability: ModelActivityRegistry | None = None,
+        tracing: LangSmithTracing | None = None,
     ) -> None:
         if not model.strip() or not prompt_version.strip():
             raise ValueError("model and prompt_version must not be blank")
@@ -47,7 +49,17 @@ class OpenAIVerificationService:
             raise ValueError("timeout_s must be positive")
         if not 0 <= temperature <= 2:
             raise ValueError("temperature must be between 0 and 2")
-        self._client = client if client is not None else AsyncOpenAI(api_key=api_key)
+        provider_client = client if client is not None else AsyncOpenAI(api_key=api_key)
+        self._client = (
+            tracing.wrap_openai_client(
+                provider_client,
+                name="OpenAI Verification",
+                provider="openai",
+                operation="claim_verification",
+            )
+            if tracing is not None
+            else provider_client
+        )
         self._model = model
         self._timeout_s = timeout_s
         self._temperature = temperature
@@ -58,6 +70,7 @@ class OpenAIVerificationService:
         prompt = build_verification_prompt(
             claims=request.claims,
             claim_log_summaries=request.claim_log_summaries,
+            claim_verification_contexts=request.claim_verification_contexts,
             timestamp_tolerance_s=request.timestamp_tolerance_s,
             version=self._prompt_version,
         )
@@ -161,6 +174,9 @@ class OpenAIVerificationService:
 def _validate_verification_result(request: VerificationRequest, result: VerificationResult) -> VerificationResult:
     expected_ids = [claim.claim_id for claim in request.claims]
     summaries = {summary.claim_id: summary for summary in request.claim_log_summaries}
+    compact_contexts = {
+        item.claim_id: item for item in request.claim_verification_contexts
+    }
     if list(summaries) != expected_ids:
         raise VerificationServiceError(
             "VERIFICATION_SUMMARY_MISMATCH",
@@ -199,7 +215,11 @@ def _validate_verification_result(request: VerificationRequest, result: Verifica
                 )
             )
             continue
-        allowed_evidence = set(summary.allowed_evidence_ids)
+        allowed_evidence = set(
+            compact_contexts[item.claim_id].allowed_evidence_ids
+            if item.claim_id in compact_contexts
+            else summary.allowed_evidence_ids
+        )
         evidence_ids = list(dict.fromkeys(eid for eid in item.evidence_ids if eid in allowed_evidence))
         if item.status == VerificationStatus.UNVERIFIED or not evidence_ids:
             normalized_results.append(

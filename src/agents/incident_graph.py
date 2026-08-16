@@ -25,6 +25,7 @@ from src.agents.nodes.incident import (
 from src.agents.nodes.review import human_review_interrupt_node
 from src.models.api import ReviewDecision
 from src.models.incidents import ReportService, VerificationService
+from src.services.langsmith_tracing import LangSmithTracing
 from src.services.model_observability import ModelActivityRegistry
 from src.services.video_memory import VideoMemoryWorkflow
 
@@ -157,18 +158,22 @@ def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointe
 
 
 class LangGraphIncidentRunner:
-    def __init__(self, graph: Any) -> None:
+    def __init__(self, graph: Any, *, tracing: LangSmithTracing | None = None) -> None:
         self._graph = graph
+        self._tracing = tracing
 
     async def start(self, state: IncidentState) -> IncidentState:
-        result = await self._graph.ainvoke(state, self.thread_config(state["incident_id"]))
+        incident_id = state["incident_id"]
+        with self._trace_context(incident_id, "start"):
+            result = await self._graph.ainvoke(state, self.thread_config(incident_id, "start"))
         return self._public_state(result)
 
     async def resume(self, incident_id: str, decision: ReviewDecision) -> IncidentState:
-        result = await self._graph.ainvoke(
-            Command(resume=decision.model_dump(mode="json")),
-            self.thread_config(incident_id),
-        )
+        with self._trace_context(incident_id, "resume"):
+            result = await self._graph.ainvoke(
+                Command(resume=decision.model_dump(mode="json")),
+                self.thread_config(incident_id, "resume"),
+            )
         return self._public_state(result)
 
     async def get(self, incident_id: str) -> IncidentState | None:
@@ -189,8 +194,22 @@ class LangGraphIncidentRunner:
         await self._graph.checkpointer.adelete_thread(incident_id)
 
     @staticmethod
-    def thread_config(incident_id: str) -> dict[str, dict[str, str]]:
-        return {"configurable": {"thread_id": incident_id}}
+    def thread_config(incident_id: str, phase: str | None = None) -> dict[str, Any]:
+        config: dict[str, Any] = {
+            "configurable": {"thread_id": incident_id},
+            "metadata": {"thread_id": incident_id, "incident_id": incident_id},
+            "tags": ["workflow:incident-analysis"],
+            "run_name": "incident-analysis",
+        }
+        if phase is not None:
+            config["metadata"]["workflow_phase"] = phase
+            config["tags"].append(f"phase:{phase}")
+        return config
+
+    def _trace_context(self, incident_id: str, phase: str):
+        if self._tracing is None:
+            return LangSmithTracing().incident_context(incident_id, phase)
+        return self._tracing.incident_context(incident_id, phase)
 
     @staticmethod
     def _public_state(value: dict[str, Any]) -> IncidentState:

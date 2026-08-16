@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     model_name: str = "gpt-5.6-luna"
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
 
+    # LangSmith tracing
+    langsmith_tracing: bool = False
+    langsmith_api_key: str = ""
+    langsmith_project: str = "incident-analysis-dev"
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    langsmith_workspace_id: str = ""
+    langsmith_tracing_sampling_rate: float = Field(default=1.0, ge=0.0, le=1.0)
+
     # Video-language model
     vlm_provider: VLMProvider = VLMProvider.OPENAI
     vlm_input_mode: VLMInputMode = VLMInputMode.TIMESTAMPED_FRAMES
@@ -70,7 +78,6 @@ class Settings(BaseSettings):
     vlm_frame_batch_size: int = Field(default=60, gt=0)
     vlm_frame_batch_overlap: int = Field(default=5, ge=0)
     vlm_frame_max_batches: int = Field(default=8, gt=0)
-    video_memory_max_entities: int = Field(default=50, gt=0)
     video_memory_max_timeline_events: int = Field(default=6, gt=0)
     video_memory_max_claims: int = Field(default=100, gt=0)
 

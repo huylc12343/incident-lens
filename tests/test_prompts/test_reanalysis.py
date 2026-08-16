@@ -36,6 +36,8 @@ def test_auto_reanalysis_contains_only_automatic_context() -> None:
     assert "feedback" not in prompt.context
     assert "claim-1" not in prompt.text
     assert prompt.context["conflict_claim"]["claim_id"] == "claim-1"
+    assert "không trả evidence" in prompt.text
+    assert "Backend sẽ tự map" in prompt.text
 
 
 def test_human_reanalysis_contains_only_reviewer_context() -> None:
@@ -67,7 +69,6 @@ def test_human_reanalysis_contains_only_reviewer_context() -> None:
         "target_claims",
         "global_scene",
         "video_summary",
-        "tracked_entities",
         "incident_window",
         "timeline",
         "existing_evidence",
@@ -79,6 +80,8 @@ def test_human_reanalysis_contains_only_reviewer_context() -> None:
     assert prompt.context["reviewer_feedback"] == "Check whether the brake lights illuminate."
     assert prompt.context["existing_evidence"] == [{"evidence_id": "frame-1", "timestamp_s": 12.5}]
     assert "không có video hoặc frame" in prompt.text
+    assert "phạm vi toàn video" in prompt.text
+    assert "Claim timestamp_s phải nằm trong incident_window" not in prompt.text
 
 
 def test_auto_and_human_prompts_are_deterministic_and_distinct() -> None:

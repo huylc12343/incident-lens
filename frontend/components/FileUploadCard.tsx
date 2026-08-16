@@ -20,7 +20,9 @@ export function FileUploadCard({ kind, files, onChange }: Props) {
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
   const isVideo = kind === "video";
-  const label = isVideo ? text("Driving Video", "Video hành trình") : text("Vehicle Telemetry", "Telemetry phương tiện");
+  const label = isVideo
+    ? text("Driving Video", "Video hành trình")
+    : text("Vehicle Telemetry (optional)", "Telemetry phương tiện (tùy chọn)");
   const accept = isVideo
     ? ".mp4,video/mp4"
     : ".csv,.txt,.json,.xls,.xlsx,text/csv,text/plain,application/json,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";

@@ -16,7 +16,7 @@ export function AnalysisForm() {
   const [submitting, setSubmitting] = useState(false);
   const [submitProgress, setSubmitProgress] = useState(0);
   const [error, setError] = useState("");
-  const ready = Boolean(video && telemetry.length);
+  const ready = Boolean(video);
 
   useEffect(() => {
     if (!submitting) return;
@@ -28,7 +28,7 @@ export function AnalysisForm() {
   }, [submitting]);
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!ready || !video || !telemetry.length || submitting) return;
+    if (!ready || !video || submitting) return;
     setSubmitting(true);
     setError("");
     const previousUrl = sessionStorage.getItem("vlens:video-url");
@@ -47,7 +47,9 @@ export function AnalysisForm() {
         incident_id: incidentId,
         video_uri: uploaded.video_uri,
         log_uri: uploaded.log_uri,
-        analysis_prompt: "Analyze the full recording, automatically identify the disengagement event timestamp, and use only observable video and telemetry evidence.",
+        analysis_prompt: telemetry.length
+          ? "Analyze the full recording, automatically identify the disengagement event timestamp, and use only observable video and telemetry evidence."
+          : "Analyze the full recording, automatically identify the disengagement event timestamp, and use only observable video evidence. Clearly state that telemetry was not provided and do not infer telemetry signals.",
         metadata: { timestamp_detection: "automatic", telemetry_files: telemetry.map((file) => file.name) },
       });
       setSubmitProgress(100);
@@ -88,6 +90,9 @@ export function AnalysisForm() {
             onChange={setTelemetry}
           />
         </div>
+        <p className="section-description">
+          {text("Only the driving video is required. Vehicle telemetry is optional for this MVP.", "Chỉ bắt buộc video hành trình. Telemetry phương tiện là tùy chọn trong MVP này.")}
+        </p>
         {submitting && (
           <div className="submission-progress" role="status" aria-live="polite">
             <div><strong>{text("Starting analysis…", "Đang bắt đầu phân tích…")}</strong><span>{submitProgress}%</span></div>

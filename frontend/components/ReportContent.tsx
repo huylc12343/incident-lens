@@ -7,6 +7,7 @@ import { artifactUrl, getIncident } from "../lib/incidentApi";
 import { INCIDENT_KEYS, secondsToTimestamp } from "../lib/incidentSession";
 import type { Claim, IncidentSnapshot } from "../types/incident";
 import { IncidentNavigationSidebar } from "./incident-review/IncidentNavigationSidebar";
+import { classifyIncidentForDisplay } from "../lib/incidentClassification";
 
 type Finding = { id: string; timestamp: number; description: string; source: string; status: string; evidenceIds: string[] };
 
@@ -47,6 +48,7 @@ export function ReportContent() {
 
 function ReportDocument({ snapshot, onExportJson }: { snapshot: IncidentSnapshot; onExportJson: () => void }) {
   const report = snapshot.final_report ?? snapshot.draft_report;
+  const classification = classifyIncidentForDisplay(snapshot);
   const audit = snapshot.review_audit.at(-1);
   const linkedClaims = snapshot.claims.filter((claim) => claim.evidence.length).length;
   const coverage = snapshot.claims.length ? Math.round(linkedClaims / snapshot.claims.length * 100) : 0;
@@ -74,7 +76,7 @@ function ReportDocument({ snapshot, onExportJson }: { snapshot: IncidentSnapshot
 
       <article className="forensic-report-document">
         <header className="report-document-header">
-          <div className="report-title-row"><div><p className="eyebrow">Forensic incident report</p><h1>Disengagement incident</h1></div><span className={`status ${snapshot.status}`}>{snapshot.status}</span></div>
+          <div className="report-title-row"><div><p className="eyebrow">Forensic incident report</p><h1>{classification.type}</h1></div><span className={`status ${snapshot.status}`}>{snapshot.status}</span></div>
           <div className="report-document-meta"><span>Incident ID: <b>{snapshot.incident_id}</b></span><i /> <span>Date: <b>{storedDate}</b></span><i /> <span>Reviewed by: <b>{audit?.reviewer ?? "Pending engineer review"}</b></span></div>
           <div className="coverage-meter"><span>Evidence coverage</span><div><i style={{ width: `${coverage}%` }} /></div><strong>{coverage}%</strong><small>{linkedClaims}/{snapshot.claims.length} claims linked</small></div>
         </header>

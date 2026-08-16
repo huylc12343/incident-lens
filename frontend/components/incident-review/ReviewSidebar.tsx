@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { secondsToTimestamp } from "../../lib/incidentSession";
 import type { Claim, IncidentSnapshot, ReviewPayload } from "../../types/incident";
 import { uiText as text } from "../../lib/ui-copy";
+import { classifyIncidentForDisplay } from "../../lib/incidentClassification";
 
 type Props = {
   snapshot: IncidentSnapshot;
@@ -31,6 +32,7 @@ export function ReviewSidebar({ snapshot, selectedClaim, busy, error, onSelectCl
   }, {});
   const canReview = snapshot.status === "awaiting_review" && !busy;
   const warnings = [...new Set([...snapshot.warnings, ...(report?.evidence_and_warnings?.warnings ?? [])])];
+  const classification = classifyIncidentForDisplay(snapshot);
 
   return (
     <aside className="incident-review-sidebar expanded-ai-review report-style-review">
@@ -45,8 +47,8 @@ export function ReviewSidebar({ snapshot, selectedClaim, busy, error, onSelectCl
           <div><dt>{text("Incident ID", "Mã sự cố")}</dt><dd className="mono-value">{snapshot.incident_id}</dd></div>
           <div><dt>{text("Analysis window", "Khoảng phân tích")}</dt><dd className="mono-value">{secondsToTimestamp(window?.t_start ?? 0)} → {secondsToTimestamp(window?.t_end ?? 0)}</dd></div>
           <div><dt>{text("Detected event", "Sự kiện phát hiện")}</dt><dd className="mono-value">{secondsToTimestamp(window?.t0 ?? 0)}</dd></div>
-          <div><dt>{text("Incident type", "Loại sự cố")}</dt><dd>Disengagement</dd></div>
-          <div><dt>{text("Severity", "Mức độ nghiêm trọng")}</dt><dd>{text("Not classified", "Chưa phân loại")}</dd></div>
+          <div><dt>{text("Incident type", "Loại sự cố")}</dt><dd>{classification.type}</dd></div>
+          <div><dt>{text("Severity", "Mức độ nghiêm trọng")}</dt><dd>{classification.severity}</dd></div>
           <div><dt>{text("Evidence sources", "Nguồn bằng chứng")}</dt><dd>{snapshot.has_log ? "Video + telemetry" : text("Video only", "Chỉ video")}</dd></div>
           <div><dt>{text("AI observations", "Quan sát AI")}</dt><dd>{snapshot.claims.length} {text("grounded claim(s)", "nhận định có bằng chứng")}</dd></div>
           <div><dt>{text("Review status", "Trạng thái rà soát")}</dt><dd>{snapshot.status.replaceAll("_", " ")}</dd></div>

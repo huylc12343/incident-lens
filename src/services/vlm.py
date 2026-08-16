@@ -394,8 +394,14 @@ class QwenNativeVideoVLMService:
         activity_id = None
         response = None
         try:
+            schema = output_model.model_json_schema()
+            if output_model in {VideoMemory, VideoMemoryPatch}:
+                definitions = schema.get("$defs", {})
+                definitions.get("Claim", {}).get("properties", {}).pop("evidence", None)
+                definitions.get("TimelineEvent", {}).get("properties", {}).pop("evidence_ids", None)
+                definitions.pop("EvidenceReference", None)
             output_schema = json.dumps(
-                output_model.model_json_schema(),
+                schema,
                 ensure_ascii=False,
                 separators=(",", ":"),
             )
@@ -411,8 +417,8 @@ class QwenNativeVideoVLMService:
                     f"- Video bắt đầu tại {timestamp_bounds[0]:g}s và kết thúc tại "
                     f"{timestamp_bounds[1]:g}s; không được trả timestamp ngoài khoảng này.\n"
                     "- Phải có t_start <= t0 <= t_end.\n"
-                    "- representative_timestamp_s, mọi timeline.timestamp_s, claim.timestamp_s và "
-                    "evidence.timestamp_s phải nằm trong [t_start, t_end].\n"
+                    "- representative_timestamp_s, mọi timeline.timestamp_s và claim.timestamp_s "
+                    "phải nằm trong khoảng thời gian video đã nêu.\n"
                     "- Timestamp là số giây tính từ đầu video, không phải số frame hay chuỗi thời gian."
                 )
             validation_feedback = ""
@@ -638,11 +644,25 @@ def _prepare_qwen_payload(
         return prepared
 
     prepared.pop("evidence_id_counter", None)
+    if output_model is VideoMemory:
+        timeline = prepared.get("timeline")
+        if isinstance(timeline, list):
+            prepared["timeline"] = [
+                {key: value for key, value in event.items() if key != "evidence_ids"}
+                if isinstance(event, dict)
+                else event
+                for event in timeline
+            ]
     claims = prepared.get("claims")
     if not isinstance(claims, list):
         return prepared
     prepared["claims"] = [
-        {**claim, "verification_status": "unverified"} if isinstance(claim, dict) else claim
+        {
+            **{key: value for key, value in claim.items() if key != "evidence"},
+            "verification_status": "unverified",
+        }
+        if isinstance(claim, dict)
+        else claim
         for claim in claims
     ]
     return prepared

@@ -40,6 +40,10 @@ def test_video_analysis_prompt_selects_mode_instruction(
     assert "không mở rộng incident_window" in prompt.text
     assert "[incident_window.t_start, incident_window.t_end]" not in prompt.text
     assert 'verification_status="unverified"' in prompt.text
+    assert "không trả evidence_ids" in prompt.text
+    assert "không trả evidence" in prompt.text
+    assert "Backend sẽ map độc lập" in prompt.text
+    assert "evidence đã tồn tại trong một claim" not in prompt.text
     assert "không trả chain-of-thought" in prompt.text
     assert "Identify the main traffic incident." not in prompt.text
     assert prompt.source == PromptSource.SYSTEM

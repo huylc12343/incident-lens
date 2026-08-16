@@ -245,6 +245,46 @@ async def test_qwen_discards_root_evidence_counter_without_retry() -> None:
 
 
 @pytest.mark.asyncio
+async def test_qwen_contract_omits_provider_visual_evidence_fields() -> None:
+    payload = {
+        "global_scene": "Đường giao thông.",
+        "incident_window": {"t_start": 0, "t0": 1, "t_end": 2},
+        "timeline": [
+            {"timestamp_s": 1, "description": "Xe chuyển hướng.", "evidence_ids": ["1.0"]},
+        ],
+        "claims": [
+            {
+                "claim_id": "claim-1",
+                "text": "Xe chuyển hướng.",
+                "timestamp_s": 1,
+                "evidence": [{"evidence_id": "1.0", "timestamp_s": 1}],
+            }
+        ],
+    }
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
+    )
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=response)))
+    )
+    service = QwenNativeVideoVLMService(model="qwen3-vl-flash", client=client)
+    request = NativeVideoAnalysisRequest(
+        incident_id="INC-QWEN-CANONICAL-EVIDENCE",
+        prompt=PromptEnvelope(text="Phân tích video."),
+        normalized_video_uri="https://cdn.example.test/artifacts/video.mp4",
+        metadata=NativeVideoMetadata(duration_s=2, width=1280, height=720, fps=15, size_bytes=100),
+    )
+
+    result = await service.analyze_video(request)
+
+    assert result.timeline[0].evidence_ids == []
+    assert result.claims[0].evidence == []
+    system_prompt = client.chat.completions.create.await_args.kwargs["messages"][0]["content"]
+    assert '"evidence_ids"' not in system_prompt
+    assert '"evidence"' not in system_prompt
+
+
+@pytest.mark.asyncio
 async def test_qwen_classifies_exhausted_free_tier_quota() -> None:
     response = httpx.Response(
         403,

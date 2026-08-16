@@ -47,7 +47,7 @@ def build_video_analysis_prompt(
             "Nếu user context có log_attention_hint, chỉ dùng nó như attention hint để quay lại xem kỹ hình ảnh "
             "ở các timestamp được gợi ý. Hint không phải evidence, không xác nhận hay phủ định bất kỳ sự kiện nào "
             "và không được dùng để kết luận tai nạn. Không suy ra rằng có bất thường hình ảnh chỉ vì hint tồn tại; "
-            "không đưa trạng thái ga, phanh, góc lái hoặc gia tốc từ hint vào VideoMemory nếu video không trực tiếp "
+            "không đưa trạng thái ga, phanh hoặc góc lái từ hint vào VideoMemory nếu video không trực tiếp "
             "hỗ trợ. Mọi timeline, claim và evidence vẫn phải được xây dựng từ video.",
 
             "Xem toàn bộ video theo đúng thứ tự thời gian trước khi kết luận. Không dừng phân tích tại bất thường, "
@@ -105,7 +105,8 @@ def build_video_analysis_prompt(
             "Nếu có tai nạn, xác định incident_window gồm t_start, t0, t_end với "
             "t_start <= t0 <= t_end. t_start là thời điểm sớm nhất có dấu hiệu liên quan trực tiếp đến diễn biến "
             "dẫn tới sự cố; t0 là thời điểm sự kiện tai nạn chính xảy ra; t_end là thời điểm hậu quả/kết cục cuối "
-            "cùng đã ổn định hoặc sự kiện kết thúc.",
+            "cùng đã ổn định hoặc sự kiện kết thúc. incident_window chỉ mô tả sự cố, không phải toàn bộ video; "
+            "không kéo t_start về đầu video hoặc t_end tới cuối video chỉ để bao phủ timeline, claims hay evidence.",
 
             "Với va chạm quan sát được, t0 là thời điểm tiếp xúc đầu tiên của sự kiện va chạm chính. Nếu điểm tiếp "
             "xúc bị che khuất, đặt t0 tại thời điểm phù hợp nhất với tiếp xúc dựa trên biến đổi chuyển động, quan hệ "
@@ -118,9 +119,10 @@ def build_video_analysis_prompt(
             "hoặc kiểm chứng; không để trống timeline hoặc claims chỉ vì không có tai nạn. Tuyệt đối không đặt "
             "incident_window.t_end = 0.",
 
-            "Mọi timestamp_s trong timeline, claims và evidence phải nằm trong đoạn đóng "
-            "[incident_window.t_start, incident_window.t_end]. Không dùng bằng chứng pre-roll hoặc post-roll ngoài "
-            "incident_window.",
+            "Mọi timestamp_s trong timeline, claims và evidence chỉ cần nằm trong đoạn đóng [0, video_duration]. "
+            "Timeline, claim và evidence trước hoặc sau sự cố được phép nằm ngoài incident_window; không mở rộng "
+            "incident_window để bao phủ các timestamp này. Riêng claim mô tả trực tiếp diễn biến sự cố phải đặt "
+            "timestamp gần và phù hợp với incident_window.",
 
             "Trả về VideoMemory gồm đúng các phần: global_scene, video_summary, incident_window, "
             "representative_timestamp_s, timeline, claims.",

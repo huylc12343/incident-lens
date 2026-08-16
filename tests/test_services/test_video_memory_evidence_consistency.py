@@ -325,11 +325,18 @@ def test_native_evidence_rejects_timestamp_outside_sampled_frames() -> None:
     assert exc_info.value.code == "VLM_NATIVE_EVIDENCE_MAPPING_FAILED"
 
 
-def test_validation_rejects_semantic_timestamp_outside_incident_window() -> None:
+def test_validation_accepts_semantic_timestamps_outside_incident_window_within_video() -> None:
     memory = VideoMemory(
         global_scene="Đường giao thông.",
         incident_window=IncidentWindow(t_start=2, t0=3, t_end=4),
         analysis_mode=AnalysisMode.SINGLE_REQUEST,
+        timeline=[
+            TimelineEvent(
+                timestamp_s=1,
+                description="Xe bắt đầu di chuyển.",
+                evidence_ids=["frame-000001"],
+            )
+        ],
         claims=[
             Claim(
                 claim_id="claim-1",
@@ -340,7 +347,8 @@ def test_validation_rejects_semantic_timestamp_outside_incident_window() -> None
         ],
     )
 
-    with pytest.raises(VideoMemoryError) as exc_info:
-        validate_video_memory(memory, source_duration_s=5, source_frame_ids={"frame-000001"})
+    result = validate_video_memory(memory, source_duration_s=5, source_frame_ids={"frame-000001"})
 
-    assert exc_info.value.code == "VLM_TIMESTAMP_OUTSIDE_INCIDENT_WINDOW"
+    assert result.incident_window == IncidentWindow(t_start=2, t0=3, t_end=4)
+    assert result.timeline[0].timestamp_s == 1
+    assert result.claims[0].timestamp_s == 1.5

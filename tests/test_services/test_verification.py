@@ -8,7 +8,11 @@ from openai import APIConnectionError, APITimeoutError, AuthenticationError, Rat
 from src.models.incidents import (
     Claim,
     ClaimLogSummary,
+    ClaimRawTelemetry,
+    ClaimTelemetryDerived,
+    ClaimTelemetrySnapshot,
     ClaimVerification,
+    ClaimVerificationContext,
     VerificationRequest,
     VerificationResult,
     VerificationStatus,
@@ -17,6 +21,11 @@ from src.services.verification import OpenAIVerificationService, VerificationSer
 
 
 def _request() -> VerificationRequest:
+    snapshot = ClaimTelemetrySnapshot(
+        timestamp_s=7.5,
+        evidence_id="log-row:7.5",
+        brake=0.8,
+    )
     return VerificationRequest(
         incident_id="INC-VERIFY",
         claims=[Claim(claim_id="claim-1", text="Vehicle brakes at 7.5 seconds", timestamp_s=7.5)],
@@ -29,6 +38,19 @@ def _request() -> VerificationRequest:
                 within_tolerance=True,
                 allowed_evidence_ids=["log-row:7.5"],
                 summary="Brake tăng gần timestamp của claim.",
+            )
+        ],
+        claim_verification_contexts=[
+            ClaimVerificationContext(
+                claim_id="claim-1",
+                available_signals=["brake"],
+                raw_telemetry=ClaimRawTelemetry(
+                    window_start=snapshot,
+                    at_claim=snapshot,
+                    window_end=snapshot,
+                ),
+                derived=ClaimTelemetryDerived(),
+                allowed_evidence_ids=["log-row:7.5"],
             )
         ],
         timestamp_tolerance_s=0.5,
@@ -119,6 +141,32 @@ async def test_verification_restores_claim_order() -> None:
                     summary="Xe gần như đứng yên.",
                 ),
             ],
+            "claim_verification_contexts": [
+                _request().claim_verification_contexts[0],
+                ClaimVerificationContext(
+                    claim_id="claim-2",
+                    available_signals=["speed_kmh"],
+                    raw_telemetry=ClaimRawTelemetry(
+                        window_start=ClaimTelemetrySnapshot(
+                            timestamp_s=8.0,
+                            evidence_id="log-row:8",
+                            speed_kmh=0.5,
+                        ),
+                        at_claim=ClaimTelemetrySnapshot(
+                            timestamp_s=8.0,
+                            evidence_id="log-row:8",
+                            speed_kmh=0.5,
+                        ),
+                        window_end=ClaimTelemetrySnapshot(
+                            timestamp_s=8.0,
+                            evidence_id="log-row:8",
+                            speed_kmh=0.5,
+                        ),
+                    ),
+                    derived=ClaimTelemetryDerived(movement_state_at_claim="near_stopped"),
+                    allowed_evidence_ids=["log-row:8"],
+                ),
+            ],
         }
     )
     reordered = VerificationResult(
@@ -164,6 +212,30 @@ async def test_verification_removes_invented_log_evidence_without_discarding_res
     )
 
     result = await OpenAIVerificationService(model="gpt-test", client=client).verify(_request())
+
+    assert result.results[0].status == VerificationStatus.UNVERIFIED
+    assert result.results[0].evidence_ids == []
+
+
+@pytest.mark.asyncio
+async def test_verification_validates_against_compact_evidence_allowlist() -> None:
+    request = _request()
+    request.claim_log_summaries[0].allowed_evidence_ids.append("log-row:7")
+    invalid = VerificationResult(
+        results=[
+            ClaimVerification(
+                claim_id="claim-1",
+                status=VerificationStatus.SUPPORTED,
+                reason="Dùng một raw row không được gửi trong compact context.",
+                evidence_ids=["log-row:7"],
+            )
+        ]
+    )
+    client = SimpleNamespace(
+        responses=SimpleNamespace(parse=AsyncMock(return_value=SimpleNamespace(output_parsed=invalid)))
+    )
+
+    result = await OpenAIVerificationService(model="gpt-test", client=client).verify(request)
 
     assert result.results[0].status == VerificationStatus.UNVERIFIED
     assert result.results[0].evidence_ids == []

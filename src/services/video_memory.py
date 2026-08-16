@@ -331,16 +331,6 @@ def validate_video_memory(
     ]:
         if timestamp > source_duration_s:
             raise VideoMemoryError("VLM_TIMESTAMP_OUT_OF_RANGE", "VideoMemory timestamp exceeds source duration")
-    semantic_timestamps = [
-        *(item.timestamp_s for item in memory.timeline),
-        *(item.timestamp_s for item in memory.claims if item.timestamp_s is not None),
-        *(evidence.timestamp_s for claim in memory.claims for evidence in claim.evidence),
-    ]
-    if any(timestamp < window.t_start or timestamp > window.t_end for timestamp in semantic_timestamps):
-        raise VideoMemoryError(
-            "VLM_TIMESTAMP_OUTSIDE_INCIDENT_WINDOW",
-            "timeline, claim, and evidence timestamps must stay inside the incident window",
-        )
     if memory.representative_timestamp_s is not None and not (
         window.t_start <= memory.representative_timestamp_s <= window.t_end
     ):
@@ -421,13 +411,6 @@ def merge_memory_only_patch(
     for claim_id, claim in patch_claims.items():
         if claim_id not in requested_target_claim_ids:
             raise VideoMemoryError("VLM_PATCH_TARGET_MISMATCH", "patch modifies a claim outside requested targets")
-        if claim.timestamp_s is not None and not (
-            memory.incident_window.t_start <= claim.timestamp_s <= memory.incident_window.t_end
-        ):
-            raise VideoMemoryError(
-                "VLM_TIMESTAMP_OUTSIDE_INCIDENT_WINDOW",
-                "memory-only claim timestamp must stay inside the incident window",
-            )
         unknown_evidence = [
             evidence.evidence_id for evidence in claim.evidence if evidence.evidence_id not in existing_evidence
         ]

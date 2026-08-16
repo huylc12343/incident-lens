@@ -210,6 +210,7 @@ class ReanalysisRequest(ContractModel):
     target_claim_ids: list[str] = Field(min_length=1)
     incident_window: IncidentWindow
     current_memory: VideoMemory
+    source_duration_s: float | None = Field(default=None, gt=0, le=60)
     frame_manifest: VideoSequenceManifest | None = None
     normalized_video_uri: str | None = None
     remote_media_handles: list[RemoteMediaHandle] = Field(default_factory=list)
@@ -265,10 +266,53 @@ class ClaimLogSummary(ContractModel):
     summary: str = Field(min_length=1)
 
 
+TelemetrySignalName = Literal["speed_kmh", "throttle", "brake", "steer"]
+
+
+class ClaimTelemetrySnapshot(ContractModel):
+    timestamp_s: float | None = Field(default=None, ge=0)
+    evidence_id: str | None = None
+    speed_kmh: float | None = None
+    throttle: float | None = None
+    brake: float | None = None
+    steer: float | None = None
+
+
+class ClaimRawTelemetry(ContractModel):
+    window_start: ClaimTelemetrySnapshot
+    at_claim: ClaimTelemetrySnapshot
+    window_end: ClaimTelemetrySnapshot
+
+
+class ClaimTelemetryChangePoint(ContractModel):
+    signal: TelemetrySignalName
+    timestamp_s: float = Field(ge=0)
+    from_value: float
+    to_value: float
+    delta: float
+    evidence_ids: list[str] = Field(min_length=1)
+
+
+class ClaimTelemetryDerived(ContractModel):
+    movement_state_at_claim: Literal["stopped", "near_stopped", "moving"] | None = None
+    steer_direction_at_claim: Literal["left", "straight", "right"] | None = None
+    speed_trend: Literal["strong_decrease", "decrease", "stable", "increase"] | None = None
+
+
+class ClaimVerificationContext(ContractModel):
+    claim_id: str = Field(min_length=1)
+    available_signals: list[TelemetrySignalName] = Field(default_factory=list)
+    raw_telemetry: ClaimRawTelemetry
+    derived: ClaimTelemetryDerived
+    change_points: list[ClaimTelemetryChangePoint] = Field(default_factory=list)
+    allowed_evidence_ids: list[str] = Field(default_factory=list, max_length=5)
+
+
 class VerificationRequest(ContractModel):
     incident_id: str = Field(min_length=1)
     claims: list[Claim]
     claim_log_summaries: list[ClaimLogSummary]
+    claim_verification_contexts: list[ClaimVerificationContext] = Field(default_factory=list)
     timestamp_tolerance_s: float = Field(ge=0)
 
 

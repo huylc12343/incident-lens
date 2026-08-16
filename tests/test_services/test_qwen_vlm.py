@@ -363,11 +363,63 @@ async def test_qwen_forces_reanalysis_claims_to_unverified_before_schema_validat
 
 
 @pytest.mark.asyncio
-async def test_qwen_expands_incident_window_to_cover_valid_timeline_in_one_request() -> None:
+async def test_qwen_reanalysis_allows_target_claim_outside_incident_window() -> None:
+    memory = VideoMemory(
+        global_scene="Đường giao thông.",
+        incident_window=IncidentWindow(t_start=25, t0=27, t_end=29),
+        analysis_mode=AnalysisMode.NATIVE_VIDEO,
+    )
+    payload = {
+        "target_claim_ids": ["claim-early"],
+        "claims": [
+            {
+                "claim_id": "claim-early",
+                "text": "Xe bắt đầu di chuyển ở đầu video",
+                "timestamp_s": 0,
+            }
+        ],
+        "base_revision": 1,
+    }
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
+    )
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=response)))
+    )
+    service = QwenNativeVideoVLMService(model="qwen3-vl-flash", client=client)
+    request = ReanalysisRequest(
+        incident_id="INC-QWEN-REANALYSIS-FULL-VIDEO",
+        prompt=PromptEnvelope(text="Phân tích lại claim."),
+        target_claim_ids=["claim-early"],
+        incident_window=memory.incident_window,
+        current_memory=memory,
+        source_duration_s=45,
+        normalized_video_uri="https://cdn.example.test/artifacts/video.mp4",
+    )
+
+    result = await service.reanalyze_claims(request)
+
+    assert result.claims[0].timestamp_s == 0
+    assert client.chat.completions.create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_qwen_preserves_incident_window_when_semantic_timestamps_cover_full_video() -> None:
     payload = {
         "global_scene": "Đường giao thông.",
-        "incident_window": {"t_start": 1, "t0": 1.5, "t_end": 2},
-        "timeline": [{"timestamp_s": 0.5, "description": "Ngoài cửa sổ", "evidence_ids": []}],
+        "video_summary": "Xe ego va chạm vật cản tại giây 27.",
+        "incident_window": {"t_start": 25, "t0": 27, "t_end": 29},
+        "representative_timestamp_s": 27,
+        "timeline": [
+            {"timestamp_s": 0, "description": "Xe bắt đầu di chuyển", "evidence_ids": []},
+            {"timestamp_s": 27, "description": "Xe va chạm vật cản", "evidence_ids": []},
+            {"timestamp_s": 45, "description": "Video kết thúc", "evidence_ids": []},
+        ],
+        "claims": [
+            {"claim_id": "claim-start", "text": "Xe bắt đầu di chuyển", "timestamp_s": 0},
+            {"claim_id": "claim-impact", "text": "Xe va chạm vật cản", "timestamp_s": 27},
+            {"claim_id": "claim-end", "text": "Xe tiếp tục xuất hiện đến cuối video", "timestamp_s": 45},
+        ],
     }
     response = SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
@@ -380,13 +432,14 @@ async def test_qwen_expands_incident_window_to_cover_valid_timeline_in_one_reque
         incident_id="INC-QWEN-WINDOW",
         prompt=PromptEnvelope(text="Phân tích video."),
         normalized_video_uri="https://cdn.example.test/artifacts/video.mp4",
-        metadata=NativeVideoMetadata(duration_s=3, width=1280, height=720, fps=15, size_bytes=100),
+        metadata=NativeVideoMetadata(duration_s=45, width=1280, height=720, fps=15, size_bytes=100),
     )
 
     result = await service.analyze_video(request)
 
-    assert result.incident_window.t_start == 0.5
-    assert result.timeline[0].timestamp_s == 0.5
+    assert result.incident_window == IncidentWindow(t_start=25, t0=27, t_end=29)
+    assert [item.timestamp_s for item in result.timeline] == [0, 27, 45]
+    assert [item.timestamp_s for item in result.claims] == [0, 27, 45]
     assert client.chat.completions.create.await_count == 1
 
 

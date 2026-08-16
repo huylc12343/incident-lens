@@ -1,7 +1,7 @@
 import pytest
 
 from src.models.incidents import Claim, IncidentWindow
-from src.services.log_analysis import build_claim_log_summaries
+from src.services.log_analysis import build_claim_log_summaries, build_claim_verification_inputs
 
 
 def _write_log(path) -> None:
@@ -93,7 +93,7 @@ def test_claim_log_summary_withholds_evidence_outside_timestamp_tolerance(tmp_pa
     assert "Mẫu gần nhất nằm ngoài tolerance" in summary.summary
 
 
-def test_claim_log_summary_ignores_non_allowlisted_raw_columns(tmp_path) -> None:
+def test_claim_log_summary_reuses_global_steering_aliases_and_ignores_unknown_columns(tmp_path) -> None:
     log = tmp_path / "extra-columns.csv"
     log.write_text(
         "timestamp,frame,x,velocity_x,hand_brake,steering_angle\n"
@@ -108,8 +108,9 @@ def test_claim_log_summary_ignores_non_allowlisted_raw_columns(tmp_path) -> None
         timestamp_tolerance_s=0.1,
     )[0]
 
-    assert summary.available_signals == ["timestamp"]
-    assert summary.metrics == {}
+    assert summary.available_signals == ["timestamp", "steer"]
+    assert summary.metrics["steer"]["start"] == 30
+    assert summary.metrics["steer"]["end"] == 60
 
 
 def test_claim_log_summary_supports_ego_signal_column_names(tmp_path) -> None:
@@ -325,6 +326,33 @@ def test_claim_evidence_is_clipped_to_incident_window(tmp_path) -> None:
     assert summary.allowed_evidence_ids == ["log-row:44.7"]
     assert summary.sample_end_s == 44.7
     assert "44.75" not in summary.summary
+
+
+def test_verification_claim_outside_incident_window_uses_full_video_bounds(tmp_path) -> None:
+    log = tmp_path / "full-video.csv"
+    log.write_text(
+        "timestamp,speed_kmh,brake\n"
+        "9.5,20,0\n"
+        "10.0,18,0\n"
+        "10.5,16,0\n"
+        "27.0,5,1\n"
+        "45.1,0,1\n",
+        encoding="utf-8",
+    )
+
+    summaries, contexts = build_claim_verification_inputs(
+        str(log),
+        [Claim(claim_id="claim-early", text="Xe giảm tốc ở đầu video", timestamp_s=10)],
+        timestamp_tolerance_s=0.5,
+        sample_radius=10,
+        incident_window=IncidentWindow(t_start=25, t0=27, t_end=29),
+        video_duration_s=45,
+    )
+
+    assert summaries[0].within_tolerance is True
+    assert [item.timestamp_s for item in summaries[0].evidence] == [9.5, 10, 10.5]
+    assert contexts[0].raw_telemetry.at_claim.timestamp_s == 10
+    assert contexts[0].allowed_evidence_ids == ["log-row:9.5", "log-row:10", "log-row:10.5"]
 
 
 def test_extreme_acceleration_is_filtered_from_claim_summary(tmp_path) -> None:

@@ -12,10 +12,16 @@ from src.models.incidents import (
     Claim,
     ClaimLogEvidence,
     ClaimLogSummary,
+    ClaimRawTelemetry,
+    ClaimTelemetryChangePoint,
+    ClaimTelemetryDerived,
+    ClaimTelemetrySnapshot,
+    ClaimVerificationContext,
     IncidentWindow,
     LogAnalysisResult,
     LogEvent,
     LogEvidenceSummary,
+    TelemetrySignalName,
 )
 
 TIMESTAMP_ALIASES = ("timestamp_s", "timestamp", "time_s", "time_sec", "time")
@@ -25,10 +31,6 @@ BRAKE_ALIASES = ("brake", "ego_brake", "brake_pedal", "brake_pressure")
 THROTTLE_ALIASES = ("throttle", "ego_throttle", "throttle_pedal")
 STEERING_ALIASES = ("steering_angle", "steer", "ego_steer", "steering")
 CAMERA_FRAME_ALIASES = ("camera_frame",)
-CLAIM_SPEED_ALIASES = ("speed_kmh", "ego_speed_kmh")
-CLAIM_THROTTLE_ALIASES = ("throttle", "ego_throttle")
-CLAIM_BRAKE_ALIASES = ("brake", "ego_brake")
-CLAIM_STEER_ALIASES = ("steer", "ego_steer")
 ACCELERATION_X_ALIASES = ("acceleration_x",)
 ACCELERATION_Y_ALIASES = ("acceleration_y",)
 ACCELERATION_Z_ALIASES = ("acceleration_z",)
@@ -51,8 +53,22 @@ ACCELERATION_OUTLIER_WARNING = "LOG_ACCELERATION_OUTLIER_FILTERED"
 ATTENTION_THROTTLE_DELTA_THRESHOLD = 0.2
 ATTENTION_BRAKE_DELTA_THRESHOLD = 0.5
 ATTENTION_STEERING_DELTA_THRESHOLD = 0.3
-ATTENTION_ACCELERATION_THRESHOLD_MPS2 = 3.0
 MAX_LOG_ATTENTION_TIMESTAMPS = 20
+MAX_VERIFICATION_EVIDENCE_ROWS = 5
+MAX_VERIFICATION_CHANGE_POINTS = 2
+
+VERIFICATION_SIGNAL_ALIASES: dict[TelemetrySignalName, tuple[str, ...]] = {
+    "speed_kmh": SPEED_ALIASES,
+    "throttle": THROTTLE_ALIASES,
+    "brake": BRAKE_ALIASES,
+    "steer": STEERING_ALIASES,
+}
+VERIFICATION_CHANGE_THRESHOLDS: dict[TelemetrySignalName, float] = {
+    "speed_kmh": STRONG_SPEED_DROP_KMH,
+    "throttle": ATTENTION_THROTTLE_DELTA_THRESHOLD,
+    "brake": ATTENTION_BRAKE_DELTA_THRESHOLD,
+    "steer": ATTENTION_STEERING_DELTA_THRESHOLD,
+}
 
 
 class LogAnalysisError(RuntimeError):
@@ -274,7 +290,6 @@ def build_log_attention_hint(log_uri: str) -> str:
     throttle = numeric_series(records, THROTTLE_ALIASES)
     brake = numeric_series(records, BRAKE_ALIASES)
     steering = numeric_series(records, STEERING_ALIASES)
-    acceleration, _ = _filter_acceleration_outliers(acceleration_series(records))
     moments: dict[float, list[str]] = {}
     moment_scores: dict[float, float] = {}
 
@@ -311,19 +326,6 @@ def build_log_attention_hint(log_uri: str) -> str:
                 abs(delta) / ATTENTION_STEERING_DELTA_THRESHOLD,
             )
 
-    previous_acceleration_state = 0
-    for record, value in zip(records, acceleration, strict=True):
-        state = 0
-        if value is not None and abs(value) > ATTENTION_ACCELERATION_THRESHOLD_MPS2:
-            state = 1 if value > 0 else -1
-        if state and state != previous_acceleration_state:
-            add(
-                record.timestamp_s,
-                "gia tốc tăng mạnh" if state > 0 else "gia tốc giảm mạnh",
-                abs(value or 0.0) / ATTENTION_ACCELERATION_THRESHOLD_MPS2,
-            )
-        previous_acceleration_state = state
-
     if not moments:
         return ""
     selected_timestamps = sorted(
@@ -356,15 +358,84 @@ def build_claim_log_summaries(
     incident_window: IncidentWindow | None = None,
 ) -> list[ClaimLogSummary]:
     """Compute one deterministic, narrow log summary around each claim timestamp."""
+    records = _claim_records(
+        log_uri,
+        timestamp_tolerance_s=timestamp_tolerance_s,
+        sample_radius=sample_radius,
+        incident_window=incident_window,
+    )
+    return _build_claim_log_summaries_from_records(
+        records,
+        claims,
+        timestamp_tolerance_s=timestamp_tolerance_s,
+        sample_radius=sample_radius,
+        incident_window=incident_window,
+    )
+
+
+def build_claim_verification_inputs(
+    log_uri: str,
+    claims: list[Claim],
+    *,
+    timestamp_tolerance_s: float,
+    sample_radius: int = 3,
+    incident_window: IncidentWindow | None = None,
+    video_duration_s: float | None = None,
+) -> tuple[list[ClaimLogSummary], list[ClaimVerificationContext]]:
+    """Build rich summaries plus compact, deterministic telemetry for the verification LLM."""
+    records = _claim_records(
+        log_uri,
+        timestamp_tolerance_s=timestamp_tolerance_s,
+        sample_radius=sample_radius,
+        incident_window=incident_window,
+        video_duration_s=video_duration_s,
+    )
+    summaries = _build_claim_log_summaries_from_records(
+        records,
+        claims,
+        timestamp_tolerance_s=timestamp_tolerance_s,
+        sample_radius=sample_radius,
+        incident_window=None if video_duration_s is not None else incident_window,
+    )
+    contexts = [
+        _claim_verification_context(records, claim, summary)
+        for claim, summary in zip(claims, summaries, strict=True)
+    ]
+    return summaries, contexts
+
+
+def _claim_records(
+    log_uri: str,
+    *,
+    timestamp_tolerance_s: float,
+    sample_radius: int,
+    incident_window: IncidentWindow | None,
+    video_duration_s: float | None = None,
+) -> list[LogRecord]:
     if timestamp_tolerance_s < 0 or sample_radius < 0:
         raise ValueError("timestamp_tolerance_s and sample_radius must be non-negative")
+    if video_duration_s is not None and video_duration_s <= 0:
+        raise ValueError("video_duration_s must be positive")
     _, records = load_log_records(log_uri)
-    if incident_window is not None:
-        records = [
-            record
-            for record in records
-            if incident_window.t_start <= record.timestamp_s <= incident_window.t_end
-        ]
+    if video_duration_s is not None:
+        return [record for record in records if record.timestamp_s <= video_duration_s]
+    if incident_window is None:
+        return records
+    return [
+        record
+        for record in records
+        if incident_window.t_start <= record.timestamp_s <= incident_window.t_end
+    ]
+
+
+def _build_claim_log_summaries_from_records(
+    records: list[LogRecord],
+    claims: list[Claim],
+    *,
+    timestamp_tolerance_s: float,
+    sample_radius: int,
+    incident_window: IncidentWindow | None,
+) -> list[ClaimLogSummary]:
     return [
         _claim_log_summary(
             records,
@@ -497,15 +568,167 @@ def _claim_log_summary_without_samples(
     )
 
 
+def _claim_verification_context(
+    records: list[LogRecord],
+    claim: Claim,
+    summary: ClaimLogSummary,
+) -> ClaimVerificationContext:
+    allowed_timestamps = {item.timestamp_s for item in summary.evidence}
+    samples = [record for record in records if record.timestamp_s in allowed_timestamps]
+    if not samples or claim.timestamp_s is None:
+        empty = ClaimTelemetrySnapshot()
+        return ClaimVerificationContext(
+            claim_id=claim.claim_id,
+            raw_telemetry=ClaimRawTelemetry(
+                window_start=empty,
+                at_claim=empty,
+                window_end=empty,
+            ),
+            derived=ClaimTelemetryDerived(),
+        )
+
+    at_claim = min(samples, key=lambda record: abs(record.timestamp_s - claim.timestamp_s))
+    snapshot_records = (samples[0], at_claim, samples[-1])
+    raw_telemetry = ClaimRawTelemetry(
+        window_start=_telemetry_snapshot(snapshot_records[0]),
+        at_claim=_telemetry_snapshot(snapshot_records[1]),
+        window_end=_telemetry_snapshot(snapshot_records[2]),
+    )
+    available_signals = [
+        signal
+        for signal, aliases in VERIFICATION_SIGNAL_ALIASES.items()
+        if any(record.number(aliases) is not None for record in samples)
+    ]
+    allowed_evidence_ids = list(
+        dict.fromkeys(_row_evidence_id(record.timestamp_s) for record in snapshot_records)
+    )
+    change_points = _important_change_points(samples, allowed_evidence_ids)
+    return ClaimVerificationContext(
+        claim_id=claim.claim_id,
+        available_signals=available_signals,
+        raw_telemetry=raw_telemetry,
+        derived=_telemetry_derived(raw_telemetry),
+        change_points=change_points,
+        allowed_evidence_ids=allowed_evidence_ids,
+    )
+
+
+def _telemetry_snapshot(record: LogRecord) -> ClaimTelemetrySnapshot:
+    return ClaimTelemetrySnapshot(
+        timestamp_s=record.timestamp_s,
+        evidence_id=_row_evidence_id(record.timestamp_s),
+        speed_kmh=record.number(SPEED_ALIASES),
+        throttle=record.number(THROTTLE_ALIASES),
+        brake=record.number(BRAKE_ALIASES),
+        steer=record.number(STEERING_ALIASES),
+    )
+
+
+def _telemetry_derived(raw: ClaimRawTelemetry) -> ClaimTelemetryDerived:
+    speed_at_claim = raw.at_claim.speed_kmh
+    if speed_at_claim is None:
+        movement_state = None
+    elif speed_at_claim == 0:
+        movement_state = "stopped"
+    elif speed_at_claim <= NEAR_STOPPED_SPEED_KMH:
+        movement_state = "near_stopped"
+    else:
+        movement_state = "moving"
+
+    steer_at_claim = raw.at_claim.steer
+    if steer_at_claim is None:
+        steer_direction = None
+    elif steer_at_claim < 0:
+        steer_direction = "left"
+    elif steer_at_claim > 0:
+        steer_direction = "right"
+    else:
+        steer_direction = "straight"
+
+    speed_start = raw.window_start.speed_kmh
+    speed_end = raw.window_end.speed_kmh
+    if speed_start is None or speed_end is None:
+        speed_trend = None
+    else:
+        speed_delta = speed_end - speed_start
+        if speed_delta <= -STRONG_SPEED_DROP_KMH:
+            speed_trend = "strong_decrease"
+        elif speed_delta < 0:
+            speed_trend = "decrease"
+        elif speed_delta > 0:
+            speed_trend = "increase"
+        else:
+            speed_trend = "stable"
+    return ClaimTelemetryDerived(
+        movement_state_at_claim=movement_state,
+        steer_direction_at_claim=steer_direction,
+        speed_trend=speed_trend,
+    )
+
+
+def _important_change_points(
+    records: list[LogRecord],
+    allowed_evidence_ids: list[str],
+) -> list[ClaimTelemetryChangePoint]:
+    candidates: list[tuple[float, float, TelemetrySignalName, float, float, list[str]]] = []
+    for signal, aliases in VERIFICATION_SIGNAL_ALIASES.items():
+        threshold = VERIFICATION_CHANGE_THRESHOLDS[signal]
+        values = numeric_series(records, aliases)
+        for index in range(1, len(records)):
+            previous, current = values[index - 1], values[index]
+            if previous is None or current is None:
+                continue
+            delta = current - previous
+            if abs(delta) <= threshold:
+                continue
+            source_ids = [
+                _row_evidence_id(records[index - 1].timestamp_s),
+                _row_evidence_id(records[index].timestamp_s),
+            ]
+            candidates.append(
+                (
+                    abs(delta) / threshold,
+                    records[index].timestamp_s,
+                    signal,
+                    previous,
+                    current,
+                    source_ids,
+                )
+            )
+
+    selected = []
+    for _, timestamp_s, signal, previous, current, source_ids in sorted(
+        candidates,
+        key=lambda item: (-item[0], item[1], item[2]),
+    ):
+        expanded_evidence = list(dict.fromkeys([*allowed_evidence_ids, *source_ids]))
+        if len(expanded_evidence) > MAX_VERIFICATION_EVIDENCE_ROWS:
+            continue
+        allowed_evidence_ids[:] = expanded_evidence
+        selected.append(
+            ClaimTelemetryChangePoint(
+                signal=signal,
+                timestamp_s=timestamp_s,
+                from_value=previous,
+                to_value=current,
+                delta=current - previous,
+                evidence_ids=source_ids,
+            )
+        )
+        if len(selected) == MAX_VERIFICATION_CHANGE_POINTS:
+            break
+    return selected
+
+
 def _claim_metrics(
     records: list[LogRecord],
     claim_timestamp_s: float,
 ) -> tuple[dict[str, dict[str, float | int | str | bool | None]], list[str]]:
     signals = {
-        "speed_kmh": numeric_series(records, CLAIM_SPEED_ALIASES),
-        "throttle": numeric_series(records, CLAIM_THROTTLE_ALIASES),
-        "brake": numeric_series(records, CLAIM_BRAKE_ALIASES),
-        "steer": numeric_series(records, CLAIM_STEER_ALIASES),
+        "speed_kmh": numeric_series(records, SPEED_ALIASES),
+        "throttle": numeric_series(records, THROTTLE_ALIASES),
+        "brake": numeric_series(records, BRAKE_ALIASES),
+        "steer": numeric_series(records, STEERING_ALIASES),
         "acceleration_x": numeric_series(records, ACCELERATION_X_ALIASES),
         "acceleration_y": numeric_series(records, ACCELERATION_Y_ALIASES),
         "acceleration_z": numeric_series(records, ACCELERATION_Z_ALIASES),
@@ -751,7 +974,7 @@ def _build_claim_summary(
             f"Tốc độ nhỏ nhất: {float(speed['min']):g} km/h",
             f"Tốc độ lớn nhất: {float(speed['max']):g} km/h",
             "Tốc độ — các dòng log được phép dùng:",
-            *_allowed_signal_table(records, CLAIM_SPEED_ALIASES, "Speed (km/h)"),
+            *_allowed_signal_table(records, SPEED_ALIASES, "Speed (km/h)"),
         ]
         speed_lines.extend(_derived_speed_states(speed))
         if speed.get("acceleration_outlier_count"):
@@ -770,7 +993,7 @@ def _build_claim_summary(
                 [
                     _brake_statement(brake),
                     "Brake — các dòng log được phép dùng:",
-                    *_allowed_signal_table(records, CLAIM_BRAKE_ALIASES, "Brake"),
+                    *_allowed_signal_table(records, BRAKE_ALIASES, "Brake"),
                 ]
             )
         if throttle:
@@ -778,7 +1001,7 @@ def _build_claim_summary(
                 [
                     _throttle_statement(throttle),
                     "Throttle — các dòng log được phép dùng:",
-                    *_allowed_signal_table(records, CLAIM_THROTTLE_ALIASES, "Throttle"),
+                    *_allowed_signal_table(records, THROTTLE_ALIASES, "Throttle"),
                 ]
             )
         if speed and speed.get("acceleration_at_claim") is not None:
@@ -808,7 +1031,7 @@ def _build_claim_summary(
                     f"Steering thay đổi lớn nhất: {steer_change:g}",
                     _steering_direction_statement(records, claim_timestamp_s),
                     "Steering — các dòng log được phép dùng:",
-                    *_allowed_signal_table(records, CLAIM_STEER_ALIASES, "Steering"),
+                    *_allowed_signal_table(records, STEERING_ALIASES, "Steering"),
                 ]
             )
         sections.append("\n".join(direction_lines))
@@ -936,7 +1159,7 @@ def _throttle_statement(metric: dict[str, float | int | str | bool | None]) -> s
 
 def _steering_direction_statement(records: list[LogRecord], claim_timestamp_s: float) -> str:
     candidates = [
-        (abs(record.timestamp_s - claim_timestamp_s), record.timestamp_s, record.number(CLAIM_STEER_ALIASES))
+        (abs(record.timestamp_s - claim_timestamp_s), record.timestamp_s, record.number(STEERING_ALIASES))
         for record in records
     ]
     _, timestamp_s, value = min(

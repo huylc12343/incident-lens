@@ -148,8 +148,8 @@ def test_build_log_attention_hint_contains_only_qualitative_changes(tmp_path: Pa
     source.write_text(
         "timestamp_s,throttle,brake,steering_angle,acceleration_mps2\n"
         "0.0,0.1,0.0,0.0,0.0\n"
-        "1.0,0.5,0.4,-0.5,-4.0\n"
-        "2.0,0.5,0.4,-0.5,0.0\n",
+        "1.0,0.5,0.6,-0.5,-4.0\n"
+        "2.0,0.5,0.6,-0.5,0.0\n",
         encoding="utf-8",
     )
 
@@ -159,18 +159,19 @@ def test_build_log_attention_hint_contains_only_qualitative_changes(tmp_path: Pa
     assert "ga tăng đột ngột" in hint
     assert "phanh tăng đột ngột" in hint
     assert "góc đánh lái thay đổi đột ngột sang trái" in hint
-    assert "gia tốc giảm mạnh" in hint
-    for raw_value in ("0.1", "0.4", "0.5", "-0.5", "-4.0"):
+    assert "gia tốc" not in hint
+    for raw_value in ("0.1", "0.5", "0.6", "-0.5", "-4.0"):
         assert raw_value not in hint
     assert "evidence_id" not in hint
 
 
-def test_build_log_attention_hint_ignores_stable_values_and_acceleration_outliers(tmp_path: Path) -> None:
+def test_build_log_attention_hint_ignores_acceleration_entirely(tmp_path: Path) -> None:
     source = tmp_path / "stable.csv"
     source.write_text(
         "timestamp_s,throttle,brake,steering_angle,acceleration_mps2\n"
         "0.0,0.1,0.0,0.0,0.0\n"
-        "1.0,0.1,0.0,0.0,-25.87\n",
+        "1.0,0.1,0.0,0.0,-4.0\n"
+        "2.0,0.1,0.0,0.0,-25.87\n",
         encoding="utf-8",
     )
 

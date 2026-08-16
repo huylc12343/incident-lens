@@ -366,7 +366,11 @@ class QwenNativeVideoVLMService:
                 "target_claim_ids": request.target_claim_ids,
                 "base_revision": request.current_memory.revision,
             },
-            timestamp_bounds=(request.incident_window.t_start, request.incident_window.t_end),
+            timestamp_bounds=(
+                (0.0, request.source_duration_s)
+                if request.source_duration_s is not None
+                else (request.incident_window.t_start, request.incident_window.t_end)
+            ),
         )
         _validate_patch_targets(patch, request.target_claim_ids)
         return patch
@@ -687,21 +691,6 @@ def _validate_qwen_timestamp_bounds(result: BaseModel, minimum_s: float, maximum
                     "message": "Representative timestamp must be inside incident_window",
                 }
             )
-    if isinstance(result, VideoMemory):
-        window = result.incident_window
-        semantic_timestamps = [
-            *(item.timestamp_s for item in result.timeline),
-            *(item.timestamp_s for item in result.claims if item.timestamp_s is not None),
-            *(evidence.timestamp_s for claim in result.claims for evidence in claim.evidence),
-        ]
-        if any(timestamp < window.t_start or timestamp > window.t_end for timestamp in semantic_timestamps):
-            errors.append(
-                {
-                    "location": "timeline/claims/evidence.timestamp_s",
-                    "type": "timestamp_outside_incident_window",
-                    "message": "All semantic timestamps must be inside incident_window",
-                }
-            )
     if errors:
         raise QwenStructuredOutputValidationError(errors, "Qwen output violates video timestamp bounds")
 
@@ -759,16 +748,10 @@ def _stabilize_qwen_timestamps(
     ]
     representative_timestamp_s = normalize(result.representative_timestamp_s)
     window = result.incident_window
-    semantic_timestamps = [
-        *(item.timestamp_s for item in timeline),
-        *(claim.timestamp_s for claim in claims if claim.timestamp_s is not None),
-        *(evidence.timestamp_s for claim in claims for evidence in claim.evidence),
-        *([representative_timestamp_s] if representative_timestamp_s is not None else []),
-    ]
     normalized_window = IncidentWindow(
-        t_start=min([normalize(window.t_start), *semantic_timestamps]),
+        t_start=normalize(window.t_start),
         t0=normalize(window.t0),
-        t_end=max([normalize(window.t_end), *semantic_timestamps]),
+        t_end=normalize(window.t_end),
     )
     return result.model_copy(
         update={

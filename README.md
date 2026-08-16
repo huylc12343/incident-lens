@@ -44,7 +44,7 @@ INCIDENT_CHECKPOINT_PATH=./data/incident_checkpoints.sqlite3
 
 Incident clip mặc định có tối thiểu 5 giây, thêm 1 giây trước và 2 giây sau window do VLM xác định. Có thể điều chỉnh bằng `INCIDENT_CLIP_MIN_DURATION_S`, `INCIDENT_CLIP_PRE_ROLL_S` và `INCIDENT_CLIP_POST_ROLL_S`. Ảnh `representative_frame` được chọn gần `t0` thay vì lấy frame đầu tiên.
 
-Khi incident có log, bước phân tích video nhận thêm một `log_attention_hint` định tính để biết timestamp nào cần xem kỹ. Hint chỉ mô tả ga/phanh thay đổi quá `0.2`, góc đánh lái thay đổi quá `0.2`, hoặc gia tốc hợp lệ vượt `3 m/s²`; tối đa 20 timestamp. VLM không nhận giá trị telemetry cụ thể, raw log hay evidence ID và không được dùng hint để kết luận tai nạn. Gia tốc vượt `15 m/s²` bị xem là outlier nên không tạo attention hint.
+Khi incident có log, bước phân tích video nhận thêm một `log_attention_hint` định tính để biết timestamp nào cần xem kỹ. Hint chỉ mô tả ga thay đổi quá `0.2`, phanh thay đổi quá `0.5` hoặc góc đánh lái thay đổi quá `0.3`; tối đa 20 timestamp. Gia tốc không được dùng để tạo attention hint. VLM không nhận giá trị telemetry cụ thể, raw log hay evidence ID và không được dùng hint để kết luận tai nạn.
 
 Khi đối chiếu claim với log, backend trước tiên chỉ giữ các dòng đồng thời nằm trong `incident_window` và `±LOG_TIMESTAMP_TOLERANCE_S` quanh timestamp của claim. `LOG_CLAIM_SAMPLE_RADIUS` sau đó giới hạn số mẫu lấy ở mỗi phía của mẫu gần nhất; mặc định `3` tạo tối đa 7 mẫu. Các dòng model nhìn thấy và `allowed_evidence_ids` luôn là cùng một tập. Nếu không có dòng hợp lệ, claim được giữ ở trạng thái `unverified`.
 

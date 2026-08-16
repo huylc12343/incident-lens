@@ -452,7 +452,7 @@ def test_memory_only_patch_preserves_unselected_claim_and_reuses_existing_eviden
     evidence = EvidenceReference(evidence_id="frame-1", timestamp_s=1)
     memory = VideoMemory(
         global_scene="Road scene",
-        incident_window=IncidentWindow(t_start=0, t0=1, t_end=2),
+        incident_window=IncidentWindow(t_start=2, t0=3, t_end=4),
         claims=[
             Claim(
                 claim_id="claim-1",

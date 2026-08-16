@@ -42,7 +42,11 @@ from src.models.incidents import (
 )
 from src.prompts.reanalysis import build_auto_reanalysis_prompt_for_conflicts, build_human_reanalysis_prompt
 from src.prompts.video_analysis import build_video_analysis_prompt
-from src.services.log_analysis import LogAnalysisError, build_claim_log_summaries, build_log_attention_hint
+from src.services.log_analysis import (
+    LogAnalysisError,
+    build_claim_verification_inputs,
+    build_log_attention_hint,
+)
 from src.services.media import NormalizedVideoArtifact
 from src.services.video_memory import (
     VideoMemoryWorkflow,
@@ -171,6 +175,7 @@ async def analyze_video_node(
                 prompt=prompt,
                 manifest=manifest,
             )
+            video_duration_s = manifest.duration_s
             artifact_uris = {"frames": str(artifact_root / "frames")}
         else:
             normalized = await media.normalize_video(
@@ -190,12 +195,14 @@ async def analyze_video_node(
                 normalized_video_uri=normalized.uri,
                 metadata=NativeVideoMetadata.model_validate(normalized.metadata),
             )
+            video_duration_s = request.metadata.duration_s
             artifact_uris = {"normalized_video": normalized.uri}
 
         memory = await workflow.analyze(request)
         return {
             "status": "running",
             "video_memory": memory,
+            "video_duration_s": video_duration_s,
             "claims": memory.claims,
             "remote_media_handles": memory.remote_media_handles,
             "artifact_uris": {**state.get("artifact_uris", {}), **artifact_uris},
@@ -238,17 +245,27 @@ async def cut_incident_video_node(
             pre_roll_s=config.incident_clip_pre_roll_s,
             post_roll_s=config.incident_clip_post_roll_s,
         )
+        sample_start_s, sample_end_s = (
+            _semantic_sampling_bounds(memory)
+            if workflow.vlm.capabilities.input_mode == VLMInputMode.NATIVE_VIDEO
+            else (memory.incident_window.t_start, memory.incident_window.t_end)
+        )
         frames = await media.sample_frames(
             video_uri,
             str(frame_dir),
-            fps=_incident_sampling_fps(memory, config),
+            fps=_incident_sampling_fps(
+                memory,
+                config,
+                start_s=sample_start_s,
+                end_s=sample_end_s,
+            ),
             width=config.frame_width,
             height=config.frame_height,
             image_format=config.frame_format,
             jpeg_quality=config.frame_jpeg_quality,
             max_frames=config.incident_max_frames,
-            start_s=memory.incident_window.t_start,
-            end_s=memory.incident_window.t_end,
+            start_s=sample_start_s,
+            end_s=sample_end_s,
         )
         if workflow.vlm.capabilities.input_mode == VLMInputMode.NATIVE_VIDEO:
             memory = reconcile_native_video_evidence(memory, frames.frames)
@@ -368,18 +385,20 @@ async def align_and_verify_claims_node(
             if changed_ids is not None
             else memory.claims
         )
-        claim_log_summaries = build_claim_log_summaries(
+        claim_log_summaries, claim_verification_contexts = build_claim_verification_inputs(
             log_uri,
             claims_to_verify,
             timestamp_tolerance_s=timestamp_tolerance_s,
             sample_radius=sample_radius,
             incident_window=memory.incident_window,
+            video_duration_s=_video_duration_s(state, memory),
         )
         result = await verification.verify(
             VerificationRequest(
                 incident_id=incident_id,
                 claims=claims_to_verify,
                 claim_log_summaries=claim_log_summaries,
+                claim_verification_contexts=claim_verification_contexts,
                 timestamp_tolerance_s=timestamp_tolerance_s,
             )
         )
@@ -691,17 +710,23 @@ async def _reanalyze(
     config = workflow.config
     artifacts = dict(state.get("artifact_uris", {}))
     frame_dir = Path(config.artifact_dir).resolve() / _safe_incident_id(incident_id) / "reanalysis_frames"
+    sample_start_s, sample_end_s = _reanalysis_sampling_bounds(memory, target_claim_ids)
     frame_manifest = await media.sample_frames(
         video_uri,
         str(frame_dir),
-        fps=_incident_sampling_fps(memory, config),
+        fps=_incident_sampling_fps(
+            memory,
+            config,
+            start_s=sample_start_s,
+            end_s=sample_end_s,
+        ),
         width=config.frame_width,
         height=config.frame_height,
         image_format=config.frame_format,
         jpeg_quality=config.frame_jpeg_quality,
         max_frames=config.incident_max_frames,
-        start_s=memory.incident_window.t_start,
-        end_s=memory.incident_window.t_end,
+        start_s=sample_start_s,
+        end_s=sample_end_s,
     )
     artifacts["reanalysis_frames"] = str(frame_dir)
     normalized_video_uri = (
@@ -717,6 +742,7 @@ async def _reanalyze(
             target_claim_ids=target_claim_ids,
             incident_window=memory.incident_window,
             current_memory=memory,
+            source_duration_s=_video_duration_s(state, memory),
             frame_manifest=frame_manifest,
             normalized_video_uri=normalized_video_uri,
             remote_media_handles=state.get("remote_media_handles", memory.remote_media_handles),
@@ -738,12 +764,61 @@ def _safe_incident_id(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]", "_", value)
 
 
-def _incident_sampling_fps(memory: VideoMemory, config: VideoMemoryWorkflowConfig) -> float:
-    """Cover the full incident window without exceeding the frame budget."""
-    duration_s = memory.incident_window.t_end - memory.incident_window.t_start
+def _incident_sampling_fps(
+    memory: VideoMemory,
+    config: VideoMemoryWorkflowConfig,
+    *,
+    start_s: float | None = None,
+    end_s: float | None = None,
+) -> float:
+    """Cover the requested sampling span without exceeding the frame budget."""
+    sample_start_s = memory.incident_window.t_start if start_s is None else start_s
+    sample_end_s = memory.incident_window.t_end if end_s is None else end_s
+    duration_s = sample_end_s - sample_start_s
     if duration_s <= 0:
         return config.incident_frame_fps
     return min(config.incident_frame_fps, config.incident_max_frames / duration_s)
+
+
+def _semantic_sampling_bounds(memory: VideoMemory) -> tuple[float, float]:
+    timestamps = [
+        memory.incident_window.t_start,
+        memory.incident_window.t_end,
+        *(item.timestamp_s for item in memory.timeline),
+        *(claim.timestamp_s for claim in memory.claims if claim.timestamp_s is not None),
+        *(evidence.timestamp_s for claim in memory.claims for evidence in claim.evidence),
+    ]
+    return min(timestamps), max(timestamps)
+
+
+def _reanalysis_sampling_bounds(
+    memory: VideoMemory,
+    target_claim_ids: list[str],
+) -> tuple[float, float]:
+    target_ids = set(target_claim_ids)
+    target_claims = [claim for claim in memory.claims if claim.claim_id in target_ids]
+    timestamps = [
+        memory.incident_window.t_start,
+        memory.incident_window.t_end,
+        *(claim.timestamp_s for claim in target_claims if claim.timestamp_s is not None),
+        *(evidence.timestamp_s for claim in target_claims for evidence in claim.evidence),
+    ]
+    return min(timestamps), max(timestamps)
+
+
+def _video_duration_s(state: IncidentState, memory: VideoMemory) -> float:
+    duration_s = state.get("video_duration_s")
+    if duration_s is not None:
+        return duration_s
+    if memory.sampling_metadata is not None:
+        return memory.sampling_metadata.source_duration_s
+    timestamps = [
+        memory.incident_window.t_end,
+        *(item.timestamp_s for item in memory.timeline),
+        *(claim.timestamp_s for claim in memory.claims if claim.timestamp_s is not None),
+        *(evidence.timestamp_s for claim in memory.claims for evidence in claim.evidence),
+    ]
+    return max(timestamps)
 
 
 def _representative_timestamp(memory: VideoMemory) -> float:

@@ -70,6 +70,7 @@ class OpenAIVerificationService:
         prompt = build_verification_prompt(
             claims=request.claims,
             claim_log_summaries=request.claim_log_summaries,
+            claim_verification_contexts=request.claim_verification_contexts,
             timestamp_tolerance_s=request.timestamp_tolerance_s,
             version=self._prompt_version,
         )
@@ -173,6 +174,9 @@ class OpenAIVerificationService:
 def _validate_verification_result(request: VerificationRequest, result: VerificationResult) -> VerificationResult:
     expected_ids = [claim.claim_id for claim in request.claims]
     summaries = {summary.claim_id: summary for summary in request.claim_log_summaries}
+    compact_contexts = {
+        item.claim_id: item for item in request.claim_verification_contexts
+    }
     if list(summaries) != expected_ids:
         raise VerificationServiceError(
             "VERIFICATION_SUMMARY_MISMATCH",
@@ -211,7 +215,11 @@ def _validate_verification_result(request: VerificationRequest, result: Verifica
                 )
             )
             continue
-        allowed_evidence = set(summary.allowed_evidence_ids)
+        allowed_evidence = set(
+            compact_contexts[item.claim_id].allowed_evidence_ids
+            if item.claim_id in compact_contexts
+            else summary.allowed_evidence_ids
+        )
         evidence_ids = list(dict.fromkeys(eid for eid in item.evidence_ids if eid in allowed_evidence))
         if item.status == VerificationStatus.UNVERIFIED or not evidence_ids:
             normalized_results.append(

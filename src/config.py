@@ -19,7 +19,11 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     cors_origins: str = "http://localhost:3000"
-    #
+
+    # API security
+    # Empty means the service fails closed for protected routes. Set this via
+    # an environment variable or a secret manager; never commit the value.
+    security_api_key: str = ""
 
     # LLM
     openai_api_key: str = ""

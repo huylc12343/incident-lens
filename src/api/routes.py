@@ -1,9 +1,14 @@
-from fastapi import APIRouter, HTTPException
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException
 
 from src.agents.graph import agent
 from src.models.schemas import ChatRequest, ChatResponse
+from src.api.security import require_api_key
 
-router = APIRouter()
+logger = logging.getLogger(__name__)
+
+router = APIRouter(dependencies=[Depends(require_api_key)])
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -15,8 +20,14 @@ async def chat(request: ChatRequest) -> ChatResponse:
             response=result.get("response", ""),
             analysis=result.get("analysis", ""),
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        # Keep implementation details and upstream errors out of the public
+        # response. The protected server log can be used for investigation.
+        logger.exception("agent request failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error",
+        ) from None
 
 
 @router.get("/status")

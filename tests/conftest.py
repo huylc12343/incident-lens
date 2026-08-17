@@ -1,8 +1,13 @@
 from unittest.mock import AsyncMock
+import os
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+
+# Keep test authentication explicit without weakening the application defaults.
+os.environ.setdefault("APP_ENV", "test")
+os.environ.setdefault("SECURITY_API_KEY", "test-key")
 
 from src.main import app
 

@@ -3,7 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Keep development artifacts separate from production builds. Mixing both
   // in `.next` can leave stale RSC manifests and missing webpack chunks.
-  distDir: process.env.NODE_ENV === "development" ? ".next-dev" : ".next",
+  distDir: process.env.NODE_ENV === "development" ? ".next-local" : ".next",
   experimental: {
     // The backend accepts a 250 MB video plus a 25 MB telemetry file. Leave
     // room for multipart boundaries while proxying the upload through Next.

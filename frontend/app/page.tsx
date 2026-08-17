@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useRef, useState } from "react";
+import { CSSProperties, useEffect, useRef, useState } from "react";
 import { Header } from "../components/Header";
 import { AnalysisForm } from "../components/AnalysisForm";
 import { RecentReviewsTable } from "../components/RecentReviewsTable";
@@ -19,6 +19,8 @@ export default function Home() {
   const [messageIndex, setMessageIndex] = useState(0);
   const [displayedMessage, setDisplayedMessage] = useState(aiMessages[0]);
   const [isFading, setIsFading] = useState(false);
+  const [quickGuideVisible, setQuickGuideVisible] = useState(false);
+  const [quickGuidePosition, setQuickGuidePosition] = useState<CSSProperties>({});
   const hasShownInitialMessage = useRef(false);
 
   useEffect(() => {
@@ -59,9 +61,39 @@ export default function Home() {
     return () => window.clearInterval(typing);
   }, [messageIndex]);
 
+  useEffect(() => {
+    if (!quickGuideVisible) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setQuickGuideVisible(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [quickGuideVisible]);
+
+  const openQuickGuide = () => {
+    const uploadSection = document.getElementById("upload-evidence");
+    if (!uploadSection) return;
+    const revealGuide = () => {
+      const bounds = uploadSection.getBoundingClientRect();
+      setQuickGuidePosition({
+        top: Math.max(82, bounds.top - 242),
+        left: Math.min(window.innerWidth - 376, Math.max(16, bounds.right - 360)),
+      });
+      setQuickGuideVisible(true);
+    };
+    const fallbackTimer = window.setTimeout(revealGuide, 650);
+    const onScrollEnd = () => {
+      window.clearTimeout(fallbackTimer);
+      revealGuide();
+    };
+    window.addEventListener("scrollend", onScrollEnd, { once: true });
+    uploadSection.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => window.removeEventListener("scrollend", onScrollEnd), 700);
+  };
+
   return (
     <>
-      <Header />
+      <Header onQuickGuide={openQuickGuide} />
       <main className="page-shell dashboard-shell">
         <section className="hero" aria-labelledby="page-title">
           <div className="hero-content">
@@ -76,9 +108,24 @@ export default function Home() {
             </div>
           </div>
         </section>
-        <AnalysisForm />
+        <AnalysisForm highlighted={quickGuideVisible} />
         <RecentReviewsTable />
       </main>
+      {quickGuideVisible && (
+        <>
+          <div className="quick-guide-overlay" aria-hidden="true" />
+          <section className="quick-guide-popover" role="dialog" aria-modal="true" aria-labelledby="quick-guide-title" style={quickGuidePosition}>
+            <p className="eyebrow">Hướng dẫn nhanh</p>
+            <h2 id="quick-guide-title">Bắt đầu phân tích</h2>
+            <ol>
+              <li>Tải video hành trình chứa phiên cần rà soát.</li>
+              <li>Thêm telemetry để AI đối chiếu dữ liệu xe chính xác hơn.</li>
+              <li>Nhấn Phân tích sau khi video đã sẵn sàng.</li>
+            </ol>
+            <button type="button" onClick={() => setQuickGuideVisible(false)}>Đã hiểu</button>
+          </section>
+        </>
+      )}
     </>
   );
 }

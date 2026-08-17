@@ -959,9 +959,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
     box-shadow: 0 2px 10px rgba(55,55,55,.18);
 }
 .nav-inner { max-width: none; padding: 0 24px; }
-.brand { min-width: 250px; gap: 11px; }
-.brand strong { color: #fff; font-size: 18px; letter-spacing: -.35px; }
-.brand small { color: #C0C0C2; font-size: 9px; letter-spacing: .035em; text-transform: uppercase; }
+.brand { min-width: 250px; align-self: stretch; gap: 11px; margin-left: -24px; padding: 0 16px 0 24px; background: #dbeafe; }
+.brand strong { color: #1e293b; font-size: 18px; letter-spacing: -.35px; }
+.brand small { color: #475569; font-size: 9px; letter-spacing: .035em; text-transform: uppercase; }
 .brand-mark { width: 34px; height: 34px; overflow: hidden; border-radius: 8px; background: transparent; box-shadow: none; }
 .brand-mark img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .topbar nav { gap: 26px; }
@@ -971,6 +971,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .topbar,
 .topbar * { font-weight: 800; }
 .nav-actions { min-width: 250px; }
+.quick-guide-button { display: grid; width: 34px; min-height: 34px; padding: 0; place-items: center; border: 1px solid #fbbf24; border-radius: 7px; background: rgba(251, 191, 36, .1); color: #fef3c7; font-size: 15px; font-weight: 800; line-height: 1; }
+.quick-guide-button:hover { border-color: #fcd34d; background: rgba(251, 191, 36, .2); color: #fff; }
 .icon-button { position: relative; width: 34px; height: 34px; color: #C0C0C2; }
 .icon-button:hover { color: #fff; background: #373737; }
 .notification-dot { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border: 1px solid #565656; border-radius: 50%; background: #ACBABF; }
@@ -1152,7 +1154,7 @@ tbody tr:hover { background: #fafbff; }
 @media (max-width: 760px) {
     .topbar { height: 58px; }
     .nav-inner { padding: 0 14px; gap: 10px; }
-    .brand { min-width: 0; }
+    .brand { min-width: 0; margin-left: -14px; padding-left: 14px; }
     .brand small, .topbar nav, .header-status, .nav-actions .icon-button { display: none; }
     .nav-actions { min-width: auto; }
     .page-shell { padding: 22px 14px 48px; }
@@ -4432,4 +4434,22 @@ body time { font-size: max(12px, .75rem) !important; line-height: 1.5 !important
   border-color: #828385 !important;
   background: #f2f4f7 !important;
   color: #1f1f1f !important;
+}
+
+.guide-highlight { position: relative; z-index: 56; border-color: #828385 !important; box-shadow: 0 0 0 5px rgba(219, 234, 254, .78), 0 14px 42px rgba(15, 23, 42, .18) !important; }
+.quick-guide-overlay { position: fixed; z-index: 55; inset: 0; background: rgba(15, 23, 42, .32); animation: quick-guide-fade 180ms ease-out; }
+.quick-guide-popover { position: fixed; z-index: 57; width: min(360px, calc(100vw - 32px)); padding: 20px; border: 1px solid #cbd5e1; border-radius: 12px; background: #fff; box-shadow: 0 18px 50px rgba(15, 23, 42, .2); animation: quick-guide-enter 220ms ease-out; }
+.quick-guide-popover .eyebrow { margin-bottom: 5px; color: #475569; }
+.quick-guide-popover h2 { margin: 0; color: #1e293b; font-size: 18px; font-weight: 800; }
+.quick-guide-popover ol { display: grid; gap: 10px; margin: 16px 0 20px; padding-left: 22px; color: #475569; font-size: 13px; line-height: 1.55; }
+.quick-guide-popover li::marker { color: #373737; font-weight: 800; }
+.quick-guide-popover button { width: 100%; min-height: 38px; border: 1px solid #373737; border-radius: 8px; background: #373737; color: #fff; font-size: 13px; font-weight: 800; }
+.quick-guide-popover button:hover { background: #1f1f1f; }
+@keyframes quick-guide-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes quick-guide-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 760px) {
+  .quick-guide-popover { top: auto !important; right: 16px; bottom: 16px; left: 16px !important; width: auto; border-radius: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .quick-guide-overlay, .quick-guide-popover { animation: none; }
 }

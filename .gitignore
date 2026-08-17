@@ -48,6 +48,7 @@ docker-compose.override.yml
 # Node (frontend)
 node_modules/
 .next/
+.next-local/
 out/
 .nuxt/
 

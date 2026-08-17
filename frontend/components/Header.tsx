@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import Image from "next/image";
 import { uiText as text } from "../lib/ui-copy";
@@ -10,10 +12,20 @@ const Icon = ({ children }: { children: React.ReactNode }) => (
 export function Header({
   active = "home",
   processing = false,
+  onQuickGuide,
 }: {
   active?: "home" | "history" | "settings";
   processing?: boolean;
+  onQuickGuide?: () => void;
 }) {
+  const openQuickGuide = () => {
+    if (onQuickGuide) {
+      onQuickGuide();
+      return;
+    }
+    window.location.assign("/#upload-evidence");
+  };
+
   return (
     <header className="topbar">
       <div className="nav-inner">
@@ -52,24 +64,8 @@ export function Header({
             </Icon>
             <span className="notification-dot" />
           </button>
-          <button className="icon-button" aria-label={text("Help", "Trợ giúp")}>
-            <Icon>
-              <circle
-                cx="12"
-                cy="12"
-                r="9"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-              />
-              <path
-                d="M9.7 9a2.5 2.5 0 1 1 4.2 1.8c-1.2 1.05-1.9 1.5-1.9 3.2M12 17h.01"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-              />
-            </Icon>
+          <button className="quick-guide-button" type="button" onClick={openQuickGuide} aria-label={text("Quick guide", "Hướng dẫn nhanh")}>
+            ?
           </button>
           <span className="avatar" aria-label={text("User account", "Tài khoản người dùng")}>
             PT

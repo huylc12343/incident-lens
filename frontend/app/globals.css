@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
 
 :root {
     --ink: #18213a;
@@ -25,7 +25,7 @@ body {
     min-width: 320px;
     background: #fbfbfd;
     color: var(--ink);
-    font-family: Inter, Arial, sans-serif;
+    font-family: Manrope, Arial, sans-serif;
     font-size: 14px;
 }
 
@@ -968,6 +968,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .topbar nav a { color: #C0C0C2; font-size: 12px; font-weight: 600; }
 .topbar nav a:hover { color: #fff; }
 .topbar nav a.active { color: #fff; }
+.topbar,
+.topbar * { font-weight: 800; }
 .nav-actions { min-width: 250px; }
 .icon-button { position: relative; width: 34px; height: 34px; color: #C0C0C2; }
 .icon-button:hover { color: #fff; background: #373737; }
@@ -999,7 +1001,19 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .hero-ai-dots i:nth-child(2) { animation-delay: .16s; }
 .hero-ai-dots i:nth-child(3) { animation-delay: .32s; }
 .hero-ai-status p { margin: 2px 0 0; color: #828385; font-family: Inter, Manrope, Arial, sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .02em; }
+.hero-ai-status .hero-ai-message { max-width: 500px; min-height: 44px; margin: 2px auto 0; color: #565656; font-family: Manrope, Inter, Arial, sans-serif; font-size: 14px; font-weight: 500; line-height: 1.55; letter-spacing: 0; text-align: center; transition: opacity 250ms ease, transform 250ms ease; transform: translateY(0); }
+.hero-ai-status .hero-ai-message.is-fading { opacity: 0; transform: translateY(4px); transition-duration: 150ms; }
 @keyframes hero-dot-pulse { 0%, 70%, 100% { opacity: .35; transform: scale(.8); } 35% { opacity: 1; transform: scale(1.15); background: #565656; } }
+
+@media (prefers-reduced-motion: reduce) {
+    .hero-ai-status .hero-ai-message,
+    .hero-ai-status .hero-ai-message.is-fading { opacity: 1; transform: none; transition: none; }
+}
+
+/* Keep the product typography consistent across every UI surface. */
+body * {
+    font-family: Manrope, Arial, sans-serif !important;
+}
 
 .workspace-card, .recent-section { overflow: hidden; border: 1px solid #e4e7ec; border-radius: 14px; background: #fff; box-shadow: var(--shadow-xs); }
 .workspace-card { padding: 0; }
@@ -1007,19 +1021,23 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .analysis-section-title { align-items: flex-start; }
 .section-title h2, .recent-heading h2 { margin: 0; color: #101828; font-size: 18px; letter-spacing: -.3px; }
 .section-description, .recent-heading p { margin: 6px 0 0; color: #667085; font-size: 11px; line-height: 1.5; }
-.automatic-timestamp { max-width: 300px; padding: 10px 12px; border: 1px solid #c7d2fe; border-radius: 8px; background: #f5f7ff; }
+.analysis-section-title .eyebrow { color: #565656; }
+.automatic-timestamp { max-width: 300px; padding: 10px 12px; border: 1px solid #d0d5dd; border-radius: 8px; background: #f9fafb; color: #373737; }
+.automatic-timestamp strong { color: #373737; }
 .workspace-card form { padding: 20px 24px 22px; }
 .upload-grid { gap: 16px; }
 .upload-card { min-height: 240px; padding: 18px; border-color: #dfe3ea; border-radius: 11px; box-shadow: none; }
-.upload-card:hover { border-color: #a5b4fc; box-shadow: 0 0 0 3px rgba(99,102,241,.06); }
+.upload-card:hover { border-color: #828385; box-shadow: 0 0 0 3px rgba(55,55,55,.06); }
 .upload-card.selected { border-color: #818cf8; background: #fbfbff; }
 .card-heading { align-items: flex-start; }
-.card-heading h2 { font-size: 14px; }
+.card-heading h2 { font-size: 14px; font-weight: 800; }
 .card-heading p { max-width: 390px; font-size: 10px; line-height: 1.55; }
 .file-icon { display: grid; flex: 0 0 auto; width: 32px; height: 32px; place-items: center; border: 1px solid #c7d2fe; border-radius: 8px; background: #eef2ff; color: #4f46e5; }
+.file-icon img { width: 18px; height: 18px; object-fit: contain; }
 .format-badge { border: 1px solid #e4e7ec; background: #f9fafb; color: #667085; }
 .dropzone { min-height: 116px; border-color: #cfd4dc; border-radius: 9px; background: #fafbfc; }
-.dropzone:hover, .dropzone.dragging { border-color: #6366f1; background: #f5f7ff; }
+.dropzone:hover, .dropzone.dragging { border-color: #565656; background: #f5f5f5; color: #565656; }
+.dropzone b { color: #373737; }
 .upload-arrow { color: #4f46e5; }
 .form-footer { margin-top: 18px; padding-top: 18px; border-top: 1px solid #eaecf0; }
 .primary-button, .approve-action { border-radius: 8px; background: #4f46e5; box-shadow: 0 1px 2px rgba(16,24,40,.08); }
@@ -1902,13 +1920,13 @@ tbody tr:hover { background: #fafbff; }
     gap: 4px;
     max-width: 360px;
     padding: 12px 16px;
-    border: 1px solid #dfe2f2;
+    border: 1px solid #d0d5dd;
     border-radius: 10px;
-    background: #f7f7ff;
+    background: #f9fafb;
 }
 
-.automatic-timestamp strong { color: var(--indigo); font-size: 13px; }
-.automatic-timestamp span { color: #6f7788; font-size: 11px; line-height: 1.4; }
+.automatic-timestamp strong { color: #373737; font-size: 13px; font-weight: 800; }
+.automatic-timestamp span { color: #667085; font-size: 11px; line-height: 1.4; }
 .submission-progress { margin: 20px 0 4px; padding: 16px; border-radius: 10px; background: #f7f7ff; }
 .submission-progress > div:first-child { display: flex; justify-content: space-between; margin-bottom: 10px; color: #465066; font-size: 12px; }
 .submission-progress p { margin: 8px 0 0; color: #7b8394; font-size: 10px; }
@@ -4335,4 +4353,83 @@ body time { font-size: max(12px, .75rem) !important; line-height: 1.5 !important
   .assessment-content section > div { padding: 13px; }
   .assessment-content section > header strong { font-size: 13px; }
   .assessment-content p { font-size: 13px !important; }
+}
+
+/* Neutral review theme for Processing, Report, and Evaluation. */
+.incident-review-frame,
+.report-page-shell,
+.evaluation-shell {
+  --indigo: #373737;
+  --indigo-dark: #1f1f1f;
+  --indigo-soft: #f2f4f7;
+}
+
+.incident-review-frame :is(h1, h2, h3, .eyebrow, .panel-heading strong, .review-command-bar strong, .sidebar-section h3, .forensic-panel-title strong),
+.report-page-shell :is(h1, h2, h3, .eyebrow, .report-section-heading strong, .report-document-header strong, .report-toolbar p strong),
+.evaluation-shell :is(h1, h2, h3, .eyebrow, strong) {
+  color: #373737;
+  font-weight: 800 !important;
+}
+
+.incident-navigation-sidebar,
+.review-command-bar,
+.workspace-panel,
+.incident-review-sidebar,
+.telemetry-chart-grid figure,
+.chart-log-assessment,
+.assessment-content section,
+.report-toolbar,
+.forensic-report-document,
+.report-summary-block,
+.report-document-section,
+.report-technical-appendix,
+.engineer-signature,
+.evaluation-hero,
+.evaluation-grid article,
+.evaluation-details {
+  border-color: #d0d5dd !important;
+  background: #fff !important;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, .05) !important;
+}
+
+.incident-navigation-sidebar,
+.review-command-bar,
+.report-toolbar,
+.evaluation-hero,
+.evaluation-grid article,
+.evaluation-details,
+.report-document-section,
+.report-technical-appendix {
+  background: #f9fafb !important;
+}
+
+.incident-review-frame :is(.source-chip, .command-secondary, .selected-event-dot, .chart-context-dot, .other-assessment-dot, .assessment-content section > header span),
+.report-page-shell :is(.report-toolbar p strong, .report-text-action, .coverage-meter i),
+.evaluation-shell :is(.status.awaiting_review, .status.pending-review) {
+  border-color: #98a2b3 !important;
+  background: #f2f4f7 !important;
+  color: #373737 !important;
+}
+
+.incident-review-frame :is(.command-decision, .approve-action, .primary-button),
+.report-page-shell :is(.report-export, .report-document-actions button),
+.evaluation-shell .approve-action {
+  border-color: #373737 !important;
+  background: #373737 !important;
+  color: #fff !important;
+}
+
+.incident-review-frame :is(.command-decision:hover, .approve-action:hover, .primary-button:hover),
+.report-page-shell :is(.report-export:hover, .report-document-actions button:hover),
+.evaluation-shell .approve-action:hover {
+  border-color: #1f1f1f !important;
+  background: #1f1f1f !important;
+}
+
+.incident-review-frame :is(.command-secondary:hover, .telemetry-chart-grid figure:hover, .assessment-content section:hover),
+.report-page-shell :is(.report-toolbar a:hover, .report-download:hover, .document-evidence-gallery figure:hover),
+.evaluation-shell :is(.secondary-action:hover, .evaluation-grid article:hover) {
+  border-color: #828385 !important;
+  background: #f2f4f7 !important;
+  color: #1f1f1f !important;
 }

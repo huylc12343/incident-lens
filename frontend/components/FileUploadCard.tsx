@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { ChangeEvent, DragEvent, useRef, useState } from "react";
 import { uiText as text } from "../lib/ui-copy";
 
@@ -14,6 +15,8 @@ const formatBytes = (bytes: number) =>
     ? `${(bytes / 1024).toFixed(1)} KB`
     : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 const telemetryExtensions = [".csv", ".txt", ".json", ".xls", ".xlsx"];
+const videoIconSrc = "/images/play.png";
+const telemetryIconSrc = "/images/waveform.png";
 
 export function FileUploadCard({ kind, files, onChange }: Props) {
   const input = useRef<HTMLInputElement>(null);
@@ -73,7 +76,9 @@ export function FileUploadCard({ kind, files, onChange }: Props) {
       className={`upload-card ${files.length ? "selected" : ""} ${error ? "invalid" : ""}`}
     >
       <div className="card-heading">
-        <span className="file-icon">{isVideo ? "▶" : "▤"}</span>
+        <span className="file-icon">
+          <Image src={isVideo ? videoIconSrc : telemetryIconSrc} alt="" width={18} height={18} />
+        </span>
         <div>
           <h2>{label}</h2>
           <p>

@@ -20,15 +20,18 @@ from openai import (
     PermissionDeniedError,
     RateLimitError,
 )
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from src.models.incidents import (
     AnalysisMode,
+    Claim,
     IncidentWindow,
     NativeVideoAnalysisRequest,
     ReanalysisRequest,
     RemoteMediaHandle,
+    TimelineEvent,
     TimestampedFramesAnalysisRequest,
+    VerificationStatus,
     VideoAnalysisRequest,
     VideoMemory,
     VideoMemoryPatch,
@@ -54,6 +57,35 @@ class QwenStructuredOutputValidationError(ValueError):
     def __init__(self, details: list[dict[str, str]], message: str = "Qwen structured output is invalid") -> None:
         super().__init__(message)
         self.details = details
+
+
+class _VLMTimelineEventOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    timestamp_s: float = Field(ge=0)
+    description: str = Field(min_length=1)
+
+
+class _VLMClaimOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    claim_id: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+    timestamp_s: float = Field(ge=0)
+    verification_status: VerificationStatus = VerificationStatus.UNVERIFIED
+
+
+class _VLMVideoMemoryOutput(BaseModel):
+    """Only fields that the visual model is allowed to generate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    global_scene: str = Field(min_length=1)
+    video_summary: str | None = Field(default=None, min_length=1)
+    incident_window: IncidentWindow
+    representative_timestamp_s: float | None = Field(default=None, ge=0)
+    timeline: list[_VLMTimelineEventOutput] = Field(default_factory=list)
+    claims: list[_VLMClaimOutput] = Field(default_factory=list)
 
 
 class OpenAIVLMService:
@@ -102,16 +134,17 @@ class OpenAIVLMService:
         if not isinstance(request, TimestampedFramesAnalysisRequest):
             raise VLMServiceError("OPENAI_UNSUPPORTED_INPUT_MODE", "OpenAI VLM accepts timestamped frames only")
         content = await self._build_frame_content(_prompt_context_text(request.prompt.context), request.manifest.frames)
-        return await self._parse_response(
+        output = await self._parse_response(
             request.prompt.text,
             content,
-            VideoMemory,
+            _VLMVideoMemoryOutput,
             "OPENAI_VIDEO_ANALYSIS_FAILED",
             incident_id=request.incident_id,
             operation="video_analysis",
             description="Phân tích toàn bộ video và tạo VideoMemory có cấu trúc.",
             metadata={"image_count": len(request.manifest.frames), "input_mode": "timestamped_frames"},
         )
+        return _video_memory_from_model_output(output, analysis_mode=AnalysisMode.SINGLE_REQUEST)
 
     async def reanalyze_claims(self, request: ReanalysisRequest) -> VideoMemoryPatch:
         if request.frame_manifest is None:
@@ -212,6 +245,8 @@ class OpenAIVLMService:
             if parsed is None:
                 output_text = getattr(response, "output_text", "")
                 parsed = json.loads(output_text)
+            if output_model is _VLMVideoMemoryOutput and isinstance(parsed, VideoMemory):
+                parsed = _video_memory_model_payload(parsed)
             result = output_model.model_validate(parsed)
             if activity_id is not None:
                 self._observability.complete(activity_id, response)
@@ -329,7 +364,11 @@ class QwenNativeVideoVLMService:
         self._max_structured_output_retries = max_structured_output_retries
         self._max_network_retries = max_network_retries
         self._observability = observability
-        self._capabilities = VLMCapabilities(provider=VLMProvider.QWEN, input_mode=VLMInputMode.NATIVE_VIDEO)
+        self._capabilities = VLMCapabilities(
+            provider=VLMProvider.QWEN,
+            input_mode=VLMInputMode.NATIVE_VIDEO,
+            native_video_fps=video_fps,
+        )
 
     @property
     def capabilities(self) -> VLMCapabilities:
@@ -400,6 +439,18 @@ class QwenNativeVideoVLMService:
                 definitions.get("Claim", {}).get("properties", {}).pop("evidence", None)
                 definitions.get("TimelineEvent", {}).get("properties", {}).pop("evidence_ids", None)
                 definitions.pop("EvidenceReference", None)
+                properties = schema.get("properties", {})
+                for field_name in (
+                    "revision",
+                    "analysis_mode",
+                    "sampling_metadata",
+                    "remote_media_handles",
+                ):
+                    properties.pop(field_name, None)
+                if "required" in schema:
+                    schema["required"] = [field_name for field_name in schema["required"] if field_name in properties]
+                definitions.pop("SamplingMetadata", None)
+                definitions.pop("RemoteMediaHandle", None)
             output_schema = json.dumps(
                 schema,
                 ensure_ascii=False,
@@ -639,11 +690,15 @@ def _prepare_qwen_payload(
     model_defaults: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Apply backend-owned values before strict Pydantic validation."""
-    prepared = {**payload, **(model_defaults or {})}
+    prepared = dict(payload)
     if output_model not in {VideoMemory, VideoMemoryPatch}:
+        prepared.update(model_defaults or {})
         return prepared
 
     prepared.pop("evidence_id_counter", None)
+    for field_name in ("revision", "analysis_mode", "sampling_metadata", "remote_media_handles"):
+        prepared.pop(field_name, None)
+    prepared.update(model_defaults or {})
     if output_model is VideoMemory:
         timeline = prepared.get("timeline")
         if isinstance(timeline, list):
@@ -666,6 +721,44 @@ def _prepare_qwen_payload(
         for claim in claims
     ]
     return prepared
+
+
+def _video_memory_model_payload(memory: VideoMemory) -> dict[str, Any]:
+    return {
+        "global_scene": memory.global_scene,
+        "video_summary": memory.video_summary,
+        "incident_window": memory.incident_window.model_dump(mode="json"),
+        "representative_timestamp_s": memory.representative_timestamp_s,
+        "timeline": [
+            {"timestamp_s": event.timestamp_s, "description": event.description}
+            for event in memory.timeline
+        ],
+        "claims": [
+            {
+                "claim_id": claim.claim_id,
+                "text": claim.text,
+                "timestamp_s": claim.timestamp_s,
+                "verification_status": claim.verification_status,
+            }
+            for claim in memory.claims
+        ],
+    }
+
+
+def _video_memory_from_model_output(
+    output: _VLMVideoMemoryOutput,
+    *,
+    analysis_mode: AnalysisMode,
+) -> VideoMemory:
+    return VideoMemory(
+        global_scene=output.global_scene,
+        video_summary=output.video_summary,
+        incident_window=output.incident_window,
+        representative_timestamp_s=output.representative_timestamp_s,
+        timeline=[TimelineEvent(**event.model_dump()) for event in output.timeline],
+        claims=[Claim(**claim.model_dump()) for claim in output.claims],
+        analysis_mode=analysis_mode,
+    )
 
 
 def _validate_qwen_timestamp_bounds(result: BaseModel, minimum_s: float, maximum_s: float) -> None:

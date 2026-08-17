@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import TypeVar
 
@@ -181,6 +182,7 @@ async def analyze_single_request(
     if isinstance(request, TimestampedFramesAnalysisRequest):
         memory = memory.model_copy(
             update={
+                "revision": 1,
                 "analysis_mode": AnalysisMode.SINGLE_REQUEST,
                 "sampling_metadata": SamplingMetadata(
                     requested_fps=_manifest_fps(request.manifest),
@@ -188,13 +190,32 @@ async def analyze_single_request(
                     source_duration_s=request.manifest.duration_s,
                     batch_count=1,
                 ),
+                "remote_media_handles": [],
             }
         )
         frame_ids = {frame.frame_id for frame in request.manifest.frames}
         expected_mode = AnalysisMode.SINGLE_REQUEST
     else:
         memory = _prepare_native_video_memory(memory)
-        memory = memory.model_copy(update={"analysis_mode": AnalysisMode.NATIVE_VIDEO})
+        native_video_fps = vlm.capabilities.native_video_fps
+        sampling_metadata = (
+            SamplingMetadata(
+                requested_fps=native_video_fps,
+                sampled_frame_count=math.ceil(request.metadata.duration_s * native_video_fps),
+                source_duration_s=request.metadata.duration_s,
+                batch_count=1,
+            )
+            if native_video_fps is not None
+            else None
+        )
+        memory = memory.model_copy(
+            update={
+                "revision": 1,
+                "analysis_mode": AnalysisMode.NATIVE_VIDEO,
+                "sampling_metadata": sampling_metadata,
+                "remote_media_handles": [],
+            }
+        )
         frame_ids = None
         expected_mode = AnalysisMode.NATIVE_VIDEO
     return validate_video_memory(
@@ -273,6 +294,7 @@ async def analyze_rolling_batches(
     memory = _reset_claim_verification(memory)
     memory = memory.model_copy(
         update={
+            "revision": 1,
             "analysis_mode": AnalysisMode.ROLLING_BATCHES,
             "sampling_metadata": SamplingMetadata(
                 requested_fps=_manifest_fps(request.manifest),
@@ -280,6 +302,7 @@ async def analyze_rolling_batches(
                 source_duration_s=request.manifest.duration_s,
                 batch_count=len(batches),
             ),
+            "remote_media_handles": [],
         }
     )
     return validate_video_memory(

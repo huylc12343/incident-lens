@@ -68,7 +68,7 @@ async def test_qwen_sends_native_video_to_dashscope_chat_completions() -> None:
     assert call["response_format"] == {"type": "json_object"}
     structured_prompt = call["messages"][0]["content"]
     assert "<json_schema>" in structured_prompt
-    assert '"analysis_mode"' in structured_prompt
+    assert '"analysis_mode"' not in structured_prompt
     assert "Quy tắc phân tích hệ thống." in structured_prompt
     assert "Tập trung vào va chạm chính." not in structured_prompt
     assert "Video bắt đầu tại 0s và kết thúc tại 2s" in structured_prompt
@@ -260,6 +260,15 @@ async def test_qwen_contract_omits_provider_visual_evidence_fields() -> None:
                 "evidence": [{"evidence_id": "1.0", "timestamp_s": 1}],
             }
         ],
+        "revision": 99,
+        "analysis_mode": "rolling_batches",
+        "sampling_metadata": {
+            "requested_fps": 30,
+            "sampled_frame_count": 60,
+            "source_duration_s": 2,
+            "batch_count": 1,
+        },
+        "remote_media_handles": [],
     }
     response = SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
@@ -279,9 +288,20 @@ async def test_qwen_contract_omits_provider_visual_evidence_fields() -> None:
 
     assert result.timeline[0].evidence_ids == []
     assert result.claims[0].evidence == []
+    assert result.analysis_mode == AnalysisMode.NATIVE_VIDEO
+    assert result.revision == 1
+    assert result.sampling_metadata is None
+    assert result.remote_media_handles == []
     system_prompt = client.chat.completions.create.await_args.kwargs["messages"][0]["content"]
-    assert '"evidence_ids"' not in system_prompt
-    assert '"evidence"' not in system_prompt
+    for backend_field in (
+        "evidence_ids",
+        "evidence",
+        "revision",
+        "analysis_mode",
+        "sampling_metadata",
+        "remote_media_handles",
+    ):
+        assert f'"{backend_field}"' not in system_prompt
 
 
 @pytest.mark.asyncio

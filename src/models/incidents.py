@@ -417,6 +417,7 @@ class VLMCapabilities(ContractModel):
     input_mode: VLMInputMode
     supports_reanalysis: bool = True
     max_images_per_request: int | None = Field(default=None, gt=0)
+    native_video_fps: float | None = Field(default=None, gt=0, le=10)
 
 
 @runtime_checkable

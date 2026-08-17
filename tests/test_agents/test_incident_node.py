@@ -147,7 +147,7 @@ async def test_analyze_video_node_adds_qualitative_log_attention_hint(tmp_path: 
     assert "Tại giây thứ 1.0" in hint
     assert "ga tăng đột ngột" in hint
     assert "phanh tăng đột ngột" in hint
-    assert "gia tốc" not in hint
+    assert "gia tốc giảm đột ngột" in hint
     assert "-4.0" not in hint
     assert "0.5" not in hint
 

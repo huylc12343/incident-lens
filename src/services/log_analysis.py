@@ -48,11 +48,10 @@ NEAR_STOPPED_SPEED_KMH = 1.0
 STRONG_SPEED_DROP_KMH = 10.0
 CONTROL_ZERO_THRESHOLD = 0.01
 CONTROL_CHANGE_THRESHOLD = 0.1
-MAX_PLAUSIBLE_ABS_ACCELERATION_MPS2 = 15.0
-ACCELERATION_OUTLIER_WARNING = "LOG_ACCELERATION_OUTLIER_FILTERED"
 ATTENTION_THROTTLE_DELTA_THRESHOLD = 0.2
 ATTENTION_BRAKE_DELTA_THRESHOLD = 0.5
 ATTENTION_STEERING_DELTA_THRESHOLD = 0.3
+ATTENTION_ACCELERATION_MAGNITUDE_THRESHOLD_MPS2 = STRONG_SPEED_DROP_KMH / 3.6
 MAX_LOG_ATTENTION_TIMESTAMPS = 20
 MAX_VERIFICATION_EVIDENCE_ROWS = 5
 MAX_VERIFICATION_CHANGE_POINTS = 2
@@ -132,13 +131,9 @@ class LogAnalysisService:
         speed = [record.number(SPEED_ALIASES) for record in sliced]
         brake = [record.number(BRAKE_ALIASES) for record in sliced]
         steering = [record.number(STEERING_ALIASES) for record in sliced]
-        acceleration, acceleration_outlier_count = _filter_acceleration_outliers(
-            _acceleration_series(sliced, speed)
-        )
+        acceleration = _acceleration_series(sliced, speed)
         events = self._detect_events(sliced, brake, steering)
         warnings = _unique_text_values(sliced, WARNING_ALIASES)
-        if acceleration_outlier_count:
-            warnings.append(ACCELERATION_OUTLIER_WARNING)
         errors = _unique_text_values(sliced, ERROR_ALIASES)
 
         speed_values = [value for value in speed if value is not None]
@@ -153,8 +148,9 @@ class LogAnalysisService:
             "speed_end": speed_values[-1] if speed_values else None,
             "speed_min": min(speed_values) if speed_values else None,
             "speed_max": max(speed_values) if speed_values else None,
+            "acceleration_min": min(acceleration_values) if acceleration_values else None,
+            "acceleration_max": max(acceleration_values) if acceleration_values else None,
             "max_deceleration": max_deceleration,
-            "acceleration_outlier_count": acceleration_outlier_count or None,
             "max_brake": max(brake_values) if brake_values else None,
             "brake_rise_time": _first_event_time(events, "brake_rise"),
             "max_steering_change": max(steering_changes, default=None),
@@ -290,6 +286,7 @@ def build_log_attention_hint(log_uri: str) -> str:
     throttle = numeric_series(records, THROTTLE_ALIASES)
     brake = numeric_series(records, BRAKE_ALIASES)
     steering = numeric_series(records, STEERING_ALIASES)
+    acceleration = acceleration_series(records)
     moments: dict[float, list[str]] = {}
     moment_scores: dict[float, float] = {}
 
@@ -325,6 +322,16 @@ def build_log_attention_hint(log_uri: str) -> str:
                 f"góc đánh lái thay đổi đột ngột sang {direction}",
                 abs(delta) / ATTENTION_STEERING_DELTA_THRESHOLD,
             )
+
+    for index, value in enumerate(acceleration):
+        if value is None or abs(value) < ATTENTION_ACCELERATION_MAGNITUDE_THRESHOLD_MPS2:
+            continue
+        direction = "tăng" if value > 0 else "giảm"
+        add(
+            records[index].timestamp_s,
+            f"gia tốc {direction} đột ngột",
+            abs(value) / ATTENTION_ACCELERATION_MAGNITUDE_THRESHOLD_MPS2,
+        )
 
     if not moments:
         return ""
@@ -822,21 +829,12 @@ def _max_deceleration(
         delta_t = records[index].timestamp_s - records[index - 1].timestamp_s
         if previous is not None and current is not None and delta_t > 0:
             candidates.append(( ((current - previous) / 3.6) / delta_t, records[index].timestamp_s))
-    filtered, outlier_count = _filter_acceleration_outliers([item[0] for item in candidates])
-    candidates = [
-        (value, candidates[index][1])
-        for index, value in enumerate(filtered)
-        if value is not None
-    ]
-    output: dict[str, float | int | str | bool | None] = {
-        "acceleration_outlier_count": outlier_count or None,
-    }
     if not candidates:
-        return {**output, "max_deceleration": None, "max_deceleration_timestamp_s": None}
+        return {"max_deceleration": None, "max_deceleration_timestamp_s": None}
     value, timestamp_s = min(candidates)
     if value >= 0:
-        return {**output, "max_deceleration": 0.0, "max_deceleration_timestamp_s": None}
-    return {**output, "max_deceleration": value, "max_deceleration_timestamp_s": timestamp_s}
+        return {"max_deceleration": 0.0, "max_deceleration_timestamp_s": None}
+    return {"max_deceleration": value, "max_deceleration_timestamp_s": timestamp_s}
 
 
 def _acceleration_at_timestamp(
@@ -853,8 +851,6 @@ def _acceleration_at_timestamp(
     if not candidates:
         return {"acceleration_at_claim": None, "acceleration_timestamp_s": None}
     _, timestamp_s, value = min(candidates, key=lambda item: item[0])
-    if abs(value) > MAX_PLAUSIBLE_ABS_ACCELERATION_MPS2:
-        return {"acceleration_at_claim": None, "acceleration_timestamp_s": None}
     return {"acceleration_at_claim": value, "acceleration_timestamp_s": timestamp_s}
 
 
@@ -977,11 +973,6 @@ def _build_claim_summary(
             *_allowed_signal_table(records, SPEED_ALIASES, "Speed (km/h)"),
         ]
         speed_lines.extend(_derived_speed_states(speed))
-        if speed.get("acceleration_outlier_count"):
-            speed_lines.append(
-                f"Đã loại {int(speed['acceleration_outlier_count'])} mẫu gia tốc bất thường "
-                f"vượt ngưỡng ±{MAX_PLAUSIBLE_ABS_ACCELERATION_MPS2:g} m/s²."
-            )
         sections.append("\n".join(speed_lines))
 
     brake = metrics.get("brake")
@@ -1195,20 +1186,6 @@ def _acceleration_series(
     return acceleration
 
 
-def _filter_acceleration_outliers(
-    values: list[float | None],
-) -> tuple[list[float | None], int]:
-    filtered: list[float | None] = []
-    outlier_count = 0
-    for value in values:
-        if value is not None and abs(value) > MAX_PLAUSIBLE_ABS_ACCELERATION_MPS2:
-            filtered.append(None)
-            outlier_count += 1
-        else:
-            filtered.append(value)
-    return filtered, outlier_count
-
-
 def _write_log_slice(output: Path, fieldnames: list[str], records: list[LogRecord]) -> None:
     with output.open("w", encoding="utf-8", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
@@ -1261,10 +1238,10 @@ def _build_summary(
         statements.append(", ".join(speeds) + ".")
     if metrics["max_deceleration"] is not None:
         statements.append(f"Mức giảm tốc lớn nhất là {abs(float(metrics['max_deceleration'])):.3f} m/s².")
-    if metrics["acceleration_outlier_count"] is not None:
+    if metrics["acceleration_min"] is not None and metrics["acceleration_max"] is not None:
         statements.append(
-            f"Đã loại {int(metrics['acceleration_outlier_count'])} mẫu gia tốc bất thường vượt ngưỡng "
-            f"±{MAX_PLAUSIBLE_ABS_ACCELERATION_MPS2:g} m/s²."
+            f"Dải gia tốc từ {float(metrics['acceleration_min']):.3f} đến "
+            f"{float(metrics['acceleration_max']):.3f} m/s²."
         )
     if metrics["max_brake"] is not None:
         statements.append(f"Giá trị brake lớn nhất là {metrics['max_brake']:g}.")

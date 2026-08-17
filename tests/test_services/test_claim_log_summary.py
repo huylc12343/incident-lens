@@ -39,8 +39,8 @@ def test_claim_log_summary_uses_three_samples_each_side_and_precomputes_metrics(
     assert summary.allowed_evidence_ids == [item.evidence_id for item in summary.evidence]
     assert summary.metrics["speed_kmh"]["start"] == 58
     assert summary.metrics["speed_kmh"]["end"] == 25
-    assert summary.metrics["speed_kmh"]["acceleration_outlier_count"] == 6
-    assert "max_deceleration" not in summary.metrics["speed_kmh"]
+    assert "acceleration_outlier_count" not in summary.metrics["speed_kmh"]
+    assert summary.metrics["speed_kmh"]["max_deceleration"] == pytest.approx(-55.555556)
     assert summary.metrics["brake"]["strongest_increase"] == pytest.approx(0.4)
     assert summary.metrics["brake"]["strongest_increase_timestamp_s"] == 0.25
     assert summary.metrics["steer"]["max_change"] == pytest.approx(0.4)
@@ -142,7 +142,8 @@ def test_claim_log_summary_supports_ego_signal_column_names(tmp_path) -> None:
         for signal_metrics in summary.metrics.values()
         for value in signal_metrics.values()
     )
-    assert "Đã loại 4 mẫu gia tốc bất thường" in summary.summary
+    assert "Đã loại" not in summary.summary
+    assert "Giảm tốc cực đại trong cửa sổ" in summary.summary
     assert "Trạng thái cuối cửa sổ: gần như đứng yên." in summary.summary
     assert "Xe đã **giảm tốc mạnh** trong cửa sổ." in summary.summary
     assert "Throttle: 1 → 0 => có sự nhả ga." in summary.summary
@@ -176,8 +177,8 @@ def test_claim_log_summary_formats_rule_derived_states_for_verification(tmp_path
     assert "Xe đã **giảm tốc mạnh** trong cửa sổ." in summary.summary
     assert "Brake: 0 → 1 => có sự ấn phanh trong cửa sổ." in summary.summary
     assert "Throttle: 0.6 → 0 => có sự nhả ga." in summary.summary
-    assert "Gia tốc tại 17.0s: -26.8981 m/s²" not in summary.summary
-    assert "Đã loại 1 mẫu gia tốc bất thường" in summary.summary
+    assert "Gia tốc tại 17.0s: -26.8981 m/s²" in summary.summary
+    assert "Đã loại" not in summary.summary
     assert "Yaw thay đổi: 0.05°" in summary.summary
     assert "Steering tại 17.0s: 0.02 => xe có xu hướng rẽ phải." in summary.summary
     assert "| 17.0s | 0.65 |" in summary.summary
@@ -355,7 +356,7 @@ def test_verification_claim_outside_incident_window_uses_full_video_bounds(tmp_p
     assert contexts[0].allowed_evidence_ids == ["log-row:9.5", "log-row:10", "log-row:10.5"]
 
 
-def test_extreme_acceleration_is_filtered_from_claim_summary(tmp_path) -> None:
+def test_extreme_acceleration_is_preserved_in_claim_summary(tmp_path) -> None:
     log = tmp_path / "acceleration-outlier.csv"
     log.write_text(
         "timestamp,speed_kmh,brake\n"
@@ -373,8 +374,8 @@ def test_extreme_acceleration_is_filtered_from_claim_summary(tmp_path) -> None:
     )[0]
 
     speed = summary.metrics["speed_kmh"]
-    assert speed["acceleration_outlier_count"] == 1
-    assert "acceleration_at_claim" not in speed
-    assert speed["max_deceleration"] == 0
-    assert "-27.777" not in summary.summary
-    assert "Đã loại 1 mẫu gia tốc bất thường" in summary.summary
+    assert "acceleration_outlier_count" not in speed
+    assert speed["acceleration_at_claim"] == pytest.approx(-27.777778)
+    assert speed["max_deceleration"] == pytest.approx(-27.777778)
+    assert "-27.777" in summary.summary
+    assert "Đã loại" not in summary.summary

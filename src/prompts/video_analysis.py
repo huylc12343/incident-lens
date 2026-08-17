@@ -46,7 +46,8 @@ def build_video_analysis_prompt(
 
         "Nếu user context có log_attention_hint, dùng các timestamp đó để ưu tiên xem kỹ lại vùng thời gian "
         "xung quanh và kiểm tra trước–tại–sau mốc được gợi ý. Hint chỉ định nơi cần chú ý, không phải evidence "
-        "và không được tự đưa telemetry như brake/throttle/steering vào VideoMemory. Chỉ ghi sự kiện nếu video "
+        "và không được tự đưa telemetry như brake/throttle/steering/acceleration vào VideoMemory. "
+        "Chỉ ghi sự kiện nếu video "
         "thực sự hỗ trợ.",
 
         "Quy trình bắt buộc: xem toàn bộ video theo thứ tự thời gian trước; xác định các biến đổi đáng chú ý; "
@@ -112,7 +113,7 @@ def build_video_analysis_prompt(
         "Timeline mô tả toàn bộ video bằng 3–6 mốc độc lập, sắp xếp tăng dần theo timestamp. Mỗi mốc chỉ trả "
         "timestamp_s và description; không trả evidence_ids. Không tạo nhiều mốc gần nhau để mô tả cùng một thay đổi.",
 
-        "Claims gồm 3–5 khẳng định quan trọng khi có đủ sự kiện độc lập, sắp xếp theo thời gian và đặt "
+        "Claims gồm 3–10 khẳng định quan trọng khi có đủ sự kiện độc lập, sắp xếp theo thời gian và đặt "
         "claim_id tuần tự. Mỗi claim chỉ chứa MỘT ý chính có thể đối chiếu rõ, timestamp_s sát sự kiện; tránh gộp "
         "'rẽ + rời đường + dừng + va chạm' vào cùng một claim nếu có thể tách thành các sự kiện độc lập.",
 

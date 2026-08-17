@@ -89,7 +89,14 @@ async def test_openai_sends_all_ordered_frames_in_one_request(tmp_path: Path) ->
     assert "sequence_index=0" in content[1]["text"]
     assert "sequence_index=1" in content[3]["text"]
     assert content[2]["image_url"].startswith("data:image/jpeg;base64,")
-    assert call["text_format"] is VideoMemory
+    assert set(call["text_format"].model_json_schema()["properties"]) == {
+        "global_scene",
+        "video_summary",
+        "incident_window",
+        "representative_timestamp_s",
+        "timeline",
+        "claims",
+    }
     activity = observability.list("INC-OPENAI")[0]
     assert activity.status == "completed"
     assert activity.model == "gpt-test"

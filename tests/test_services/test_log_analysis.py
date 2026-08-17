@@ -121,7 +121,7 @@ def test_accepts_time_sec_timestamp_column(tmp_path: Path) -> None:
     assert all(value is not None for value in result.summary.metrics.values())
 
 
-def test_analysis_filters_extreme_acceleration_and_records_warning(tmp_path: Path) -> None:
+def test_analysis_preserves_extreme_acceleration_for_model_context(tmp_path: Path) -> None:
     source = tmp_path / "outlier.csv"
     source.write_text(
         "timestamp_s,speed_kmh,brake\n"
@@ -137,10 +137,13 @@ def test_analysis_filters_extreme_acceleration_and_records_warning(tmp_path: Pat
         window=IncidentWindow(t_start=0, t0=0.1, t_end=0.2),
     )
 
-    assert result.summary.metrics["max_deceleration"] == 0
-    assert result.summary.metrics["acceleration_outlier_count"] == 1
-    assert "LOG_ACCELERATION_OUTLIER_FILTERED" in result.summary.warnings
-    assert "27.778" not in result.summary.summary
+    assert result.summary.metrics["max_deceleration"] == pytest.approx(-27.777778)
+    assert result.summary.metrics["acceleration_min"] == pytest.approx(-27.777778)
+    assert result.summary.metrics["acceleration_max"] == 0
+    assert "acceleration_outlier_count" not in result.summary.metrics
+    assert "LOG_ACCELERATION_OUTLIER_FILTERED" not in result.summary.warnings
+    assert "27.778" in result.summary.summary
+    assert "Dải gia tốc" in result.summary.summary
 
 
 def test_build_log_attention_hint_contains_only_qualitative_changes(tmp_path: Path) -> None:
@@ -159,13 +162,13 @@ def test_build_log_attention_hint_contains_only_qualitative_changes(tmp_path: Pa
     assert "ga tăng đột ngột" in hint
     assert "phanh tăng đột ngột" in hint
     assert "góc đánh lái thay đổi đột ngột sang trái" in hint
-    assert "gia tốc" not in hint
+    assert "gia tốc giảm đột ngột" in hint
     for raw_value in ("0.1", "0.5", "0.6", "-0.5", "-4.0"):
         assert raw_value not in hint
     assert "evidence_id" not in hint
 
 
-def test_build_log_attention_hint_ignores_acceleration_entirely(tmp_path: Path) -> None:
+def test_build_log_attention_hint_uses_acceleration_without_raw_values(tmp_path: Path) -> None:
     source = tmp_path / "stable.csv"
     source.write_text(
         "timestamp_s,throttle,brake,steering_angle,acceleration_mps2\n"
@@ -175,4 +178,27 @@ def test_build_log_attention_hint_ignores_acceleration_entirely(tmp_path: Path) 
         encoding="utf-8",
     )
 
-    assert build_log_attention_hint(str(source)) == ""
+    hint = build_log_attention_hint(str(source))
+
+    assert "Tại giây thứ 1.0" in hint
+    assert "Tại giây thứ 2.0" in hint
+    assert "gia tốc giảm đột ngột" in hint
+    assert "-4.0" not in hint
+    assert "-25.87" not in hint
+
+
+def test_build_log_attention_hint_derives_acceleration_from_speed(tmp_path: Path) -> None:
+    source = tmp_path / "derived-acceleration.csv"
+    source.write_text(
+        "timestamp_s,speed_kmh\n"
+        "0.0,20\n"
+        "0.1,10\n"
+        "0.2,10\n",
+        encoding="utf-8",
+    )
+
+    hint = build_log_attention_hint(str(source))
+
+    assert "Tại giây thứ 0.1" in hint
+    assert "gia tốc giảm đột ngột" in hint
+    assert "27.777" not in hint

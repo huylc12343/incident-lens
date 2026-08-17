@@ -11,6 +11,7 @@ from src.models.incidents import (
     NativeVideoAnalysisRequest,
     NativeVideoMetadata,
     PromptEnvelope,
+    SamplingMetadata,
     TimelineEvent,
     TimestampedFrame,
     TimestampedFramesAnalysisRequest,
@@ -145,6 +146,12 @@ async def test_native_workflow_discards_provider_evidence_until_frames_are_sampl
         global_scene="Đường giao thông.",
         incident_window=IncidentWindow(t_start=0, t0=1, t_end=2),
         analysis_mode=AnalysisMode.NATIVE_VIDEO,
+        revision=9,
+        sampling_metadata=SamplingMetadata(
+            requested_fps=30,
+            sampled_frame_count=1350,
+            source_duration_s=45,
+        ),
         timeline=[TimelineEvent(timestamp_s=1, description="Xe phanh.", evidence_ids=["frame-000007"])],
         claims=[
             Claim(
@@ -157,14 +164,18 @@ async def test_native_workflow_discards_provider_evidence_until_frames_are_sampl
         ],
     )
     vlm = SimpleNamespace(
-        capabilities=VLMCapabilities(provider=VLMProvider.QWEN, input_mode=VLMInputMode.NATIVE_VIDEO),
+        capabilities=VLMCapabilities(
+            provider=VLMProvider.QWEN,
+            input_mode=VLMInputMode.NATIVE_VIDEO,
+            native_video_fps=5,
+        ),
         analyze_video=AsyncMock(return_value=memory),
     )
     request = NativeVideoAnalysisRequest(
         incident_id="INC-NATIVE-EVIDENCE",
         prompt=PromptEnvelope(text="Phân tích video."),
         normalized_video_uri="normalized.mp4",
-        metadata=NativeVideoMetadata(duration_s=2, width=1280, height=720, fps=15, size_bytes=100),
+        metadata=NativeVideoMetadata(duration_s=45, width=1280, height=720, fps=30, size_bytes=100),
     )
 
     result = await VideoMemoryWorkflow(vlm=vlm, config=VideoMemoryWorkflowConfig()).analyze(request)
@@ -172,6 +183,13 @@ async def test_native_workflow_discards_provider_evidence_until_frames_are_sampl
     assert result.claims[0].evidence == []
     assert result.timeline[0].evidence_ids == []
     assert result.claims[0].verification_status == VerificationStatus.UNVERIFIED
+    assert result.analysis_mode == AnalysisMode.NATIVE_VIDEO
+    assert result.revision == 1
+    assert result.sampling_metadata == SamplingMetadata(
+        requested_fps=5,
+        sampled_frame_count=225,
+        source_duration_s=45,
+    )
 
 
 @pytest.mark.asyncio

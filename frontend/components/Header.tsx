@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { uiText as text } from "../lib/ui-copy";
 const Icon = ({ children }: { children: React.ReactNode }) => (
   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -16,10 +17,10 @@ export function Header({
   return (
     <header className="topbar">
       <div className="nav-inner">
-        <Link className="brand" href="/" aria-label="IncidentLens home">
-          <span className="brand-mark incident-lens-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" fill="none" stroke="currentColor" strokeWidth="1.8"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg></span>
+        <Link className="brand" href="/" aria-label="VLens home">
+          <span className="brand-mark"><Image src="/images/logo.png" alt="VLens" width={34} height={34} priority /></span>
           <span>
-            <strong>IncidentLens</strong>
+            <strong>VLens</strong>
             <small>{text("Forensic Review Workspace", "Không gian rà soát sự cố")}</small>
           </span>
         </Link>

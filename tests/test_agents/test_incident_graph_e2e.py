@@ -43,6 +43,8 @@ def _qwen_client(*outputs: object) -> SimpleNamespace:
 def _narrative(label: str = "Initial") -> ReportModelOutput:
     return ReportModelOutput(
         type_of_accident=AccidentType.OTHER_UNKNOWN,
+        incident_window=IncidentWindow(t_start=6, t0=7, t_end=9),
+        representative_timestamp_s=7,
         timeline=f"{label} timeline",
         video_observations=f"{label} observations",
         hypothesized_causes=f"{label} hypothesis",

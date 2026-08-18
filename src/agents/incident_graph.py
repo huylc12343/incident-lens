@@ -108,7 +108,7 @@ def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointe
     async def after_step(state: IncidentState) -> Literal["continue", "cleanup"]:
         return "cleanup" if state.get("status") == "failed" else "continue"
 
-    async def after_clip(state: IncidentState) -> Literal["analyze_log", "draft_report", "cleanup"]:
+    async def after_video_analysis(state: IncidentState) -> Literal["analyze_log", "draft_report", "cleanup"]:
         if state.get("status") == "failed":
             return "cleanup"
         return "analyze_log" if state.get("log_uri") else "draft_report"
@@ -144,12 +144,12 @@ def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointe
     graph.add_node("cleanup", cleanup)
 
     graph.add_edge(START, "analyze_video")
-    graph.add_conditional_edges("analyze_video", after_step, {"continue": "cut_incident_video", "cleanup": "cleanup"})
-    graph.add_conditional_edges("cut_incident_video", after_clip)
+    graph.add_conditional_edges("analyze_video", after_video_analysis)
     graph.add_conditional_edges("analyze_log", after_step, {"continue": "verify", "cleanup": "cleanup"})
     graph.add_conditional_edges("verify", after_verification)
     graph.add_conditional_edges("auto_reanalyze", after_step, {"continue": "verify", "cleanup": "cleanup"})
-    graph.add_conditional_edges("draft_report", after_step, {"continue": "review", "cleanup": "cleanup"})
+    graph.add_conditional_edges("draft_report", after_step, {"continue": "cut_incident_video", "cleanup": "cleanup"})
+    graph.add_conditional_edges("cut_incident_video", after_step, {"continue": "review", "cleanup": "cleanup"})
     graph.add_conditional_edges("review", after_review)
     graph.add_conditional_edges("manual_reanalyze", after_manual)
     graph.add_conditional_edges("manual_verify", after_step, {"continue": "draft_report", "cleanup": "cleanup"})

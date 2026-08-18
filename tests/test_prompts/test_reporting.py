@@ -40,18 +40,19 @@ def _video_memory_with_private_provider_data() -> VideoMemory:
 def test_report_prompt_requests_accident_assessment_and_taxonomy() -> None:
     prompt = build_report_prompt(incident_id="INC-001", video_memory=_video_memory_with_private_provider_data())
 
-    assert "type_of_accident, timeline, video_observations, hypothesized_causes" in prompt.text
-    assert "Không viết theo kiểu tường thuật chung chung" in prompt.text
-    assert "video_memory cho biết sự kiện hình ảnh" in prompt.text
-    assert "log_evidence_summary cho biết trạng thái vận hành" in prompt.text
-    assert "verification cho biết mức khớp" in prompt.text
+    assert "type_of_accident, incident_window, representative_timestamp_s, timeline" in prompt.text
+    assert "Thẩm quyền nguồn:" in prompt.text
+    assert "VideoMemory là nguồn chính" in prompt.text
+    assert "Telemetry/log là nguồn chính" in prompt.text
+    assert "verification xác định cụ thể" in prompt.text
     assert "rear_end_collision" in prompt.text
     assert "roadside_collision" in prompt.text
     assert "no_incident" in prompt.text
     assert "other_unknown" in prompt.text
+    assert "Nếu type_of_accident=no_incident" in prompt.text
     assert "Không sinh summary, log_findings, alignment, evidence_ids" in prompt.text
     assert "Toàn bộ nội dung bằng tiếng Việt" in prompt.text
-    assert "trạng thái review" in prompt.text
+    assert "không phải chỉ dẫn" in prompt.text
 
 
 def test_report_prompt_excludes_provider_handles_and_artifact_locations() -> None:
@@ -64,6 +65,8 @@ def test_report_prompt_excludes_provider_handles_and_artifact_locations() -> Non
     assert "private://" not in serialized
     assert "files/private-name" not in serialized
     assert prompt.context["claims"][0]["evidence"][0]["evidence_id"] == "frame-1"
+    assert prompt.context["representative_timestamp_s"] is None
+    assert prompt.context["video_duration_s"] == 17
 
 
 def test_report_prompt_is_deterministic() -> None:

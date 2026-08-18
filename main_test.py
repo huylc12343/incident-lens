@@ -317,7 +317,10 @@ def _render_unified_report(
         _render_incident_media(snapshot.get("artifact_uris"))
 
         st.markdown("### 2. Khoảng thời gian sự cố")
-        _render_incident_window(report.get("incident_window"))
+        _render_incident_window(
+            report.get("incident_window"),
+            representative_timestamp_s=report.get("representative_timestamp_s"),
+        )
 
         st.markdown("### 3. Diễn biến theo thời gian")
         timeline = report.get("timeline")
@@ -419,14 +422,15 @@ def _render_claim_details(claims: Any, verification: Any) -> None:
                 st.caption(f"Evidence verification: {', '.join(str(item) for item in evidence_ids)}")
 
 
-def _render_incident_window(value: Any) -> None:
+def _render_incident_window(value: Any, *, representative_timestamp_s: Any = None) -> None:
     if not isinstance(value, dict):
         st.caption("Chưa xác định khoảng thời gian sự cố.")
         return
-    columns = st.columns(3)
+    columns = st.columns(4)
     columns[0].metric("Bắt đầu", _seconds(value.get("t_start")))
     columns[1].metric("Sự kiện chính", _seconds(value.get("t0")))
     columns[2].metric("Kết thúc", _seconds(value.get("t_end")))
+    columns[3].metric("Khung hình đại diện", _seconds(representative_timestamp_s))
 
 
 def _render_section_narrative(value: Any) -> None:

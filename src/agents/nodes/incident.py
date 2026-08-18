@@ -269,6 +269,24 @@ async def cut_incident_video_node(
         )
         if workflow.vlm.capabilities.input_mode == VLMInputMode.NATIVE_VIDEO:
             memory = reconcile_native_video_evidence(memory, frames.frames)
+            verification = state.get("verification")
+            if verification is not None:
+                status_by_claim_id = {item.claim_id: item.status for item in verification.results}
+                memory = memory.model_copy(
+                    update={
+                        "claims": [
+                            claim.model_copy(
+                                update={
+                                    "verification_status": status_by_claim_id.get(
+                                        claim.claim_id,
+                                        claim.verification_status,
+                                    )
+                                }
+                            )
+                            for claim in memory.claims
+                        ]
+                    }
+                )
             validate_video_memory(
                 memory,
                 source_duration_s=frames.duration_s,
@@ -285,9 +303,13 @@ async def cut_incident_video_node(
             target_timestamp_s = _representative_timestamp(memory)
             representative = min(frames.frames, key=lambda frame: abs(frame.timestamp_s - target_timestamp_s))
             artifact_uris["representative_frame"] = representative.image_uri
-        output: dict[str, object] = {"status": "running", "artifact_uris": artifact_uris}
-        if workflow.vlm.capabilities.input_mode == VLMInputMode.NATIVE_VIDEO:
-            output.update({"video_memory": memory, "claims": memory.claims})
+        output: dict[str, object] = {
+            "status": "awaiting_review" if state.get("draft_report") is not None else "running",
+            "artifact_uris": artifact_uris,
+            "video_memory": memory,
+            "claims": memory.claims,
+        }
+        output.update(_refresh_report_after_cut(state, memory=memory, artifact_uris=artifact_uris))
         return output
     except Exception as exc:
         return {
@@ -616,6 +638,9 @@ async def build_draft_report_node(
                 )
             )
             model_output = ReportModelOutput.model_validate(narrative)
+            memory, geometry_warning = _apply_report_incident_geometry(state, memory, model_output)
+            if geometry_warning is not None:
+                warnings.append(geometry_warning)
             has_log = state.get("log_evidence_summary") is not None
             narrative = ReportNarrative(
                 type_of_accident=model_output.type_of_accident,
@@ -660,6 +685,7 @@ async def build_draft_report_node(
         ),
         type_of_accident=narrative.type_of_accident,
         incident_window=memory.incident_window,
+        representative_timestamp_s=memory.representative_timestamp_s,
         summary=narrative.summary,
         timeline=ReportTimelineSection(
             narrative=narrative.timeline,
@@ -687,10 +713,78 @@ async def build_draft_report_node(
     )
     return {
         "status": "awaiting_review",
+        "video_memory": memory,
+        "claims": memory.claims,
         "report_narrative": narrative,
         "draft_report": draft_report,
         "warnings": warnings,
     }
+
+
+def _apply_report_incident_geometry(
+    state: IncidentState,
+    memory: VideoMemory,
+    model_output: ReportModelOutput,
+) -> tuple[VideoMemory, str | None]:
+    """Accept a report correction only when it describes an in-bounds incident."""
+    if model_output.type_of_accident == AccidentType.NO_INCIDENT:
+        return memory, None
+
+    window = model_output.incident_window
+    representative_timestamp_s = model_output.representative_timestamp_s
+    duration_s = _video_duration_s(state, memory)
+    if window.t_end > duration_s:
+        return memory, (
+            "REPORT_INCIDENT_WINDOW_INVALID: report incident_window exceeds the source video duration; "
+            "the VLM incident window was retained."
+        )
+    if not window.t_start <= representative_timestamp_s <= window.t_end:
+        return memory, (
+            "REPORT_REPRESENTATIVE_TIMESTAMP_INVALID: report representative_timestamp_s is outside its "
+            "incident_window; the VLM incident window was retained."
+        )
+    return memory.model_copy(
+        update={
+            "incident_window": window,
+            "representative_timestamp_s": representative_timestamp_s,
+        }
+    ), None
+
+
+def _refresh_report_after_cut(
+    state: IncidentState,
+    *,
+    memory: VideoMemory,
+    artifact_uris: dict[str, str],
+) -> dict[str, object]:
+    """Attach clip/frame artifacts and canonical visual evidence after report generation."""
+    draft_report = state.get("draft_report")
+    if not isinstance(draft_report, DraftReport):
+        return {}
+
+    evidence = [evidence for claim in memory.claims for evidence in claim.evidence]
+    output: dict[str, object] = {
+        "draft_report": draft_report.model_copy(
+            update={
+                "incident_window": memory.incident_window,
+                "representative_timestamp_s": memory.representative_timestamp_s,
+                "timeline": draft_report.timeline.model_copy(update={"events": memory.timeline}),
+                "evidence_and_warnings": draft_report.evidence_and_warnings.model_copy(
+                    update={
+                        "evidence": evidence,
+                        "artifact_uris": artifact_uris,
+                        "warnings": state.get("warnings", []),
+                    }
+                ),
+            }
+        )
+    }
+    narrative = state.get("report_narrative")
+    if isinstance(narrative, ReportNarrative):
+        output["report_narrative"] = narrative.model_copy(
+            update={"evidence_ids": [item.evidence_id for item in evidence]}
+        )
+    return output
 
 
 async def _reanalyze(

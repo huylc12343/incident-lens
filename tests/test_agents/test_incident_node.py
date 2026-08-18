@@ -318,7 +318,20 @@ async def test_native_cut_maps_fake_evidence_ids_to_sampled_artifacts(tmp_path: 
     )
 
     result = await cut_incident_video_node(
-        {"incident_id": "INC-NATIVE", "video_uri": "video.mp4", "video_memory": memory},
+        {
+            "incident_id": "INC-NATIVE",
+            "video_uri": "video.mp4",
+            "video_memory": memory,
+            "verification": VerificationResult(
+                results=[
+                    ClaimVerification(
+                        claim_id="claim-1",
+                        status=VerificationStatus.SUPPORTED,
+                        reason="Telemetry supports the claim.",
+                    )
+                ]
+            ),
+        },
         media=media,
         workflow=workflow,
     )
@@ -326,7 +339,8 @@ async def test_native_cut_maps_fake_evidence_ids_to_sampled_artifacts(tmp_path: 
     assert result["status"] == "running"
     claim = result["video_memory"].claims[0]
     assert [item.evidence_id for item in claim.evidence] == ["frame-000001"]
-    assert claim.verification_status == VerificationStatus.UNVERIFIED
+    assert claim.verification_status == VerificationStatus.SUPPORTED
+    assert result["claims"][0].verification_status == VerificationStatus.SUPPORTED
     frame_artifacts = {Path(frame.image_uri).stem for frame in manifest.frames}
     assert {item.evidence_id for item in claim.evidence}.issubset(frame_artifacts)
 
@@ -929,6 +943,8 @@ async def test_draft_report_marks_video_only_and_unresolved_conflict() -> None:
     memory = memory.model_copy(update={"claims": [contradicted]})
     narrative = ReportModelOutput(
         type_of_accident="other_unknown",
+        incident_window=memory.incident_window,
+        representative_timestamp_s=memory.incident_window.t0,
         timeline="Timeline",
         video_observations="Video findings",
         hypothesized_causes="Possible cause",
@@ -949,7 +965,7 @@ async def test_draft_report_marks_video_only_and_unresolved_conflict() -> None:
     assert result["status"] == "awaiting_review"
     assert result["report_narrative"].log_findings == "Không có dữ liệu log."
     assert result["draft_report"].log_findings.narrative == "Không có dữ liệu log."
-    assert len(type(result["draft_report"]).model_fields) == 11
+    assert len(type(result["draft_report"]).model_fields) == 12
     assert result["draft_report"].type_of_accident == "other_unknown"
     assert "claim-1" in result["warnings"][0]
     report.build_narrative.assert_awaited_once()
@@ -1022,6 +1038,8 @@ async def test_draft_report_uses_code_log_summary_and_verification_alignment() -
     )
     narrative = ReportModelOutput(
         type_of_accident="rear_end_collision",
+        incident_window=memory.incident_window,
+        representative_timestamp_s=memory.incident_window.t0,
         timeline="Timeline.",
         video_observations="Quan sát.",
         hypothesized_causes="Chưa xác định.",
@@ -1045,6 +1063,152 @@ async def test_draft_report_uses_code_log_summary_and_verification_alignment() -
     assert draft.log_findings.narrative == log_summary.summary
     assert "claim-1 được log hỗ trợ" in draft.alignment.narrative
     assert "log-evidence:2:brake_rise" in draft.alignment.narrative
+
+
+@pytest.mark.asyncio
+async def test_draft_report_can_correct_default_vlm_incident_window() -> None:
+    memory = VideoMemory(
+        global_scene="Road scene",
+        incident_window=IncidentWindow(t_start=0, t0=0, t_end=45),
+        representative_timestamp_s=0,
+        timeline=[
+            TimelineEvent(timestamp_s=25, description="Xe tiến gần chướng ngại vật."),
+            TimelineEvent(timestamp_s=27, description="Xe va chạm."),
+            TimelineEvent(timestamp_s=29, description="Xe dừng sau va chạm."),
+        ],
+        claims=[Claim(claim_id="claim-impact", text="Xe va chạm tại 27 giây.", timestamp_s=27)],
+        analysis_mode=AnalysisMode.SINGLE_REQUEST,
+    )
+    narrative = ReportModelOutput(
+        type_of_accident="static_object_collision",
+        incident_window=IncidentWindow(t_start=25, t0=27, t_end=29),
+        representative_timestamp_s=27,
+        timeline="Xe tiếp cận, va chạm rồi dừng lại.",
+        video_observations="Ego va chạm vật thể tĩnh.",
+        hypothesized_causes="Chưa đủ dữ liệu xác định nguyên nhân.",
+    )
+    report = SimpleNamespace(build_narrative=AsyncMock(return_value=narrative))
+
+    result = await build_draft_report_node(
+        {
+            "incident_id": "INC-REPORT-CORRECTION",
+            "video_uri": "video.mp4",
+            "video_memory": memory,
+        },
+        report=report,
+    )
+
+    corrected = result["video_memory"]
+    assert corrected.incident_window == IncidentWindow(t_start=25, t0=27, t_end=29)
+    assert corrected.representative_timestamp_s == 27
+    assert result["draft_report"].incident_window == corrected.incident_window
+    assert result["draft_report"].representative_timestamp_s == 27
+
+
+@pytest.mark.asyncio
+async def test_draft_report_keeps_vlm_geometry_for_no_incident() -> None:
+    memory = VideoMemory(
+        global_scene="Road scene",
+        incident_window=IncidentWindow(t_start=0, t0=0, t_end=45),
+        representative_timestamp_s=0,
+        analysis_mode=AnalysisMode.SINGLE_REQUEST,
+    )
+    narrative = ReportModelOutput(
+        type_of_accident="no_incident",
+        incident_window=IncidentWindow(t_start=25, t0=27, t_end=29),
+        representative_timestamp_s=27,
+        timeline="Xe tiếp tục di chuyển bình thường.",
+        video_observations="Không phát hiện tai nạn.",
+        hypothesized_causes="Không áp dụng phân tích nguyên nhân tai nạn.",
+    )
+    report = SimpleNamespace(build_narrative=AsyncMock(return_value=narrative))
+
+    result = await build_draft_report_node(
+        {
+            "incident_id": "INC-REPORT-NO-INCIDENT",
+            "video_uri": "video.mp4",
+            "video_memory": memory,
+        },
+        report=report,
+    )
+
+    assert result["video_memory"].incident_window == memory.incident_window
+    assert result["video_memory"].representative_timestamp_s == 0
+
+
+@pytest.mark.asyncio
+async def test_cut_after_report_uses_report_corrected_incident_window(tmp_path: Path) -> None:
+    memory = VideoMemory(
+        global_scene="Road scene",
+        incident_window=IncidentWindow(t_start=0, t0=0, t_end=45),
+        representative_timestamp_s=0,
+        timeline=[TimelineEvent(timestamp_s=27, description="Xe va chạm.")],
+        claims=[Claim(claim_id="claim-impact", text="Xe va chạm tại 27 giây.", timestamp_s=27)],
+        analysis_mode=AnalysisMode.SINGLE_REQUEST,
+    )
+    report = SimpleNamespace(
+        build_narrative=AsyncMock(
+            return_value=ReportModelOutput(
+                type_of_accident="static_object_collision",
+                incident_window=IncidentWindow(t_start=25, t0=27, t_end=29),
+                representative_timestamp_s=27,
+                timeline="Xe va chạm rồi dừng lại.",
+                video_observations="Ego va chạm vật thể tĩnh.",
+                hypothesized_causes="Chưa đủ dữ liệu xác định nguyên nhân.",
+            )
+        )
+    )
+    report_result = await build_draft_report_node(
+        {
+            "incident_id": "INC-CUT-AFTER-REPORT",
+            "video_uri": "video.mp4",
+            "video_memory": memory,
+        },
+        report=report,
+    )
+    clip = NormalizedVideoArtifact(
+        uri=str(tmp_path / "incident_clip.mp4"),
+        metadata=NativeVideoMetadata(duration_s=4, width=160, height=90, fps=5, size_bytes=100),
+    )
+    manifest = VideoSequenceManifest(
+        source_video_uri="video.mp4",
+        duration_s=45,
+        frames=[
+            TimestampedFrame(
+                frame_id="frame-000027",
+                sequence_index=0,
+                timestamp_s=27,
+                delta_from_previous_s=0,
+                image_uri=str(tmp_path / "frame-000027.jpg"),
+            )
+        ],
+    )
+    media = SimpleNamespace(
+        cut_incident_clip=AsyncMock(return_value=clip),
+        sample_frames=AsyncMock(return_value=manifest),
+    )
+    workflow = VideoMemoryWorkflow(
+        vlm=_service(VLMInputMode.TIMESTAMPED_FRAMES, memory),
+        config=VideoMemoryWorkflowConfig(artifact_dir=str(tmp_path)),
+    )
+
+    result = await cut_incident_video_node(
+        {
+            "incident_id": "INC-CUT-AFTER-REPORT",
+            "video_uri": "video.mp4",
+            "video_memory": report_result["video_memory"],
+            "draft_report": report_result["draft_report"],
+            "report_narrative": report_result["report_narrative"],
+            "warnings": report_result["warnings"],
+        },
+        media=media,
+        workflow=workflow,
+    )
+
+    assert result["status"] == "awaiting_review"
+    assert media.cut_incident_clip.await_args.kwargs["window"] == IncidentWindow(t_start=25, t0=27, t_end=29)
+    assert result["draft_report"].evidence_and_warnings.artifact_uris["incident_clip"] == clip.uri
+    assert result["draft_report"].representative_timestamp_s == 27
 
 
 @pytest.mark.asyncio

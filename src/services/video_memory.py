@@ -378,6 +378,11 @@ def merge_video_memory_patch(
     if patch.base_revision != memory.revision:
         raise VideoMemoryError("VLM_PATCH_REVISION_CONFLICT", "patch base revision does not match current memory")
     current_claims = {claim.claim_id: claim for claim in memory.claims}
+    allow_deferred_native_evidence = (
+        memory.analysis_mode == AnalysisMode.NATIVE_VIDEO
+        and bool(memory.claims)
+        and all(not claim.evidence for claim in memory.claims)
+    )
     missing_targets = set(patch.target_claim_ids) - set(current_claims)
     if missing_targets:
         raise VideoMemoryError("VLM_PATCH_TARGET_MISSING", "patch targets claims not present in current memory")
@@ -402,7 +407,9 @@ def merge_video_memory_patch(
             [evidence.evidence_id for evidence in claim.evidence],
             f"evidence IDs in claim {claim.claim_id}",
         )
-    if any(not claim.evidence for claim in merged.claims):
+    # Native-video claims are intentionally evidence-free until the final cut node
+    # samples canonical frames. All other partial-evidence states remain invalid.
+    if not allow_deferred_native_evidence and any(not claim.evidence for claim in merged.claims):
         raise VideoMemoryError("VLM_CLAIM_EVIDENCE_MISSING", "every claim must contain frame evidence")
     return merged
 

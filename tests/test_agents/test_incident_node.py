@@ -759,6 +759,71 @@ async def test_auto_reanalysis_resamples_claim_window_once(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+async def test_auto_reanalysis_allows_pre_cut_native_claims_without_evidence(tmp_path: Path) -> None:
+    memory = VideoMemory(
+        global_scene="Road scene",
+        incident_window=IncidentWindow(t_start=1, t0=2, t_end=3),
+        claims=[
+            Claim(claim_id="claim-1", text="Vehicle moves", timestamp_s=1),
+            Claim(claim_id="claim-2", text="Vehicle brakes", timestamp_s=2),
+        ],
+        analysis_mode=AnalysisMode.NATIVE_VIDEO,
+    )
+    service = _service(VLMInputMode.NATIVE_VIDEO, memory)
+    service.reanalyze_claims.return_value = VideoMemoryPatch(
+        target_claim_ids=["claim-2"],
+        claims=[Claim(claim_id="claim-2", text="Vehicle slows down", timestamp_s=2)],
+        base_revision=1,
+    )
+    workflow = VideoMemoryWorkflow(
+        vlm=service,
+        config=VideoMemoryWorkflowConfig(artifact_dir=str(tmp_path)),
+    )
+    manifest = VideoSequenceManifest(
+        frames=[
+            TimestampedFrame(
+                frame_id=f"frame-{index}",
+                sequence_index=index,
+                timestamp_s=float(index + 1),
+                delta_from_previous_s=float(bool(index)),
+                image_uri=f"frame-{index}.jpg",
+            )
+            for index in range(3)
+        ],
+        source_video_uri="video.mp4",
+        duration_s=3,
+    )
+    media = SimpleNamespace(sample_frames=AsyncMock(return_value=manifest))
+    verification = VerificationResult(
+        results=[
+            ClaimVerification(
+                claim_id="claim-2",
+                status=VerificationStatus.CONTRADICTED,
+                reason="Log does not support braking.",
+            )
+        ]
+    )
+
+    result = await auto_reanalyze_node(
+        {
+            "incident_id": "INC-AUTO-PRE-CUT",
+            "video_uri": "video.mp4",
+            "video_memory": memory,
+            "verification": verification,
+            "log_evidence_summary": LogEvidenceSummary(),
+            "auto_reanalysis_count": 0,
+        },
+        media=media,
+        workflow=workflow,
+        prompt_version="v1",
+    )
+
+    assert result["status"] == "running"
+    assert result["video_memory"].claims[0].evidence == []
+    assert [item.evidence_id for item in result["video_memory"].claims[1].evidence] == ["frame-1"]
+
+
+@pytest.mark.asyncio
 async def test_auto_reanalysis_stops_after_one_attempt(tmp_path: Path) -> None:
     memory = _claim_memory(AnalysisMode.SINGLE_REQUEST)
     service = _service(VLMInputMode.TIMESTAMPED_FRAMES, memory)

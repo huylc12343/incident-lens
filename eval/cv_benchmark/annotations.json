@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "coordinate_system": "xyxy_pixels_zero_based",
+  "sampling": {
+    "rule": "every_10th_frame",
+    "offset": 1,
+    "description": "Frames are 1, 11, 21, ... so the benchmark also exercises the old detect_every=2 skipped-frame path."
+  },
+  "annotation_status": "minimal_manual_subset",
+  "annotation_notes": [
+    "The supplied videos contain useful plate views but no clearly resolvable human faces at the source resolution. Face recall is therefore reported as N/A until a face-bearing video is labelled.",
+    "Plate boxes are conservative redaction regions around the visible plate area; they are intentionally slightly expanded because the source video is compressed and motion-blurred.",
+    "This is a minimal benchmark for regression and before/after comparison, not a production validation set. Add 100-200 independently labelled frames before claiming deployment-level recall."
+  ],
+  "videos": [
+    {
+      "id": "bridge",
+      "path": "dataset/data_real/dataset_bridge_incident_sensor_data/front_camera.mp4",
+      "width": 1920,
+      "height": 1080,
+      "frames": [
+        {"frame_index": 61, "objects": [{"class": "plate", "bbox": [1000, 395, 1120, 440]}]},
+        {"frame_index": 71, "objects": [{"class": "plate", "bbox": [1000, 395, 1120, 440]}]},
+        {"frame_index": 81, "objects": [{"class": "plate", "bbox": [1000, 395, 1120, 440]}]},
+        {"frame_index": 91, "objects": [{"class": "plate", "bbox": [990, 395, 1120, 440]}]},
+        {"frame_index": 101, "objects": [{"class": "plate", "bbox": [980, 395, 1120, 440]}]},
+        {"frame_index": 111, "objects": [{"class": "plate", "bbox": [970, 395, 1120, 440]}]},
+        {"frame_index": 121, "objects": [{"class": "plate", "bbox": [960, 395, 1110, 440]}]}
+      ]
+    },
+    {
+      "id": "intersection",
+      "path": "dataset/data_real/dataset_intersection_incident_sensor_data/front_camera.mp4",
+      "width": 640,
+      "height": 360,
+      "frames": [
+        {"frame_index": 961, "objects": [{"class": "plate", "bbox": [190, 174, 235, 194]}]},
+        {"frame_index": 971, "objects": [{"class": "plate", "bbox": [180, 178, 228, 199]}]},
+        {"frame_index": 981, "objects": [{"class": "plate", "bbox": [205, 180, 240, 198]}]},
+        {"frame_index": 991, "objects": [{"class": "plate", "bbox": [190, 185, 228, 204]}]},
+        {"frame_index": 1001, "objects": [{"class": "plate", "bbox": [175, 190, 215, 210]}]}
+      ]
+    }
+  ]
+}

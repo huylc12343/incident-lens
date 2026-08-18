@@ -1,0 +1,10 @@
+﻿timestamp_s,event_type,severity,details,source
+0.00,scene_start,info,Xe ego bắt đầu nhập vào đường chính.,manual_video_review
+8.00,normal_driving,info,Xe di chuyển ổn định trên đường đô thị.,manual_video_review
+24.00,intersection_approach,info,Xe tiếp cận giao lộ có đèn tín hiệu.,manual_video_review
+29.50,deceleration,medium,Xe ego giảm tốc và tiến tới vạch dừng.,manual_video_review
+31.50,vehicle_crossing,medium,Các phương tiện bắt đầu cắt ngang giao lộ phía trước.,manual_video_review
+34.00,red_jeep_enters_path,high,"Xe Jeep màu đỏ đi từ phải sang trái, cắt qua hướng di chuyển của xe ego.",manual_video_review
+35.00,near_conflict,high,Jeep đi qua rất gần phần đầu xe ego; ego vẫn dừng/di chuyển rất chậm.,manual_video_review
+37.00,conflict_cleared,info,Xe Jeep rời khỏi quỹ đạo trực tiếp phía trước.,manual_video_review
+38.61,scene_end,info,Video kết thúc tại giao lộ; không thấy va chạm rõ ràng.,manual_video_review

@@ -4,6 +4,8 @@
 
 ---
 
+<!-- Temporary note: this marker intentionally has no runtime effect. -->
+
 ## [YYYY-MM-DD]
 
 | Member | Task | Status | Output | Time |

@@ -774,3 +774,55 @@ def test_qwen_requires_public_url_for_large_local_video(tmp_path) -> None:
         service._public_video_url(str(video))
 
     assert exc_info.value.code == "QWEN_PUBLIC_VIDEO_URL_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_qwen_reanalysis_short_clip_requires_global_source_timestamps() -> None:
+    """A focused clip retains its source-video time coordinates in Qwen's contract."""
+    memory = VideoMemory(
+        global_scene="Đường giao thông.",
+        incident_window=IncidentWindow(t_start=25, t0=26.5, t_end=29),
+        revision=3,
+        analysis_mode=AnalysisMode.NATIVE_VIDEO,
+    )
+    payload = {
+        "claims": [
+            {
+                "claim_id": "claim-1",
+                "text": "Xe bắt đầu rẽ phải.",
+                "timestamp_s": 26.5,
+            }
+        ]
+    }
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
+    )
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=response)))
+    )
+    service = QwenNativeVideoVLMService(model="qwen3-vl-flash", client=client)
+    request = ReanalysisRequest(
+        incident_id="INC-QWEN-SHORT-REANALYSIS",
+        prompt=PromptEnvelope(
+            text="Chỉ phân tích lại claim mục tiêu.",
+            context={"reanalysis_window": {"t_start": 24.5, "t0": 26.5, "t_end": 28.5}},
+        ),
+        target_claim_ids=["claim-1"],
+        incident_window=memory.incident_window,
+        current_memory=memory,
+        source_duration_s=45,
+        normalized_video_uri="https://cdn.example.test/artifacts/reanalysis/claim-1.mp4",
+        input_video_start_s=24.5,
+        input_video_end_s=28.5,
+    )
+
+    result = await service.reanalyze_claims(request)
+
+    call = client.chat.completions.create.await_args.kwargs
+    structured_prompt = call["messages"][0]["content"]
+    assert call["messages"][1]["content"][0]["video_url"]["url"] == request.normalized_video_uri
+    assert "mốc 0s của clip này tương ứng với 24.5s của video gốc" in structured_prompt
+    assert "Clip phủ vùng 24.5s đến 28.5s của video gốc" in structured_prompt
+    assert "timestamp toàn cục của video gốc" in structured_prompt
+    assert "[24.5, 28.5]" in structured_prompt
+    assert result.claims[0].timestamp_s == 26.5

@@ -21,8 +21,10 @@ from src.agents.nodes.incident import (
     build_draft_report_node,
     cut_incident_video_node,
     manual_reanalyze_node,
+    map_canonical_evidence_node,
 )
 from src.agents.nodes.review import human_review_interrupt_node
+from src.config import LOG_VERIFICATION_INCIDENT_PADDING_S_DEFAULT
 from src.models.api import ReviewDecision
 from src.models.incidents import ReportService, VerificationService
 from src.services.langsmith_tracing import LangSmithTracing
@@ -41,6 +43,7 @@ class IncidentGraphDependencies:
     artifact_dir: str
     timestamp_tolerance_s: float = 0.5
     claim_log_sample_radius: int = 3
+    verification_incident_padding_s: float = LOG_VERIFICATION_INCIDENT_PADDING_S_DEFAULT
     reanalysis_prompt_version: str = "v1"
     auto_reanalysis_enabled: bool = True
     cleanup_remote_resources: bool = True
@@ -52,7 +55,17 @@ def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointe
 
     async def analyze_video(state: IncidentState) -> dict[str, object]:
         result = await analyze_video_node(state, media=dependencies.media, workflow=dependencies.video_workflow)
-        return _with_model_activities(state, result, dependencies.observability)
+        return {
+            **_with_model_activities(state, result, dependencies.observability),
+            "canonical_evidence_phase": "initial",
+        }
+
+    async def map_canonical_evidence(state: IncidentState) -> dict[str, object]:
+        return await map_canonical_evidence_node(
+            state,
+            media=dependencies.media,
+            workflow=dependencies.video_workflow,
+        )
 
     async def cut_video(state: IncidentState) -> dict[str, object]:
         return await cut_incident_video_node(state, media=dependencies.media, workflow=dependencies.video_workflow)
@@ -63,6 +76,8 @@ def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointe
             log_analysis=dependencies.log_analysis,
             charts=dependencies.charts,
             artifact_dir=dependencies.artifact_dir,
+            timestamp_tolerance_s=dependencies.timestamp_tolerance_s,
+            verification_incident_padding_s=dependencies.verification_incident_padding_s,
         )
 
     async def verify(state: IncidentState) -> dict[str, object]:
@@ -71,6 +86,7 @@ def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointe
             verification=dependencies.verification,
             timestamp_tolerance_s=dependencies.timestamp_tolerance_s,
             sample_radius=dependencies.claim_log_sample_radius,
+            verification_incident_padding_s=dependencies.verification_incident_padding_s,
         )
         return _with_model_activities(state, result, dependencies.observability)
 
@@ -81,7 +97,10 @@ def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointe
             workflow=dependencies.video_workflow,
             prompt_version=dependencies.reanalysis_prompt_version,
         )
-        return _with_model_activities(state, result, dependencies.observability)
+        return {
+            **_with_model_activities(state, result, dependencies.observability),
+            "canonical_evidence_phase": "auto_reanalysis",
+        }
 
     async def manual_reanalyze(state: IncidentState) -> dict[str, object]:
         result = await manual_reanalyze_node(
@@ -89,7 +108,10 @@ def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointe
             reanalysis=dependencies.report,
             prompt_version=dependencies.reanalysis_prompt_version,
         )
-        return _with_model_activities(state, result, dependencies.observability)
+        return {
+            **_with_model_activities(state, result, dependencies.observability),
+            "canonical_evidence_phase": "manual_reanalysis",
+        }
 
     async def build_report(state: IncidentState) -> dict[str, object]:
         result = await build_draft_report_node(state, report=dependencies.report)
@@ -108,9 +130,16 @@ def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointe
     async def after_step(state: IncidentState) -> Literal["continue", "cleanup"]:
         return "cleanup" if state.get("status") == "failed" else "continue"
 
-    async def after_video_analysis(state: IncidentState) -> Literal["analyze_log", "draft_report", "cleanup"]:
+    async def after_canonical_evidence(
+        state: IncidentState,
+    ) -> Literal["analyze_log", "verify", "manual_verify", "draft_report", "cleanup"]:
         if state.get("status") == "failed":
             return "cleanup"
+        phase = state.get("canonical_evidence_phase")
+        if phase == "auto_reanalysis":
+            return "verify"
+        if phase == "manual_reanalysis":
+            return "manual_verify" if state.get("log_uri") else "draft_report"
         return "analyze_log" if state.get("log_uri") else "draft_report"
 
     async def after_verification(state: IncidentState) -> Literal["auto_reanalyze", "draft_report", "cleanup"]:
@@ -127,12 +156,8 @@ def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointe
             return "manual_reanalyze"
         return "review"
 
-    async def after_manual(state: IncidentState) -> Literal["manual_verify", "draft_report", "cleanup"]:
-        if state.get("status") == "failed":
-            return "cleanup"
-        return "manual_verify" if state.get("log_uri") else "draft_report"
-
     graph.add_node("analyze_video", analyze_video)
+    graph.add_node("map_canonical_evidence", map_canonical_evidence)
     graph.add_node("cut_incident_video", cut_video)
     graph.add_node("analyze_log", analyze_log)
     graph.add_node("verify", verify)
@@ -144,14 +169,27 @@ def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointe
     graph.add_node("cleanup", cleanup)
 
     graph.add_edge(START, "analyze_video")
-    graph.add_conditional_edges("analyze_video", after_video_analysis)
+    graph.add_conditional_edges(
+        "analyze_video",
+        after_step,
+        {"continue": "map_canonical_evidence", "cleanup": "cleanup"},
+    )
+    graph.add_conditional_edges("map_canonical_evidence", after_canonical_evidence)
     graph.add_conditional_edges("analyze_log", after_step, {"continue": "verify", "cleanup": "cleanup"})
     graph.add_conditional_edges("verify", after_verification)
-    graph.add_conditional_edges("auto_reanalyze", after_step, {"continue": "verify", "cleanup": "cleanup"})
+    graph.add_conditional_edges(
+        "auto_reanalyze",
+        after_step,
+        {"continue": "map_canonical_evidence", "cleanup": "cleanup"},
+    )
     graph.add_conditional_edges("draft_report", after_step, {"continue": "cut_incident_video", "cleanup": "cleanup"})
     graph.add_conditional_edges("cut_incident_video", after_step, {"continue": "review", "cleanup": "cleanup"})
     graph.add_conditional_edges("review", after_review)
-    graph.add_conditional_edges("manual_reanalyze", after_manual)
+    graph.add_conditional_edges(
+        "manual_reanalyze",
+        after_step,
+        {"continue": "map_canonical_evidence", "cleanup": "cleanup"},
+    )
     graph.add_conditional_edges("manual_verify", after_step, {"continue": "draft_report", "cleanup": "cleanup"})
     graph.add_edge("cleanup", END)
     return graph.compile(checkpointer=checkpointer)

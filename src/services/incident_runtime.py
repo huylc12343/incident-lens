@@ -173,6 +173,10 @@ async def incident_workflow_service(
         log_analysis=LogAnalysisService(
             brake_rise_threshold=settings.log_brake_rise_threshold,
             steering_change_threshold=settings.log_steering_change_threshold,
+            strong_deceleration_threshold_mps2=settings.log_strong_deceleration_threshold_mps2,
+            strong_acceleration_threshold_mps2=settings.log_strong_acceleration_threshold_mps2,
+            extreme_acceleration_threshold_mps2=settings.log_extreme_acceleration_threshold_mps2,
+            strong_steering_delta_threshold=settings.log_strong_steering_delta_threshold,
         ),
         charts=ChartService(),
         verification=verification,
@@ -180,6 +184,7 @@ async def incident_workflow_service(
         artifact_dir=settings.artifact_dir,
         timestamp_tolerance_s=settings.log_timestamp_tolerance_s,
         claim_log_sample_radius=settings.log_claim_sample_radius,
+        verification_incident_padding_s=settings.log_verification_incident_padding_s,
         reanalysis_prompt_version=settings.reanalysis_prompt_version,
         auto_reanalysis_enabled=settings.auto_reanalysis_enabled,
         cleanup_remote_resources=True,

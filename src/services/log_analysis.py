@@ -8,6 +8,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from src.config import (
+    LOG_EXTREME_ACCELERATION_THRESHOLD_MPS2_DEFAULT,
+    LOG_STRONG_ACCELERATION_THRESHOLD_MPS2_DEFAULT,
+    LOG_STRONG_DECELERATION_THRESHOLD_MPS2_DEFAULT,
+    LOG_STRONG_STEERING_DELTA_THRESHOLD_DEFAULT,
+    LOG_VERIFICATION_INCIDENT_PADDING_S_DEFAULT,
+)
 from src.models.incidents import (
     Claim,
     ClaimLogEvidence,
@@ -42,7 +49,17 @@ AUTONOMY_ALIASES = ("autonomous_state", "autonomy_state", "autopilot", "automate
 DISENGAGEMENT_ALIASES = ("disengagement", "driver_takeover", "manual_takeover")
 WARNING_ALIASES = ("warning_code", "warning", "warnings")
 ERROR_ALIASES = ("error_code", "error", "errors")
-LogEventType = Literal["brake_rise", "steering_change", "disengagement", "warning", "error"]
+LogEventType = Literal[
+    "brake_rise",
+    "steering_change",
+    "strong_steering_change",
+    "strong_deceleration",
+    "strong_acceleration",
+    "extreme_acceleration",
+    "disengagement",
+    "warning",
+    "error",
+]
 
 NEAR_STOPPED_SPEED_KMH = 1.0
 STRONG_SPEED_DROP_KMH = 10.0
@@ -107,11 +124,32 @@ class LogAnalysisService:
         *,
         brake_rise_threshold: float = 0.3,
         steering_change_threshold: float = 10.0,
+        strong_deceleration_threshold_mps2: float = LOG_STRONG_DECELERATION_THRESHOLD_MPS2_DEFAULT,
+        strong_acceleration_threshold_mps2: float = LOG_STRONG_ACCELERATION_THRESHOLD_MPS2_DEFAULT,
+        extreme_acceleration_threshold_mps2: float = LOG_EXTREME_ACCELERATION_THRESHOLD_MPS2_DEFAULT,
+        strong_steering_delta_threshold: float = LOG_STRONG_STEERING_DELTA_THRESHOLD_DEFAULT,
     ) -> None:
         if brake_rise_threshold < 0 or steering_change_threshold < 0:
             raise ValueError("log thresholds must be non-negative")
+        if strong_deceleration_threshold_mps2 >= 0:
+            raise ValueError("strong_deceleration_threshold_mps2 must be negative")
+        if strong_acceleration_threshold_mps2 <= 0:
+            raise ValueError("strong_acceleration_threshold_mps2 must be positive")
+        if extreme_acceleration_threshold_mps2 <= 0:
+            raise ValueError("extreme_acceleration_threshold_mps2 must be positive")
+        if extreme_acceleration_threshold_mps2 < max(
+            abs(strong_deceleration_threshold_mps2),
+            strong_acceleration_threshold_mps2,
+        ):
+            raise ValueError("extreme_acceleration_threshold_mps2 must exceed strong acceleration thresholds")
+        if strong_steering_delta_threshold <= 0:
+            raise ValueError("strong_steering_delta_threshold must be positive")
         self._brake_rise_threshold = brake_rise_threshold
         self._steering_change_threshold = steering_change_threshold
+        self._strong_deceleration_threshold_mps2 = strong_deceleration_threshold_mps2
+        self._strong_acceleration_threshold_mps2 = strong_acceleration_threshold_mps2
+        self._extreme_acceleration_threshold_mps2 = extreme_acceleration_threshold_mps2
+        self._strong_steering_delta_threshold = strong_steering_delta_threshold
 
     def analyze(
         self,
@@ -132,8 +170,11 @@ class LogAnalysisService:
         brake = [record.number(BRAKE_ALIASES) for record in sliced]
         steering = [record.number(STEERING_ALIASES) for record in sliced]
         acceleration = _acceleration_series(sliced, speed)
-        events = self._detect_events(sliced, brake, steering)
-        warnings = _unique_text_values(sliced, WARNING_ALIASES)
+        events = self._detect_events(sliced, brake, steering, acceleration)
+        warnings = [
+            *_unique_text_values(sliced, WARNING_ALIASES),
+            *_anomaly_warnings(events),
+        ]
         errors = _unique_text_values(sliced, ERROR_ALIASES)
 
         speed_values = [value for value in speed if value is not None]
@@ -155,6 +196,10 @@ class LogAnalysisService:
             "brake_rise_time": _first_event_time(events, "brake_rise"),
             "max_steering_change": max(steering_changes, default=None),
             "steering_change_time": _first_event_time(events, "steering_change"),
+            "strong_steering_change_time": _first_event_time(events, "strong_steering_change"),
+            "strong_deceleration_time": _first_event_time(events, "strong_deceleration"),
+            "strong_acceleration_time": _first_event_time(events, "strong_acceleration"),
+            "extreme_acceleration_time": _first_event_time(events, "extreme_acceleration"),
             "disengagement_time": _first_event_time(events, "disengagement"),
         }
         metric_evidence_ids = [
@@ -182,6 +227,7 @@ class LogAnalysisService:
         records: list[LogRecord],
         brake: list[float | None],
         steering: list[float | None],
+        acceleration: list[float | None],
     ) -> list[LogEvent]:
         events: list[LogEvent] = []
         for index in range(1, len(records)):
@@ -201,6 +247,17 @@ class LogAnalysisService:
                     )
             if steering[index] is not None and steering[index - 1] is not None:
                 steering_delta = abs(steering[index] - steering[index - 1])
+                if steering_delta >= self._strong_steering_delta_threshold:
+                    events.append(
+                        _event(
+                            "strong_steering_change",
+                            current.timestamp_s,
+                            "steering",
+                            steering[index],
+                            steering[index - 1],
+                            f"absolute steering change {steering_delta:.3f}",
+                        )
+                    )
                 if steering_delta >= self._steering_change_threshold:
                     events.append(
                         _event(
@@ -212,6 +269,43 @@ class LogAnalysisService:
                             f"absolute steering change {steering_delta:.3f}",
                         )
                     )
+
+        for record, value in zip(records, acceleration, strict=True):
+            if value is None:
+                continue
+            if abs(value) >= self._extreme_acceleration_threshold_mps2:
+                events.append(
+                    _event(
+                        "extreme_acceleration",
+                        record.timestamp_s,
+                        "acceleration_mps2",
+                        value,
+                        None,
+                        f"extreme acceleration {value:.3f} m/s²",
+                    )
+                )
+            elif value <= self._strong_deceleration_threshold_mps2:
+                events.append(
+                    _event(
+                        "strong_deceleration",
+                        record.timestamp_s,
+                        "acceleration_mps2",
+                        value,
+                        None,
+                        f"strong deceleration {value:.3f} m/s²",
+                    )
+                )
+            elif value >= self._strong_acceleration_threshold_mps2:
+                events.append(
+                    _event(
+                        "strong_acceleration",
+                        record.timestamp_s,
+                        "acceleration_mps2",
+                        value,
+                        None,
+                        f"strong acceleration {value:.3f} m/s²",
+                    )
+                )
 
         disengagement_time = _find_disengagement(records)
         if disengagement_time is not None:
@@ -273,6 +367,73 @@ def load_log_records(log_uri: str) -> tuple[list[str], list[LogRecord]]:
     if timestamps != sorted(timestamps) or len(timestamps) != len(set(timestamps)):
         raise LogAnalysisError("LOG_TIMESTAMP_ORDER_INVALID", "log timestamps must be unique and increasing")
     return fieldnames, records
+
+
+def build_verification_log_artifact(
+    log_uri: str,
+    output_uri: str,
+    *,
+    incident_window: IncidentWindow,
+    claims: list[Claim],
+    claim_timestamp_tolerance_s: float,
+    incident_padding_s: float = LOG_VERIFICATION_INCIDENT_PADDING_S_DEFAULT,
+    video_duration_s: float | None = None,
+) -> str:
+    """Persist exactly the telemetry rows that verification may use.
+
+    Incident analysis remains scoped to the unpadded incident window.  This
+    separate artifact is the union of a padded incident span and each claim's
+    timestamp-tolerance span, so verification can support claims elsewhere in
+    the video without citing rows absent from its persisted input.
+    """
+    if claim_timestamp_tolerance_s < 0 or incident_padding_s < 0:
+        raise ValueError("claim_timestamp_tolerance_s and incident_padding_s must be non-negative")
+    if video_duration_s is not None and video_duration_s <= 0:
+        raise ValueError("video_duration_s must be positive")
+
+    fieldnames, records = load_log_records(log_uri)
+    spans = [
+        _bounded_log_span(
+            incident_window.t_start - incident_padding_s,
+            incident_window.t_end + incident_padding_s,
+            video_duration_s=video_duration_s,
+        )
+    ]
+    spans.extend(
+        _bounded_log_span(
+            claim.timestamp_s - claim_timestamp_tolerance_s,
+            claim.timestamp_s + claim_timestamp_tolerance_s,
+            video_duration_s=video_duration_s,
+        )
+        for claim in claims
+        if claim.timestamp_s is not None
+    )
+    selected = [
+        record
+        for record in records
+        if any(start_s <= record.timestamp_s <= end_s for start_s, end_s in spans)
+    ]
+    if not selected:
+        raise LogAnalysisError(
+            "LOG_VERIFICATION_WINDOW_EMPTY",
+            "log contains no rows in the verification artifact windows",
+        )
+
+    output = Path(output_uri).resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    _write_log_slice(output, fieldnames, selected)
+    return str(output)
+
+
+def _bounded_log_span(
+    start_s: float,
+    end_s: float,
+    *,
+    video_duration_s: float | None,
+) -> tuple[float, float]:
+    bounded_start_s = max(0.0, start_s)
+    bounded_end_s = end_s if video_duration_s is None else min(end_s, video_duration_s)
+    return bounded_start_s, max(bounded_start_s, bounded_end_s)
 
 
 def acceleration_series(records: list[LogRecord]) -> list[float | None]:
@@ -1220,6 +1381,20 @@ def _metric_evidence_id(name: str) -> str:
     return f"log-metric:{name}"
 
 
+def _anomaly_warnings(events: list[LogEvent]) -> list[str]:
+    codes = {
+        "strong_deceleration": "LOG_STRONG_DECELERATION",
+        "strong_acceleration": "LOG_STRONG_ACCELERATION",
+        "extreme_acceleration": "LOG_EXTREME_ACCELERATION",
+        "strong_steering_change": "LOG_STRONG_STEERING_CHANGE",
+    }
+    return [
+        f"{codes[event.event_type]} at {_format_timestamp_s(event.timestamp_s)}s: {event.details}"
+        for event in events
+        if event.event_type in codes
+    ]
+
+
 def _build_summary(
     window: IncidentWindow,
     metrics: dict[str, float | int | str | bool | None],
@@ -1243,6 +1418,18 @@ def _build_summary(
             f"Dải gia tốc từ {float(metrics['acceleration_min']):.3f} đến "
             f"{float(metrics['acceleration_max']):.3f} m/s²."
         )
+    if metrics["extreme_acceleration_time"] is not None:
+        statements.append(
+            f"Phát hiện gia tốc cực đoan tại {float(metrics['extreme_acceleration_time']):g} giây."
+        )
+    elif metrics["strong_deceleration_time"] is not None:
+        statements.append(
+            f"Phát hiện giảm tốc mạnh tại {float(metrics['strong_deceleration_time']):g} giây."
+        )
+    elif metrics["strong_acceleration_time"] is not None:
+        statements.append(
+            f"Phát hiện tăng tốc mạnh tại {float(metrics['strong_acceleration_time']):g} giây."
+        )
     if metrics["max_brake"] is not None:
         statements.append(f"Giá trị brake lớn nhất là {metrics['max_brake']:g}.")
     if metrics["brake_rise_time"] is not None:
@@ -1254,6 +1441,10 @@ def _build_summary(
         if metrics["steering_change_time"] is not None:
             steering += f" tại {metrics['steering_change_time']:g} giây"
         statements.append(steering + ".")
+    if metrics["strong_steering_change_time"] is not None:
+        statements.append(
+            f"Phát hiện thay đổi lái mạnh tại {float(metrics['strong_steering_change_time']):g} giây."
+        )
     if metrics["disengagement_time"] is not None:
         statements.append(f"Disengagement hoặc tài xế tiếp quản tại {metrics['disengagement_time']:g} giây.")
     statements.append(f"Warning: {', '.join(warnings)}." if warnings else "Không có warning trong đoạn log.")

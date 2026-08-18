@@ -3,8 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from src.models.incidents import IncidentWindow
-from src.services.log_analysis import LogAnalysisError, LogAnalysisService, build_log_attention_hint
+from src.models.incidents import Claim, IncidentWindow
+from src.services.log_analysis import (
+    LogAnalysisError,
+    LogAnalysisService,
+    build_log_attention_hint,
+    build_verification_log_artifact,
+)
 
 REAL_LOG = Path("data_mock/vehicle_state.csv")
 CONFLICT_LOG = Path("data_mock/vehicle_state_fake.csv")
@@ -144,6 +149,94 @@ def test_analysis_preserves_extreme_acceleration_for_model_context(tmp_path: Pat
     assert "LOG_ACCELERATION_OUTLIER_FILTERED" not in result.summary.warnings
     assert "27.778" in result.summary.summary
     assert "Dải gia tốc" in result.summary.summary
+
+
+def test_analysis_emits_deterministic_anomaly_events_and_warnings(tmp_path: Path) -> None:
+    source = tmp_path / "anomalies.csv"
+    source.write_text(
+        "timestamp_s,speed_kmh,steer,acceleration_mps2\n"
+        "0.0,30,0.0,0.0\n"
+        "1.0,30,0.4,-5.5\n"
+        "2.0,30,0.0,4.5\n"
+        "3.0,30,0.5,-8.0\n",
+        encoding="utf-8",
+    )
+
+    result = LogAnalysisService().analyze(
+        str(source),
+        str(tmp_path / "slice.csv"),
+        window=IncidentWindow(t_start=0, t0=1, t_end=3),
+    )
+
+    event_types = [event.event_type for event in result.events]
+    assert "strong_deceleration" in event_types
+    assert "strong_acceleration" in event_types
+    assert "extreme_acceleration" in event_types
+    assert "strong_steering_change" in event_types
+    assert "LOG_STRONG_DECELERATION" in "\n".join(result.summary.warnings)
+    assert "LOG_STRONG_ACCELERATION" in "\n".join(result.summary.warnings)
+    assert "LOG_EXTREME_ACCELERATION" in "\n".join(result.summary.warnings)
+    assert "LOG_STRONG_STEERING_CHANGE" in "\n".join(result.summary.warnings)
+    assert result.summary.metrics["strong_deceleration_time"] == 1
+    assert result.summary.metrics["strong_acceleration_time"] == 2
+    assert result.summary.metrics["extreme_acceleration_time"] == 3
+    assert result.summary.metrics["strong_steering_change_time"] == 1
+
+
+def test_verification_log_artifact_unions_padded_incident_and_claim_windows(tmp_path: Path) -> None:
+    source = tmp_path / "vehicle.csv"
+    source.write_text(
+        "timestamp_s,speed_kmh\n"
+        "2.5,20\n"
+        "3.0,20\n"
+        "3.5,20\n"
+        "4.5,20\n"
+        "5.0,20\n"
+        "6.0,20\n"
+        "12.0,20\n"
+        "12.5,20\n"
+        "13.0,20\n"
+        "13.5,20\n",
+        encoding="utf-8",
+    )
+
+    artifact_uri = build_verification_log_artifact(
+        str(source),
+        str(tmp_path / "verification_log.csv"),
+        incident_window=IncidentWindow(t_start=6, t0=9, t_end=12),
+        claims=[Claim(claim_id="claim-early", text="Xe đang di chuyển", timestamp_s=3)],
+        claim_timestamp_tolerance_s=0.5,
+        incident_padding_s=1,
+    )
+
+    with Path(artifact_uri).open(encoding="utf-8") as file:
+        rows = list(csv.DictReader(file))
+    assert [float(row["timestamp_s"]) for row in rows] == [2.5, 3.0, 3.5, 5.0, 6.0, 12.0, 12.5, 13.0]
+
+
+def test_verification_log_artifact_excludes_rows_after_video_end(tmp_path: Path) -> None:
+    source = tmp_path / "vehicle.csv"
+    source.write_text(
+        "timestamp_s,speed_kmh\n"
+        "44.70,10\n"
+        "44.75,10\n"
+        "44.80,10\n",
+        encoding="utf-8",
+    )
+
+    artifact_uri = build_verification_log_artifact(
+        str(source),
+        str(tmp_path / "verification_log.csv"),
+        incident_window=IncidentWindow(t_start=40, t0=44, t_end=44.73),
+        claims=[],
+        claim_timestamp_tolerance_s=0.5,
+        incident_padding_s=1,
+        video_duration_s=44.73,
+    )
+
+    with Path(artifact_uri).open(encoding="utf-8") as file:
+        rows = list(csv.DictReader(file))
+    assert [float(row["timestamp_s"]) for row in rows] == [44.7]
 
 
 def test_build_log_attention_hint_contains_only_qualitative_changes(tmp_path: Path) -> None:

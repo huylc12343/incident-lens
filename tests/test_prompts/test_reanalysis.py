@@ -32,12 +32,15 @@ def test_auto_reanalysis_contains_only_automatic_context() -> None:
         "verification_reason",
         "log_evidence_summary",
         "timestamp_window",
+        "reanalysis_window",
     }
     assert "feedback" not in prompt.context
     assert "claim-1" not in prompt.text
     assert prompt.context["conflict_claim"]["claim_id"] == "claim-1"
     assert "không trả evidence" in prompt.text
     assert "Backend sẽ tự map" in prompt.text
+    assert "cùng sự kiện" in prompt.text
+    assert prompt.context["reanalysis_window"] == {"t_start": 11.2, "t0": 12.5, "t_end": 15.1}
 
 
 def test_human_reanalysis_contains_only_reviewer_context() -> None:

@@ -214,7 +214,23 @@ class ReanalysisRequest(ContractModel):
     source_duration_s: float | None = Field(default=None, gt=0, le=60)
     frame_manifest: VideoSequenceManifest | None = None
     normalized_video_uri: str | None = None
+    # A native re-analysis can receive a short physical clip while all returned
+    # timestamps remain coordinates of the original source video.
+    input_video_start_s: float | None = Field(default=None, ge=0)
+    input_video_end_s: float | None = Field(default=None, gt=0)
     remote_media_handles: list[RemoteMediaHandle] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_input_video_window(self) -> ReanalysisRequest:
+        has_start = self.input_video_start_s is not None
+        has_end = self.input_video_end_s is not None
+        if has_start != has_end:
+            raise ValueError("input_video_start_s and input_video_end_s must be provided together")
+        if has_start and self.input_video_start_s >= self.input_video_end_s:
+            raise ValueError("input video window must satisfy input_video_start_s < input_video_end_s")
+        if self.source_duration_s is not None and has_end and self.input_video_end_s > self.source_duration_s:
+            raise ValueError("input video window cannot exceed source_duration_s")
+        return self
 
 
 class LogEvidenceSummary(ContractModel):
@@ -228,7 +244,17 @@ class LogEvidenceSummary(ContractModel):
 
 class LogEvent(ContractModel):
     event_id: str = Field(min_length=1)
-    event_type: Literal["brake_rise", "steering_change", "disengagement", "warning", "error"]
+    event_type: Literal[
+        "brake_rise",
+        "steering_change",
+        "strong_steering_change",
+        "strong_deceleration",
+        "strong_acceleration",
+        "extreme_acceleration",
+        "disengagement",
+        "warning",
+        "error",
+    ]
     timestamp_s: float = Field(ge=0)
     signal: str = Field(min_length=1)
     value: float | int | str | bool | None = None

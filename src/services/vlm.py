@@ -138,6 +138,15 @@ class QwenNativeVideoVLMService:
     async def reanalyze_claims(self, request: ReanalysisRequest) -> VideoMemoryPatch:
         if not request.normalized_video_uri:
             raise VLMServiceError("QWEN_REANALYSIS_VIDEO_REQUIRED", "Qwen re-analysis requires normalized_video_uri")
+        timestamp_bounds = (
+            (request.input_video_start_s, request.input_video_end_s)
+            if request.input_video_start_s is not None and request.input_video_end_s is not None
+            else (
+                (0.0, request.source_duration_s)
+                if request.source_duration_s is not None
+                else (request.incident_window.t_start, request.incident_window.t_end)
+            )
+        )
         patch = await self._generate(
             incident_id=request.incident_id,
             operation="claim_reanalysis",
@@ -150,11 +159,8 @@ class QwenNativeVideoVLMService:
                 "target_claim_ids": request.target_claim_ids,
                 "base_revision": request.current_memory.revision,
             },
-            timestamp_bounds=(
-                (0.0, request.source_duration_s)
-                if request.source_duration_s is not None
-                else (request.incident_window.t_start, request.incident_window.t_end)
-            ),
+            timestamp_bounds=timestamp_bounds,
+            input_video_start_s=request.input_video_start_s,
         )
         _validate_patch_targets(patch, request.target_claim_ids)
         return patch
@@ -174,6 +180,7 @@ class QwenNativeVideoVLMService:
         output_model: type[StructuredModel],
         model_defaults: dict[str, Any] | None = None,
         timestamp_bounds: tuple[float, float] | None = None,
+        input_video_start_s: float | None = None,
     ) -> StructuredModel:
         activity_id = None
         response = None
@@ -208,15 +215,25 @@ class QwenNativeVideoVLMService:
                 f"<json_schema>{output_schema}</json_schema>"
             )
             if timestamp_bounds is not None:
-                structured_system_prompt += (
-                    "\nQUY TẮC TIMESTAMP BẮT BUỘC:\n"
-                    f"- Video bắt đầu tại {timestamp_bounds[0]:g}s và kết thúc tại "
-                    f"{timestamp_bounds[1]:g}s; không được trả timestamp ngoài khoảng này.\n"
-                    "- Phải có t_start <= t0 <= t_end.\n"
-                    "- representative_timestamp_s, mọi timeline.timestamp_s và claim.timestamp_s "
-                    "phải nằm trong khoảng thời gian video đã nêu.\n"
-                    "- Timestamp là số giây tính từ đầu video, không phải số frame hay chuỗi thời gian."
-                )
+                if input_video_start_s is not None:
+                    structured_system_prompt += (
+                        "\nQUY TẮC TIMESTAMP BẮT BUỘC:\n"
+                        "- Input là một clip con: mốc 0s của clip này tương ứng với "
+                        f"{input_video_start_s:g}s của video gốc.\n"
+                        f"- Clip phủ vùng {timestamp_bounds[0]:g}s đến {timestamp_bounds[1]:g}s của video gốc. "
+                        "Mọi timestamp trả về phải là timestamp toàn cục của video gốc, không phải timestamp cục bộ của clip.\n"
+                        f"- Không được trả timestamp ngoài [{timestamp_bounds[0]:g}, {timestamp_bounds[1]:g}]."
+                    )
+                else:
+                    structured_system_prompt += (
+                        "\nQUY TẮC TIMESTAMP BẮT BUỘC:\n"
+                        f"- Video bắt đầu tại {timestamp_bounds[0]:g}s và kết thúc tại "
+                        f"{timestamp_bounds[1]:g}s; không được trả timestamp ngoài khoảng này.\n"
+                        "- Phải có t_start <= t0 <= t_end.\n"
+                        "- representative_timestamp_s, mọi timeline.timestamp_s và claim.timestamp_s "
+                        "phải nằm trong khoảng thời gian video đã nêu.\n"
+                        "- Timestamp là số giây tính từ đầu video, không phải số frame hay chuỗi thời gian."
+                    )
             validation_feedback = ""
             for attempt in range(self._max_structured_output_retries + 1):
                 attempt_user_prompt = user_prompt
@@ -268,6 +285,11 @@ class QwenNativeVideoVLMService:
                                 "video_fps": self._video_fps,
                                 "structured_output_attempt": attempt + 1,
                                 "network_attempt": network_attempt + 1,
+                                **(
+                                    {"source_timestamp_window": list(timestamp_bounds)}
+                                    if input_video_start_s is not None and timestamp_bounds is not None
+                                    else {}
+                                ),
                             },
                         )
                     try:

@@ -58,3 +58,33 @@ def test_creates_full_log_charts_with_all_window_markers(tmp_path: Path, monkeyp
     assert chart_timestamps[0][0] < window.t_start
     assert chart_timestamps[0][-1] > window.t_end
     assert all(Path(uri).read_bytes().startswith(b"\x89PNG\r\n\x1a\n") for uri in chart_uris)
+
+
+def test_charts_accept_deterministic_telemetry_anomaly_events(tmp_path: Path) -> None:
+    source = tmp_path / "anomalies.csv"
+    source.write_text(
+        "timestamp_s,speed_kmh,steer,acceleration_mps2\n"
+        "0,30,0,0\n"
+        "1,30,0.4,-5.5\n"
+        "2,30,0,4.5\n"
+        "3,30,0.5,-8\n",
+        encoding="utf-8",
+    )
+    window = IncidentWindow(t_start=0, t0=1, t_end=3)
+    analysis = LogAnalysisService().analyze(str(source), str(tmp_path / "log_slice.csv"), window=window)
+
+    chart_uris = ChartService().create_charts(
+        str(source),
+        str(tmp_path / "charts"),
+        window=window,
+        events=analysis.events,
+        claims=[],
+    )
+
+    assert {event.event_type for event in analysis.events} >= {
+        "strong_deceleration",
+        "strong_acceleration",
+        "extreme_acceleration",
+        "strong_steering_change",
+    }
+    assert all(Path(uri).is_file() for uri in chart_uris)

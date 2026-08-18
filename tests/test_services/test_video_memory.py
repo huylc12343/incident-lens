@@ -543,6 +543,45 @@ def test_memory_only_patch_keeps_verification_when_claim_content_is_unchanged() 
     assert merged.claims[0].verification_status == VerificationStatus.SUPPORTED
 
 
+def test_video_memory_patch_can_drop_only_its_target_without_resetting_other_claims() -> None:
+    """An unsupported focused reanalysis may omit its target, not unrelated claims."""
+    target_evidence = EvidenceReference(evidence_id="frame-target", timestamp_s=1)
+    supported_evidence = EvidenceReference(evidence_id="frame-supported", timestamp_s=2)
+    memory = VideoMemory(
+        global_scene="Road scene",
+        incident_window=IncidentWindow(t_start=0, t0=1, t_end=2),
+        claims=[
+            Claim(
+                claim_id="claim-target",
+                text="Target no longer has enough evidence.",
+                timestamp_s=1,
+                evidence=[target_evidence],
+                verification_status=VerificationStatus.CONTRADICTED,
+            ),
+            Claim(
+                claim_id="claim-supported",
+                text="Unrelated supported event.",
+                timestamp_s=2,
+                evidence=[supported_evidence],
+                verification_status=VerificationStatus.SUPPORTED,
+            ),
+        ],
+        analysis_mode=AnalysisMode.SINGLE_REQUEST,
+    )
+    patch = VideoMemoryPatch(
+        target_claim_ids=["claim-target"],
+        claims=[],
+        base_revision=1,
+    )
+
+    merged = merge_video_memory_patch(memory, patch)
+
+    assert merged.revision == 2
+    assert [claim.claim_id for claim in merged.claims] == ["claim-supported"]
+    assert merged.claims[0].verification_status == VerificationStatus.SUPPORTED
+    assert merged.claims[0].evidence == [supported_evidence]
+
+
 @pytest.mark.asyncio
 async def test_rolling_batch_limit_rejects_before_any_request() -> None:
     request = _frame_request(8)

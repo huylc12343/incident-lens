@@ -127,6 +127,10 @@ class ChartService:
             "error": "#b71c1c",
             "brake_rise": "#c62828",
             "steering_change": "#6a1b9a",
+            "strong_steering_change": "#4a148c",
+            "strong_deceleration": "#d84315",
+            "strong_acceleration": "#1565c0",
+            "extreme_acceleration": "#b71c1c",
         }
         for event in events:
             axis.scatter(

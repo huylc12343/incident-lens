@@ -387,17 +387,36 @@ def merge_video_memory_patch(
     if missing_targets:
         raise VideoMemoryError("VLM_PATCH_TARGET_MISSING", "patch targets claims not present in current memory")
     patch_claims = {claim.claim_id: claim for claim in patch.claims}
-    for claim_id in patch.target_claim_ids:
-        if claim_id in patch_claims:
-            current_claims[claim_id] = patch_claims[claim_id]
+    if len(patch_claims) != len(patch.claims):
+        raise VideoMemoryError("VLM_PATCH_CLAIM_DUPLICATE", "memory patch contains duplicate claim IDs")
+
+    # A patch may omit a target when its short re-analysis clip has insufficient
+    # evidence.  That intentionally drops only that target; untouched claims
+    # retain both their contents and their previous verification result.
+    merged_claims = []
+    for previous_claim in memory.claims:
+        claim_id = previous_claim.claim_id
+        if claim_id not in patch.target_claim_ids:
+            merged_claims.append(previous_claim)
+            continue
+        next_claim = patch_claims.get(claim_id)
+        if next_claim is None:
+            continue
+        content_changed = _claim_semantics_changed(previous_claim, next_claim)
+        merged_claims.append(
+            next_claim.model_copy(
+                update={
+                    "verification_status": (
+                        VerificationStatus.UNVERIFIED if content_changed else previous_claim.verification_status
+                    )
+                }
+            )
+        )
 
     handles = _merge_by_id(memory.remote_media_handles, patch.remote_media_handles, "name")
     merged = memory.model_copy(
         update={
-            "claims": [
-                claim.model_copy(update={"verification_status": VerificationStatus.UNVERIFIED})
-                for claim in current_claims.values()
-            ],
+            "claims": merged_claims,
             "remote_media_handles": handles,
             "revision": memory.revision + 1,
         }
@@ -407,8 +426,9 @@ def merge_video_memory_patch(
             [evidence.evidence_id for evidence in claim.evidence],
             f"evidence IDs in claim {claim.claim_id}",
         )
-    # Native-video claims are intentionally evidence-free until the final cut node
-    # samples canonical frames. All other partial-evidence states remain invalid.
+    # Direct callers can still merge native output before the canonical-evidence
+    # node runs; the graph maps that evidence before verification/reporting.
+    # All other partial-evidence states remain invalid.
     if not allow_deferred_native_evidence and any(not claim.evidence for claim in merged.claims):
         raise VideoMemoryError("VLM_CLAIM_EVIDENCE_MISSING", "every claim must contain frame evidence")
     return merged
@@ -714,6 +734,13 @@ def _manifest_fps(manifest: VideoSequenceManifest) -> float:
 def _require_unique(values: list[str], label: str) -> None:
     if len(values) != len(set(values)):
         raise VideoMemoryError("VLM_DUPLICATE_ID", f"VideoMemory contains duplicate {label}")
+
+
+def _claim_semantics_changed(previous: BaseModel, current: BaseModel) -> bool:
+    """Frame canonicalization alone must not invalidate a telemetry verdict."""
+    return previous.model_dump(exclude={"verification_status", "evidence"}) != current.model_dump(
+        exclude={"verification_status", "evidence"}
+    )
 
 
 def _merge_by_id(

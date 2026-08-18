@@ -67,6 +67,8 @@ input:focus-visible,
     display: flex;
     align-items: center;
     gap: 10px;
+    padding: 7px 10px;
+    border-radius: 10px;
     color: var(--ink);
     text-decoration: none;
     min-width: 233px;
@@ -973,6 +975,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .nav-actions { min-width: 250px; }
 .quick-guide-button { display: grid; width: 34px; min-height: 34px; padding: 0; place-items: center; border: 1px solid #fbbf24; border-radius: 7px; background: rgba(251, 191, 36, .1); color: #fef3c7; font-size: 15px; font-weight: 800; line-height: 1; }
 .quick-guide-button:hover { border-color: #fcd34d; background: rgba(251, 191, 36, .2); color: #fff; }
+.settings-trigger-button { display: grid; width: 34px; height: 34px; padding: 0; place-items: center; border: 1px solid #828385; border-radius: 7px; background: #fff; }
+.settings-trigger-button:hover { border-color: #fff; background: #e5e7eb; }
+.settings-trigger-button img { display: block; width: 22px; height: 22px; object-fit: contain; }
 .icon-button { position: relative; width: 34px; height: 34px; color: #C0C0C2; }
 .icon-button:hover { color: #fff; background: #373737; }
 .notification-dot { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border: 1px solid #565656; border-radius: 50%; background: #ACBABF; }
@@ -997,7 +1002,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .hero h1 { max-width: 760px; margin: 0; color: #373737; font-family: Inter, Manrope, Arial, sans-serif; font-size: clamp(29px, 3.2vw, 42px); font-weight: 800; line-height: 1.12; letter-spacing: -1.6px; }
 .hero-copy { max-width: 720px; margin: 14px auto 0; color: #565656; font-family: Inter, Manrope, Arial, sans-serif; font-size: 14px; line-height: 1.65; }
 .hero-ai-status { display: grid; justify-items: center; margin-top: 19px; }
+.hero-ai-mascot-wrap { position: relative; }
 .hero-ai-mascot { display: block; width: clamp(96px, 10vw, 112px); height: clamp(96px, 10vw, 112px); object-fit: contain; image-rendering: pixelated; }
+.hero-quick-guide-button { position: absolute; right: -18px; bottom: 5px; display: grid; width: 30px; height: 30px; padding: 0; place-items: center; border: 1px solid #fbbf24; border-radius: 50%; background: #fff8df; color: #8a5a00; font-size: 15px; font-weight: 800; line-height: 1; }
+.hero-quick-guide-button:hover { border-color: #d97706; background: #fef3c7; }
 .hero-ai-dots { display: flex; align-items: center; justify-content: center; gap: 6px; height: 18px; margin-top: 7px; }
 .hero-ai-dots i { display: block; width: 5px; height: 5px; border-radius: 50%; background: #828385; animation: hero-dot-pulse 1.2s ease-in-out infinite; }
 .hero-ai-dots i:nth-child(2) { animation-delay: .16s; }
@@ -1010,6 +1018,137 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 @media (prefers-reduced-motion: reduce) {
     .hero-ai-status .hero-ai-message,
     .hero-ai-status .hero-ai-message.is-fading { opacity: 1; transform: none; transition: none; }
+}
+
+.settings-modal-backdrop {
+    position: fixed;
+    z-index: 100;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background:
+        linear-gradient(rgba(24, 33, 58, .28), rgba(24, 33, 58, .28)),
+        url("/images/settings2.png") center / cover no-repeat;
+    backdrop-filter: blur(7px);
+    -webkit-backdrop-filter: blur(7px);
+}
+
+.settings-modal {
+    width: min(390px, 100%);
+    padding: 22px;
+    border: 1px solid #b9bec8;
+    border-radius: 12px;
+    background: #e1e3e7;
+    box-shadow: 0 20px 55px rgba(15, 23, 42, .25);
+}
+
+.settings-modal-header {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #c5c9d0;
+}
+
+.settings-modal-header h2 {
+    margin: 0;
+    color: #252b36;
+    font-size: 18px;
+}
+
+.settings-modal-close {
+    position: absolute;
+    top: 50%;
+    right: 0;
+    display: grid;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    place-items: center;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: #3f4652;
+    font-size: 26px;
+    line-height: 1;
+    transform: translateY(-50%);
+}
+
+.settings-modal-close:hover {
+    background: rgba(255, 255, 255, .55);
+}
+
+.settings-modal-close img {
+    display: block;
+    width: 27px;
+    height: 27px;
+    object-fit: contain;
+}
+
+.settings-modal-options {
+    display: grid;
+    justify-items: center;
+    gap: 9px;
+    margin-top: 17px;
+}
+
+.settings-modal-options button {
+    width: 132px;
+    min-height: 44px;
+    padding: 10px 20px;
+    border: 1px solid #c5c9d0;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, .7);
+    color: #252b36;
+    font-weight: 700;
+    text-align: center;
+}
+
+.settings-modal-options button:hover {
+    border-color: #9ca3af;
+    background: #fff;
+}
+
+.settings-modal-options .settings-support-option {
+    border-color: #a9d7ee;
+    background: #dff3fd;
+    color: #155e75;
+}
+
+.settings-modal-options .settings-support-option:hover {
+    border-color: #79c4e5;
+    background: #c8eafb;
+}
+
+.settings-modal-options .settings-light-option {
+    border-color: #4b5563;
+    background: #4b5563;
+    color: #fff;
+}
+
+.settings-modal-options .settings-light-option:hover {
+    border-color: #374151;
+    background: #374151;
+}
+
+.settings-modal-options .settings-light-option.is-black,
+.settings-modal-options .settings-light-option.is-black:hover {
+    border-color: #000;
+    background: #000;
+}
+
+.settings-modal-options .settings-logout-option {
+    border-color: #f3a7a7;
+    background: #fee2e2;
+    color: #b42318;
+}
+
+.settings-modal-options .settings-logout-option:hover {
+    border-color: #eb7c7c;
+    background: #fecaca;
 }
 
 /* Keep the product typography consistent across every UI surface. */
@@ -4436,7 +4575,47 @@ body time { font-size: max(12px, .75rem) !important; line-height: 1.5 !important
   color: #1f1f1f !important;
 }
 
+/* Subtle decorative motifs behind the application content. */
+body {
+  background-color: #f8fafc;
+  background-image:
+    linear-gradient(rgba(248, 250, 252, .84), rgba(248, 250, 252, .84)),
+    url("/images/blacktree.png"),
+    url("/images/blacktree.png");
+  background-position: center, -68px 148px, calc(100% + 307px) 100%;
+  background-size: auto, 470px 470px, 615px 615px;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  background-blend-mode: normal, multiply, multiply;
+}
+
 .guide-highlight { position: relative; z-index: 56; border-color: #828385 !important; box-shadow: 0 0 0 5px rgba(219, 234, 254, .78), 0 14px 42px rgba(15, 23, 42, .18) !important; }
+.workspace-card,
+.recent-section,
+.upload-card,
+.video-panel,
+.processing-panel,
+.workspace-strip,
+.workspace-panel,
+.incident-review-sidebar,
+.report-meta,
+.report-card,
+.evaluation-hero,
+.evaluation-grid article,
+.evaluation-details,
+.review-card,
+.frame-card,
+.forensic-report-document,
+.document-evidence-gallery figure,
+.all-evidence-inspector .workspace-evidence-grid figure,
+.telemetry-chart-grid figure,
+.assessment-content section,
+.refined-clip-card,
+.incident-navigation-sidebar,
+.report-style-review {
+  box-shadow: 0 3px 12px rgba(16, 24, 40, .07);
+}
+
 .quick-guide-overlay { position: fixed; z-index: 55; inset: 0; background: rgba(15, 23, 42, .32); animation: quick-guide-fade 180ms ease-out; }
 .quick-guide-popover { position: fixed; z-index: 57; width: min(360px, calc(100vw - 32px)); padding: 20px; border: 1px solid #cbd5e1; border-radius: 12px; background: #fff; box-shadow: 0 18px 50px rgba(15, 23, 42, .2); animation: quick-guide-enter 220ms ease-out; }
 .quick-guide-popover .eyebrow { margin-bottom: 5px; color: #475569; }

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import { useEffect, useState } from "react";
 import { uiText as text } from "../lib/ui-copy";
 const Icon = ({ children }: { children: React.ReactNode }) => (
   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -12,19 +13,23 @@ const Icon = ({ children }: { children: React.ReactNode }) => (
 export function Header({
   active = "home",
   processing = false,
-  onQuickGuide,
 }: {
   active?: "home" | "history" | "settings";
   processing?: boolean;
-  onQuickGuide?: () => void;
 }) {
-  const openQuickGuide = () => {
-    if (onQuickGuide) {
-      onQuickGuide();
-      return;
-    }
-    window.location.assign("/#upload-evidence");
-  };
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isLightOptionDark, setIsLightOptionDark] = useState(false);
+
+  useEffect(() => {
+    if (!isSettingsOpen) return;
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsSettingsOpen(false);
+    };
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [isSettingsOpen]);
 
   return (
     <header className="topbar">
@@ -37,18 +42,6 @@ export function Header({
           </span>
         </Link>
         <nav aria-label={text("Main navigation", "Điều hướng chính")}>
-          <Link className={active === "home" ? "active" : ""} href="/">
-            {text("Dashboard", "Tổng quan")}
-          </Link>
-          <Link
-            className={active === "history" ? "active" : ""}
-            href="/#recent-reviews"
-          >
-            {text("History", "Lịch sử")}
-          </Link>
-          <a className={active === "settings" ? "active" : ""} href="#settings">
-            {text("Settings", "Cài đặt")}
-          </a>
         </nav>
         <div className="nav-actions">
           {processing && <span className="header-status">{text("Incident Review", "Rà soát sự cố")}</span>}
@@ -64,14 +57,59 @@ export function Header({
             </Icon>
             <span className="notification-dot" />
           </button>
-          <button className="quick-guide-button" type="button" onClick={openQuickGuide} aria-label={text("Quick guide", "Hướng dẫn nhanh")}>
-            ?
+          <button
+            className="settings-trigger-button"
+            type="button"
+            onClick={() => setIsSettingsOpen(true)}
+            aria-label={text("Settings", "Cài đặt")}
+          >
+            <Image src="/images/settings.png" alt="" width={22} height={22} />
           </button>
           <span className="avatar" aria-label={text("User account", "Tài khoản người dùng")}>
             PT
           </span>
         </div>
       </div>
+      {isSettingsOpen && (
+        <div
+          className="settings-modal-backdrop"
+          role="presentation"
+          onMouseDown={() => setIsSettingsOpen(false)}
+        >
+          <section
+            className="settings-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-modal-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="settings-modal-header">
+              <h2 id="settings-modal-title">{text("Settings", "Cài đặt")}</h2>
+              <button
+                className="settings-modal-close"
+                type="button"
+                onClick={() => setIsSettingsOpen(false)}
+                aria-label={text("Close settings", "Đóng cài đặt")}
+              >
+                <Image src="/images/cancel.png" alt="" width={27} height={27} />
+              </button>
+            </div>
+            <div className="settings-modal-options">
+              <button className="settings-support-option" type="button">{text("Support", "Hỗ trợ")}</button>
+              <button className="settings-history-option" type="button">{text("History", "Lịch sử")}</button>
+              <button
+                className={`settings-light-option${isLightOptionDark ? " is-black" : ""}`}
+                type="button"
+                aria-pressed={isLightOptionDark}
+                onClick={() => setIsLightOptionDark((current) => !current)}
+              >
+                {text("Light", "Ánh sáng")}
+              </button>
+              <button className="settings-logout-option" type="button">{text("Log out", "Đăng xuất")}</button>
+            </div>
+          </section>
+        </div>
+      )}
     </header>
   );
 }

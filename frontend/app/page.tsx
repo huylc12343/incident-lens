@@ -93,7 +93,7 @@ export default function Home() {
 
   return (
     <>
-      <Header onQuickGuide={openQuickGuide} />
+      <Header />
       <main className="page-shell dashboard-shell">
         <section className="hero" aria-labelledby="page-title">
           <div className="hero-content">
@@ -102,7 +102,10 @@ export default function Home() {
               {text("Analyze synchronized video and telemetry, inspect every AI observation, and keep the engineer in control of the final decision.", "Phân tích video và dữ liệu telemetry đồng bộ, kiểm tra từng quan sát AI và đảm bảo kỹ sư kiểm soát quyết định cuối cùng.")}
             </p>
             <div className="hero-ai-status" aria-label="AI đang sẵn sàng lắng nghe">
-              <Image className="hero-ai-mascot" src="/image/ai_pixel.png" alt="Trợ lý AI đang chờ lệnh" width={112} height={112} priority />
+              <div className="hero-ai-mascot-wrap">
+                <Image className="hero-ai-mascot" src="/images/ai_pixel.png" alt="Trợ lý AI đang chờ lệnh" width={112} height={112} priority />
+                <button className="hero-quick-guide-button" type="button" onClick={openQuickGuide} aria-label={text("Quick guide", "Hướng dẫn nhanh")}>?</button>
+              </div>
               <span className="hero-ai-dots" aria-hidden="true"><i /><i /><i /></span>
               <p className={`hero-ai-message${isFading ? " is-fading" : ""}`} aria-live="off">{displayedMessage}</p>
             </div>

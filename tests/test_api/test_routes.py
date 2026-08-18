@@ -3,6 +3,7 @@ import pytest
 
 AUTH_HEADERS = {"X-API-Key": "test-key"}
 
+# Test marker for the development activity log.
 
 @pytest.mark.asyncio
 async def test_health(client):

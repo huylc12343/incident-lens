@@ -108,7 +108,7 @@ Lưu ý: đường dẫn output tương đối như `runs/detect` được tính
 Mở PowerShell tại thư mục gốc `P-207`, sau đó chạy:
 
 ```powershell
-python src/agents/nodes/detect_and_blur.py --source "D:\Videos\input.mp4"
+python src/services/detect_and_blur.py --source "D:\Tailieu-2026\vin\Demo_day\Vid\2_720p.mp4"
 ```
 
 Chương trình sẽ dùng hai model trong `src/models/` và in đường dẫn tuyệt đối của file kết quả khi hoàn tất.

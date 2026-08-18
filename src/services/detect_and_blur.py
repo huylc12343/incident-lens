@@ -195,8 +195,8 @@ def main():
     # Resolve model paths relative to this file:
     # src/services/detect_and_blur.py -> src/models/*.pt
     src_dir = Path(__file__).resolve().parent.parent
-    default_plate_weights = src_dir / "models" / "best_cv.pt"
-    default_face_weights = src_dir / "models" / "face_yolov8n.pt"
+    default_plate_weights = src_dir / "models" / "best_plate.pt"
+    default_face_weights = src_dir / "models" / "best3_face.pt"
 
     parser.add_argument("--plate-weights", type=str, default=str(default_plate_weights))
     parser.add_argument("--face-weights", type=str, default=str(default_face_weights))

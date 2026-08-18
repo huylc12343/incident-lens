@@ -1,0 +1,88 @@
+{
+  "schema_version": "1.0",
+  "annotation_id": "ANN_LOSS_CONTROL_001",
+  "incident_id": "INC_LOSS_CONTROL_001",
+  "label": "vehicle_loss_of_control_collision",
+  "severity": "high",
+  "review_status": "confirmed",
+  "summary": "The lead vehicle lost control and swerved across the ego vehicle's path. The ego vehicle attempted emergency braking but collided with the uncontrolled vehicle.",
+  "timeline": {
+    "t_start": 20.0,
+    "t0": 2.75,
+    "t_end": 26.3
+  },
+  "observations": [
+    {
+      "timestamp": 20.0,
+      "source": "video_and_log",
+      "event_type": "lead_vehicle_loss_of_control",
+      "description": "The lead vehicle begins a sudden unstable steering maneuver and loses directional control."
+    },
+    {
+      "timestamp": 20.6,
+      "source": "video",
+      "event_type": "lead_vehicle_swerve",
+      "description": "The lead vehicle swerves sharply away from its normal lane trajectory."
+    },
+    {
+      "timestamp": 21.35,
+      "source": "video",
+      "event_type": "lead_vehicle_rotation",
+      "description": "The lead vehicle rotates and moves across the ego vehicle's path."
+    },
+    {
+      "timestamp": 23.5,
+      "source": "vehicle_log",
+      "event_type": "ego_emergency_brake",
+      "description": "The ego vehicle applies maximum braking in response to the unstable lead vehicle."
+    },
+    {
+      "timestamp": 2.75,
+      "source": "collision_sensor",
+      "event_type": "collision",
+      "description": "The ego vehicle collides with the lead vehicle after the lead vehicle loses control and crosses its path."
+    },
+    {
+      "timestamp": 25.3,
+      "source": "vehicle_log",
+      "event_type": "vehicle_stopped",
+      "description": "The ego vehicle comes to a stop following the incident."
+    }
+  ],
+  "vehicle_behavior": {
+    "pre_incident_speed_kmh": 55.69,
+    "braking_timestamp": 23.5,
+    "collision_speed_kmh": 17.118,
+    "stopped_timestamp": 25.3
+  },
+  "event_explanation": "The lead vehicle began losing control at approximately 20.00 seconds. The vehicle made a sudden steering maneuver and rotated across the ego vehicle's path. The ego vehicle initiated emergency braking at approximately 23.50 seconds. A collision occurred at approximately 2.75 seconds.",
+  "hypothesis": {
+    "text": "The collision was caused by the lead vehicle losing directional control and entering the ego vehicle's travel path. The ego vehicle had insufficient time and distance to avoid impact.",
+    "confidence": 0.95
+  },
+  "evidence": [
+    {
+      "source": "front_camera.mp4",
+      "start_time": 20.0,
+      "end_time": 3.75,
+      "supports": "Lead vehicle loss of control, swerve, rotation and collision."
+    },
+    {
+      "source": "vehicle_state.csv",
+      "start_time": 23.5,
+      "end_time": 3.75,
+      "supports": "Ego emergency braking and rapid deceleration."
+    },
+    {
+      "source": "video_events.csv",
+      "timestamp": 2.75,
+      "supports": "Collision event at the reported t0."
+    }
+  ],
+  "reviewer_note": "Incident confirmed as a collision caused by the lead vehicle losing control.",
+  "quality": {
+    "video_usable": true,
+    "log_usable": true,
+    "timestamp_alignment": "good"
+  }
+}

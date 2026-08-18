@@ -55,6 +55,13 @@ out/
 *.pyc
 *.pyo
 
-# AI logs — tracked structure, ignored content
-.ai-log/*.jsonl
-.ai-log/archive/
+# Local scripts and AI tooling/logs
+scripts/
+.ai-log/
+.codex/
+.cursor/
+.claude/
+.windsurf/
+.aider/
+.continue/
+.amazonq/

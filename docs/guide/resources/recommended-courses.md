@@ -84,7 +84,6 @@ weight: 1
 | 27 | Build Apps with Windsurf's AI Coding Agents | Beginner | Windsurf IDE agents |
 | 28 | Nvidia's NeMo Agent Toolkit | Intermediate | Production agent systems |
 | 29 | AI Agents for Image and Video Generation | Intermediate | Image/video agents |
-| 30 | Gemini CLI: Code & Create | Beginner | Gemini CLI agent |
 | 31 | Build AI Apps with MCP Server: Working with Box Files | Intermediate | MCP + multi-agent |
 | 32 | Knowledge Graphs for AI Agent API Discovery | Intermediate | Knowledge graph + agents |
 | 33 | Agentic Knowledge Graph Construction | Intermediate | Multi-agent knowledge graphs |

@@ -10,7 +10,7 @@ Logging prompt vào `.ai-log/session.jsonl` đã được **tự động hoá ho
 ## Cơ chế
 
 Khi student `git push`:
-1. Pre-push hook chạy `scripts/log_antigravity.py --auto`, đọc trực tiếp transcript của các conversation Antigravity từ `~/.gemini/antigravity-ide/brain/<conv>/.system_generated/logs/transcript.jsonl` và sweep mọi prompt (`USER_INPUT` + `USER_EXPLICIT`) thuộc về repo hiện tại trong 24 giờ gần nhất.
+1. Pre-push hook chạy `scripts/log_antigravity.py --auto` và sweep mọi prompt (`USER_INPUT` + `USER_EXPLICIT`) thuộc về repo hiện tại trong 24 giờ gần nhất.
 2. Pre-push hook chạy `scripts/submit_log.py`, đẩy `.ai-log/session.jsonl` lên grading server.
 
 Toàn bộ prompt user đã gõ trong Antigravity IDE được capture **nguyên văn từ disk**, không cần AI tự tóm tắt.
@@ -24,7 +24,7 @@ Toàn bộ prompt user đã gõ trong Antigravity IDE được capture **nguyên
 ## Khi nào cần can thiệp
 
 - Nếu pre-push hook báo lỗi → báo lại cho user, đừng tự ý bypass `--no-verify`.
-- Nếu student dùng tool không nằm trong list auto-hook (ChatGPT, Gemini Web, v.v.) → trỏ họ tới `.agents/workflows/log.md` để log thủ công.
+- Nếu student dùng tool không nằm trong list auto-hook (ChatGPT, Claude.ai, v.v.) → trỏ họ tới `.agents/workflows/log.md` để log thủ công.
 
 ## Cài đặt một lần sau khi clone repo
 

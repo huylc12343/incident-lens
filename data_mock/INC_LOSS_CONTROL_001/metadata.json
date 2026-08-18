@@ -1,0 +1,79 @@
+{
+  "schema_version": "1.0",
+  "incident_id": "INC_LOSS_CONTROL_001",
+  "dataset": {
+    "source": "CARLA",
+    "purpose": "Incident Lens evaluation dataset",
+    "split": "test"
+  },
+  "simulation": {
+    "carla_version": "edf3e9f5c",
+    "map": "Town04",
+    "seed": 2,
+    "duration_sec": 60.0,
+    "fps": 20,
+    "total_frames": 1200,
+    "fixed_delta_seconds": 0.05,
+    "synchronous_mode": true
+  },
+  "scenario": {
+    "name": "front_vehicle_loss_of_control",
+    "description": "The lead vehicle suddenly loses directional control, swerves and rotates across the ego vehicle's path, leading to a collision.",
+    "trigger_time": 20.0,
+    "loss_control_end": 22.7,
+    "ego_brake_time": 23.5
+  },
+  "ego_vehicle": {
+    "actor_id": "ego",
+    "carla_actor_id": 157,
+    "blueprint": "vehicle.tesla.model3"
+  },
+  "other_vehicles": [
+    {
+      "actor_id": "vehicle_001",
+      "carla_actor_id": 158,
+      "blueprint": "vehicle.audi.tt",
+      "role": "lead_vehicle"
+    }
+  ],
+  "sensors": {
+    "front_camera": {
+      "type": "sensor.camera.rgb",
+      "width": 1280,
+      "height": 720,
+      "fov": 90,
+      "fps": 20,
+      "position": {
+        "x": 1.5,
+        "y": 0.0,
+        "z": 1.7
+      }
+    },
+    "collision_sensor": {
+      "type": "sensor.other.collision",
+      "enabled": true
+    },
+    "lane_invasion_sensor": {
+      "type": "sensor.other.lane_invasion",
+      "enabled": true
+    }
+  },
+  "weather": {
+    "preset": "ClearNoon",
+    "cloudiness": 5.0,
+    "precipitation": 0.0,
+    "precipitation_deposits": 0.0,
+    "wind_intensity": 10.0,
+    "sun_altitude_angle": 45.0,
+    "fog_density": 2.0,
+    "wetness": 0.0
+  },
+  "files": {
+    "video": "front_camera.mp4",
+    "vehicle_state": "vehicle_state.csv",
+    "events": "video_events.csv",
+    "incident_ground_truth": "incident.json",
+    "human_annotation": "human_annotation.json"
+  },
+  "generated_at": "2026-08-08T11:15:57.807510+07:00"
+}

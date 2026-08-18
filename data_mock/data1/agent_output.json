@@ -1,0 +1,77 @@
+{
+  "agent_run_id": "run_incident_bridge_001_001",
+  "input_files": [
+    "front_camera.mp4",
+    "vehicle_state.csv",
+    "video_events.csv",
+    "metadata.json"
+  ],
+  "detected_incident": true,
+  "incident_type": "road_departure_and_fall",
+  "severity": "critical",
+  "time_window_s": {
+    "start": 6.0,
+    "end": 14.5
+  },
+  "summary": "Xe tải lưu thông trên cầu, va chạm/né phương tiện ngược chiều rồi lao qua lan can và rơi xuống nước.",
+  "reasoning_summary": "Mất kiểm soát hướng lái sau tình huống tiếp cận rất gần với xe ngược chiều; video không đủ để xác nhận chắc chắn có va chạm trực tiếp.",
+  "key_events": [
+    {
+      "timestamp_s": 4.5,
+      "event": "oncoming_vehicle_close",
+      "severity": "medium"
+    },
+    {
+      "timestamp_s": 6.0,
+      "event": "critical_proximity",
+      "severity": "high"
+    },
+    {
+      "timestamp_s": 6.8,
+      "event": "collision_or_evasive_maneuver",
+      "severity": "critical"
+    },
+    {
+      "timestamp_s": 7.5,
+      "event": "barrier_departure",
+      "severity": "critical"
+    },
+    {
+      "timestamp_s": 9.0,
+      "event": "fall_from_bridge",
+      "severity": "critical"
+    },
+    {
+      "timestamp_s": 13.5,
+      "event": "water_impact",
+      "severity": "critical"
+    }
+  ],
+  "claims": [
+    {
+      "claim": "Có sự kiện nguy hiểm trong video.",
+      "evidence_timestamps_s": [
+        6.0,
+        14.5
+      ],
+      "confidence": 0.95
+    },
+    {
+      "claim": "Mất kiểm soát hướng lái sau tình huống tiếp cận rất gần với xe ngược chiều; video không đủ để xác nhận chắc chắn có va chạm trực tiếp.",
+      "evidence_timestamps_s": [
+        6.0,
+        6.8,
+        7.5,
+        9.0,
+        13.5
+      ],
+      "confidence": 0.72
+    }
+  ],
+  "comparison_target": [
+    "incident.json",
+    "human_annotation.json"
+  ],
+  "overall_confidence": 0.86,
+  "notes": "Kết quả phân tích được sinh bởi Incident Lens Agent từ video, vehicle telemetry và event log đồng bộ."
+}

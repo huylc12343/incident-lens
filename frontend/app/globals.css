@@ -1767,7 +1767,7 @@ tbody tr:hover { background: #fafbff; }
 
 .verification-counts .supported { color: #166534; background: #ecfdf3; }
 .verification-counts .contradicted { color: #991b1b; background: #fef2f2; }
-.verification-counts .video_only { color: #1d4ed8; background: #eff6ff; }
+.verification-counts .video_only { color: #4b5563; background: #f3f4f6; }
 
 .structured-summary textarea,
 .reanalysis-control textarea,
@@ -4337,7 +4337,7 @@ tbody tr:hover { background: #fafbff; }
 .report-style-review .verification-counts .supported { border-color: #bbf7d0; background: #f0fdf4; }
 .report-style-review .verification-counts .contradicted { border-color: #fecdd3; background: #fff1f2; }
 .report-style-review .verification-counts .unverified { border-color: #fde68a; background: #fffbeb; }
-.report-style-review .verification-counts .video_only { border-color: #bfdbfe; background: #eff6ff; }
+.report-style-review .verification-counts .video_only { border-color: #d1d5db; background: #f3f4f6; }
 .report-style-review .structured-summary > p,
 .report-style-review .report-narrative-section > p { display: block; width: 100%; margin: 0; color: #334155; font-size: 13px; line-height: 1.75; overflow-wrap: anywhere; white-space: pre-line; }
 .report-text-action { padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; color: #4f46e5; font-size: 12px; font-weight: 700; cursor: pointer; }

@@ -11,10 +11,8 @@ const Icon = ({ children }: { children: React.ReactNode }) => (
 );
 
 export function Header({
-  active = "home",
   processing = false,
 }: {
-  active?: "home" | "history" | "settings";
   processing?: boolean;
 }) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);

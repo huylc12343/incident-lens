@@ -74,7 +74,7 @@ def _memory(
 
 
 def _vlm(*, input_mode: VLMInputMode, max_images: int | None, side_effect: object) -> SimpleNamespace:
-    provider = VLMProvider.OPENAI if input_mode == VLMInputMode.TIMESTAMPED_FRAMES else VLMProvider.QWEN
+    provider = VLMProvider.QWEN
     analyze_video = AsyncMock()
     if callable(side_effect):
         analyze_video.side_effect = side_effect

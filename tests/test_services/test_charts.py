@@ -5,7 +5,7 @@ from src.services.charts import ChartService
 from src.services.log_analysis import LogAnalysisService
 
 
-def test_creates_four_png_charts_with_all_window_markers(tmp_path: Path, monkeypatch) -> None:
+def test_creates_full_log_charts_with_all_window_markers(tmp_path: Path, monkeypatch) -> None:
     window = IncidentWindow(t_start=6, t0=7.5, t_end=14.5)
     analysis = LogAnalysisService().analyze(
         "data_mock/INC_LOSS_CONTROL_001/vehicle_state.csv",
@@ -18,6 +18,8 @@ def test_creates_four_png_charts_with_all_window_markers(tmp_path: Path, monkeyp
     claims = [Claim(claim_id="claim-1", text="Xe ego giảm tốc.", timestamp_s=7.2)]
     original = service._mark_window
     original_claims = service._mark_claims
+    original_speed_chart = service._speed_acceleration_chart
+    chart_timestamps: list[list[float]] = []
 
     def record_markers(axis, marked_window: IncidentWindow) -> None:
         marker_calls.append((marked_window.t_start, marked_window.t0, marked_window.t_end))
@@ -30,8 +32,14 @@ def test_creates_four_png_charts_with_all_window_markers(tmp_path: Path, monkeyp
         original_claims(axis, marked_claims)
 
     monkeypatch.setattr(service, "_mark_claims", record_claim_markers)
+
+    def record_speed_chart(destination, timestamps, speed, acceleration, marked_window, marked_claims):
+        chart_timestamps.append(timestamps)
+        return original_speed_chart(destination, timestamps, speed, acceleration, marked_window, marked_claims)
+
+    monkeypatch.setattr(service, "_speed_acceleration_chart", record_speed_chart)
     chart_uris = service.create_charts(
-        analysis.log_slice_uri,
+        "data_mock/INC_LOSS_CONTROL_001/vehicle_state.csv",
         str(tmp_path / "charts"),
         window=window,
         events=analysis.events,
@@ -46,4 +54,7 @@ def test_creates_four_png_charts_with_all_window_markers(tmp_path: Path, monkeyp
     ]
     assert marker_calls == [(6, 7.5, 14.5)] * 4
     assert claim_marker_calls == [[("claim-1", 7.2)]] * 4
+    assert len(chart_timestamps[0]) > analysis.row_count
+    assert chart_timestamps[0][0] < window.t_start
+    assert chart_timestamps[0][-1] > window.t_end
     assert all(Path(uri).read_bytes().startswith(b"\x89PNG\r\n\x1a\n") for uri in chart_uris)

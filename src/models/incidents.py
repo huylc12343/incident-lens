@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class VLMProvider(StrEnum):
-    OPENAI = "openai"
     QWEN = "qwen"
 
 
@@ -183,6 +182,8 @@ class VideoMemoryPatch(ContractModel):
 
 
 class TimestampedFramesAnalysisRequest(ContractModel):
+    """Legacy provider-neutral request contract retained for stored workflow data."""
+
     input_mode: Literal[VLMInputMode.TIMESTAMPED_FRAMES] = VLMInputMode.TIMESTAMPED_FRAMES
     incident_id: str = Field(min_length=1)
     prompt: PromptEnvelope

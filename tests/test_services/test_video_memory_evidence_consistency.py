@@ -217,7 +217,7 @@ async def test_timestamped_workflow_resets_provider_verification_without_log() -
     )
     vlm = SimpleNamespace(
         capabilities=VLMCapabilities(
-            provider=VLMProvider.OPENAI,
+            provider=VLMProvider.QWEN,
             input_mode=VLMInputMode.TIMESTAMPED_FRAMES,
             max_images_per_request=10,
         ),

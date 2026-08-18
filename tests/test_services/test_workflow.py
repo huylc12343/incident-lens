@@ -327,7 +327,7 @@ async def test_failed_snapshot_does_not_expose_provider_error_text() -> None:
             return_value={
                 "incident_id": "INC-FAILED",
                 "status": "failed",
-                "error_code": "OPENAI_VIDEO_ANALYSIS_FAILED",
+                "error_code": "QWEN_VIDEO_ANALYSIS_FAILED",
                 "error_message": "request failed with api_key=sk-secret-value",
             }
         ),

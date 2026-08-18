@@ -39,7 +39,7 @@ Các thành phần chính:
 
 - FastAPI cung cấp HTTP API và khởi tạo runtime trong lifespan.
 - LangGraph điều phối workflow phân tích video/log và dừng tại human review.
-- VLM xử lý video qua OpenAI timestamped frames hoặc Qwen3-VL-Flash native video qua DashScope OpenAI-compatible API.
+- VLM chỉ xử lý video qua Qwen3-VL-Flash native video trên DashScope.
 - Các service deterministic xử lý media, log, metrics, charts và validation.
 - OpenAI verification/report service thực hiện đối chiếu claims và sinh narrative báo cáo.
 - SQLite lưu checkpoint LangGraph và kết quả terminal sau review.
@@ -56,7 +56,7 @@ flowchart LR
     API[FastAPI\nsrc/main.py]
     WF[WorkflowService]
     GRAPH[LangGraph\nIncidentGraph]
-    VLM[VLM service\nOpenAI frames / Qwen video]
+    VLM[VLM service\nQwen native video]
     MEDIA[MediaService\nffmpeg / ffprobe]
     LOG[LogAnalysisService]
     VERIFY[VerificationService]
@@ -126,7 +126,7 @@ flowchart TD
 
 ### 3.1. Ý nghĩa từng node
 
-1. `analyze_video`: tạo frame manifest hoặc normalize video, gọi VLM và lưu `VideoMemory`.
+1. `analyze_video`: normalize video, gọi Qwen VLM và lưu `VideoMemory`.
 2. `cut_incident_video`: cắt clip theo `t_start`, `t0`, `t_end`; lấy incident frames và frame đại diện gần `t0`.
 3. `analyze_log`: cắt log theo incident window, tính metrics/events và sinh chart. Node này chỉ chạy khi có `log_uri`.
 4. `verify`: code tạo `claim_log_summary` riêng từ 3 mẫu trước/sau mẫu gần timestamp claim nhất, rồi chỉ gửi
@@ -190,7 +190,7 @@ flowchart TD
 │   └── services/
 │       ├── incident_runtime.py         # Factory ghép dependency và SQLite checkpointer
 │       ├── workflow.py                 # Application service của incident
-│       ├── vlm.py                      # OpenAI frames / Qwen native video
+│       ├── vlm.py                      # Qwen native video
 │       ├── video_memory.py             # Giới hạn, batch và merge video memory
 │       ├── media.py                    # Probe/normalize/cut/sample bằng FFmpeg
 │       ├── log_analysis.py             # CSV slice, metrics và log events
@@ -403,18 +403,11 @@ Swagger/OpenAPI có sẵn tại `http://localhost:8000/docs`.
 cp .env.example .env
 ```
 
-Không commit `.env`. Điền tối thiểu `OPENAI_API_KEY` nếu dùng OpenAI. `Settings` đọc biến môi trường theo tên uppercase tương ứng với field trong `src/config.py`.
+Không commit `.env`. Điền `DASHSCOPE_API_KEY` cho Qwen VLM và `OPENAI_API_KEY` cho LLM, verification, report. `Settings` đọc biến môi trường theo tên uppercase tương ứng với field trong `src/config.py`.
 
-### 8.2. Provider matrix
+### 8.2. VLM provider
 
-Các tổ hợp provider/input mode sau được chấp nhận:
-
-| `VLM_PROVIDER` | `VLM_INPUT_MODE`     | Ý nghĩa                                               |
-| ---------------- | ---------------------- | ------------------------------------------------------- |
-| `openai`       | `timestamped_frames` | Lấy frame theo timestamp và gửi cho OpenAI VLM       |
-| `qwen`         | `native_video`       | Gửi video public URL tới Qwen3-VL-Flash qua DashScope |
-
-OpenAI + `native_video` và Qwen + `timestamped_frames` bị từ chối khi bootstrap Settings.
+VLM chỉ dùng Qwen3-VL-Flash native video qua DashScope. Video được chuẩn hóa trước khi gửi dưới dạng Base64 Data URL hoặc public artifact URL.
 
 ### 8.3. Nhóm biến quan trọng
 
@@ -422,15 +415,15 @@ OpenAI + `native_video` và Qwen + `timestamped_frames` bị từ chối khi boo
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | App              | `APP_ENV`, `APP_HOST`, `APP_PORT`, `LOG_LEVEL`, `CORS_ORIGINS`                                                                                                     |
 | LLM              | `OPENAI_API_KEY`, `MODEL_NAME`, `LLM_TEMPERATURE`                                                                                                                      |
-| VLM              | `VLM_PROVIDER`, `VLM_INPUT_MODE`, `OPENAI_VLM_MODEL_NAME`, `DASHSCOPE_API_KEY`, `QWEN_VLM_MODEL_NAME`, `QWEN_BASE64_MAX_VIDEO_BYTES`, `QWEN_ARTIFACT_URL_BASE` |
-| VLM limits       | `VLM_TIMEOUT_S`, `VLM_MAX_RETRIES`, `VLM_FRAME_FPS`, `VLM_MAX_FRAMES`, `VLM_FRAME_OVERFLOW_STRATEGY`                                                               |
+| VLM              | `DASHSCOPE_API_KEY`, `QWEN_VLM_MODEL_NAME`, `QWEN_BASE64_MAX_VIDEO_BYTES`, `QWEN_ARTIFACT_URL_BASE` |
+| VLM limits       | `VLM_TIMEOUT_S`, `VLM_STRUCTURED_OUTPUT_RETRIES`, `VLM_REANALYSIS_FRAME_FPS`, `VLM_REANALYSIS_MAX_FRAMES` |
 | Model downstream | `VERIFICATION_MODEL_NAME`, `REPORT_MODEL_NAME`, timeout/temperature tương ứng                                                                                         |
 | Input            | `INCIDENT_INPUT_ROOTS`, `INCIDENT_UPLOAD_DIR`, `INCIDENT_MAX_LOG_BYTES`, `INCIDENT_MAX_DURATION_S`                                                                 |
 | Log              | `LOG_TIMESTAMP_TOLERANCE_S`, `LOG_BRAKE_RISE_THRESHOLD`, `LOG_STEERING_CHANGE_THRESHOLD`                                                                               |
 | Storage          | `ARTIFACT_DIR`, `INCIDENT_DATABASE_PATH`, `INCIDENT_CHECKPOINT_PATH`                                                                                                   |
 | Qwen video       | `QWEN_BASE_URL`, `QWEN_VIDEO_FPS`, `QWEN_ENABLE_THINKING`, `QWEN_THINKING_BUDGET`                                                                                    |
 
-Với Qwen, `VLM_MAX_RETRIES` cũng là số lần thử lại khi JSON trả về đúng cú pháp nhưng không đạt schema. Mỗi lần
+Với Qwen, `VLM_STRUCTURED_OUTPUT_RETRIES` là số lần thử lại khi JSON trả về đúng cú pháp nhưng không đạt schema. Mỗi lần
 thử lại nhận danh sách field validation bị lỗi. Adapter cũng kiểm tra incident window, representative timestamp,
 timeline, claim và evidence không vượt thời lượng video; backend không tự clamp timestamp sai.
 

@@ -47,8 +47,8 @@ def test_disabled_tracing_does_not_wrap_provider_client() -> None:
 
     result = LangSmithTracing().wrap_openai_client(
         provider_client,
-        name="OpenAI VLM",
-        provider="openai",
+        name="Qwen VLM",
+        provider="qwen",
         operation="video_analysis",
     )
 
@@ -64,20 +64,20 @@ def test_enabled_tracing_wraps_provider_client_with_metadata() -> None:
     with patch("src.services.langsmith_tracing.wrap_openai", return_value=wrapped_client) as wrapper:
         result = tracing.wrap_openai_client(
             provider_client,
-            name="OpenAI VLM",
-            provider="openai",
+            name="Qwen VLM",
+            provider="qwen",
             operation="vlm",
         )
 
     assert result is wrapped_client
     wrapper.assert_called_once_with(
         provider_client,
-        chat_name="OpenAI VLM",
-        completions_name="OpenAI VLM",
+        chat_name="Qwen VLM",
+        completions_name="Qwen VLM",
         tracing_extra={
             "client": langsmith_client,
-            "tags": ["provider:openai", "operation:vlm"],
-            "metadata": {"provider": "openai", "operation": "vlm"},
+            "tags": ["provider:qwen", "operation:vlm"],
+            "metadata": {"provider": "qwen", "operation": "vlm"},
         },
     )
 
@@ -90,7 +90,7 @@ def test_wrapper_failure_keeps_original_provider_client() -> None:
         result = tracing.wrap_openai_client(
             provider_client,
             name="Injected test client",
-            provider="openai",
+            provider="qwen",
             operation="vlm",
         )
 

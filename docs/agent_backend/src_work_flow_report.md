@@ -6,7 +6,7 @@ Dưới đây là báo cáo reverse-engineering trực tiếp từ mã nguồn t
 
 ## 1. Executive Summary
 
-Hệ thống là một pipeline Agentic kết hợp giữa **FastAPI**, **LangGraph**, và các **LLM/VLM (OpenAI & Qwen)** để phân tích tự động video sự cố và đối chiếu với log phương tiện.
+Hệ thống là một pipeline Agentic kết hợp giữa **FastAPI**, **LangGraph**, Qwen VLM và OpenAI LLM để phân tích tự động video sự cố và đối chiếu với log phương tiện.
 Thay vì gửi toàn bộ video và log cho một model khổng lồ, hệ thống chia nhỏ thành các tác vụ chuyên biệt: VLM trích xuất claims từ video → Code xử lý log bằng rule-based deterministic → LLM đối chiếu (verify) claims với log summary → VLM re-analyze nếu mâu thuẫn → LLM tổng hợp báo cáo nháp → Human Reviewer.
 Tất cả đều được implement thật (không dùng mock/stub), thao tác media qua FFmpeg, và có observability (ghi vết LLM tokens, latency).
 
@@ -124,17 +124,10 @@ stateDiagram-v2
 
 ### 4.2 Cắt/Gửi Video vào VLM
 
-Code xử lý tùy thuộc vào config VLM adapter (`src/agents/nodes/incident.py` + `src/services/video_memory.py`):
+VLM luôn dùng native video Qwen (`src/agents/nodes/incident.py` + `src/services/video_memory.py`):
 
-- **Trường hợp 1: Mode TIMESTAMPED_FRAMES (OpenAI)**
-
-  - Gọi `media.sample_frames(video_uri, ..., fps=2.0, max_frames=120)` (ffmpeg filter `fps=2.0`).
-  - Gửi các frame thành mảng Base64 Images vào prompt.
-  - Xử lý mượt `rolling_batches` nếu số frame vượt quá limit.
-- **Trường hợp 2: Mode NATIVE_VIDEO (Qwen)**
-
-  - Gọi `media.normalize_video` để resize/pad, chuẩn hóa FPS và mã hóa MP4 (`max_duration=60s`).
-  - Gửi video đã chuẩn hóa bằng Base64 Data URL hoặc public artifact URL tới Qwen qua DashScope.
+- Gọi `media.normalize_video` để resize/pad, chuẩn hóa FPS và mã hóa MP4 (`max_duration=60s`).
+- Gửi video đã chuẩn hóa bằng Base64 Data URL hoặc public artifact URL tới Qwen qua DashScope.
 
 ### 4.3 Prompt VLM (`src/prompts/video_analysis.py`)
 

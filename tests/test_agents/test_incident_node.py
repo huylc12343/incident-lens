@@ -1,6 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -55,7 +55,7 @@ def _memory(mode: AnalysisMode, duration_s: float) -> VideoMemory:
 def _service(mode: VLMInputMode, result: VideoMemory) -> SimpleNamespace:
     return SimpleNamespace(
         capabilities=VLMCapabilities(
-            provider=VLMProvider.OPENAI if mode == VLMInputMode.TIMESTAMPED_FRAMES else VLMProvider.QWEN,
+            provider=VLMProvider.QWEN,
             input_mode=mode,
             max_images_per_request=10 if mode == VLMInputMode.TIMESTAMPED_FRAMES else None,
         ),
@@ -400,7 +400,7 @@ async def test_analyze_log_node_exposes_verification_artifacts(tmp_path: Path) -
     log_analysis = SimpleNamespace(analyze=AsyncMock())
     log_analysis.analyze = lambda *args, **kwargs: analysis
     chart_uri = str(tmp_path / "charts" / "01.png")
-    charts = SimpleNamespace(create_charts=lambda *args, **kwargs: [chart_uri])
+    charts = SimpleNamespace(create_charts=Mock(return_value=[chart_uri]))
 
     result = await analyze_log_node(
         {
@@ -419,6 +419,7 @@ async def test_analyze_log_node_exposes_verification_artifacts(tmp_path: Path) -
     assert result["chart_uris"] == [chart_uri]
     assert result["artifact_uris"]["incident_clip"] == "clip.mp4"
     assert result["artifact_uris"]["log_slice"] == analysis.log_slice_uri
+    assert charts.create_charts.call_args.args[0] == "vehicle.csv"
 
 
 def _claim_memory(mode: AnalysisMode) -> VideoMemory:
@@ -682,9 +683,9 @@ async def test_verification_failure_continues_without_result(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
-async def test_auto_reanalysis_resamples_openai_window_once(tmp_path: Path) -> None:
-    memory = _claim_memory(AnalysisMode.SINGLE_REQUEST)
-    service = _service(VLMInputMode.TIMESTAMPED_FRAMES, memory)
+async def test_auto_reanalysis_resamples_claim_window_once(tmp_path: Path) -> None:
+    memory = _claim_memory(AnalysisMode.NATIVE_VIDEO)
+    service = _service(VLMInputMode.NATIVE_VIDEO, memory)
     service.reanalyze_claims.return_value = VideoMemoryPatch(
         target_claim_ids=["claim-1"],
         claims=[Claim(claim_id="claim-1", text="Vehicle does not brake")],

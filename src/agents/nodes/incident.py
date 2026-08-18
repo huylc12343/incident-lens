@@ -116,7 +116,7 @@ class LogWorkflowService(Protocol):
 class ChartWorkflowService(Protocol):
     def create_charts(
         self,
-        log_slice_uri: str,
+        log_uri: str,
         output_dir: str,
         *,
         window: IncidentWindow,
@@ -322,7 +322,7 @@ async def analyze_log_node(
             window=memory.incident_window,
         )
         chart_uris = charts.create_charts(
-            result.log_slice_uri,
+            log_uri,
             str(artifact_root / "charts"),
             window=memory.incident_window,
             events=result.events,

@@ -728,8 +728,6 @@ async def test_qwen_retries_collision_denial_that_conflicts_with_its_observation
 
 def test_qwen_runtime_allows_base64_mode_without_public_artifact_url() -> None:
     settings = Settings(
-        vlm_provider="qwen",
-        vlm_input_mode="native_video",
         dashscope_api_key="test-key",
         qwen_artifact_url_base="",
     )

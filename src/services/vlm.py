@@ -1,4 +1,4 @@
-"""Production OpenAI-frames and Qwen-native-video VLM adapters."""
+"""Production Qwen native-video VLM adapter."""
 
 from __future__ import annotations
 
@@ -20,18 +20,14 @@ from openai import (
     PermissionDeniedError,
     RateLimitError,
 )
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ValidationError
 
 from src.models.incidents import (
     AnalysisMode,
-    Claim,
     IncidentWindow,
     NativeVideoAnalysisRequest,
     ReanalysisRequest,
     RemoteMediaHandle,
-    TimelineEvent,
-    TimestampedFramesAnalysisRequest,
-    VerificationStatus,
     VideoAnalysisRequest,
     VideoMemory,
     VideoMemoryPatch,
@@ -59,259 +55,8 @@ class QwenStructuredOutputValidationError(ValueError):
         self.details = details
 
 
-class _VLMTimelineEventOutput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    timestamp_s: float = Field(ge=0)
-    description: str = Field(min_length=1)
-
-
-class _VLMClaimOutput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    claim_id: str = Field(min_length=1)
-    text: str = Field(min_length=1)
-    timestamp_s: float = Field(ge=0)
-    verification_status: VerificationStatus = VerificationStatus.UNVERIFIED
-
-
-class _VLMVideoMemoryOutput(BaseModel):
-    """Only fields that the visual model is allowed to generate."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    global_scene: str = Field(min_length=1)
-    video_summary: str | None = Field(default=None, min_length=1)
-    incident_window: IncidentWindow
-    representative_timestamp_s: float | None = Field(default=None, ge=0)
-    timeline: list[_VLMTimelineEventOutput] = Field(default_factory=list)
-    claims: list[_VLMClaimOutput] = Field(default_factory=list)
-
-
-class OpenAIVLMService:
-    def __init__(
-        self,
-        *,
-        model: str,
-        client: Any | None = None,
-        api_key: str | None = None,
-        timeout_s: float = 120.0,
-        temperature: float = 0.0,
-        max_images_per_request: int = 120,
-        observability: ModelActivityRegistry | None = None,
-        tracing: LangSmithTracing | None = None,
-    ) -> None:
-        if not model.strip():
-            raise ValueError("model must not be blank")
-        if timeout_s <= 0 or max_images_per_request <= 0:
-            raise ValueError("timeout and image limit must be positive")
-        provider_client = client if client is not None else AsyncOpenAI(api_key=api_key)
-        self._client = (
-            tracing.wrap_openai_client(
-                provider_client,
-                name="OpenAI VLM",
-                provider="openai",
-                operation="vlm",
-            )
-            if tracing is not None
-            else provider_client
-        )
-        self._model = model
-        self._timeout_s = timeout_s
-        self._temperature = temperature
-        self._observability = observability
-        self._capabilities = VLMCapabilities(
-            provider=VLMProvider.OPENAI,
-            input_mode=VLMInputMode.TIMESTAMPED_FRAMES,
-            max_images_per_request=max_images_per_request,
-        )
-
-    @property
-    def capabilities(self) -> VLMCapabilities:
-        return self._capabilities
-
-    async def analyze_video(self, request: VideoAnalysisRequest) -> VideoMemory:
-        if not isinstance(request, TimestampedFramesAnalysisRequest):
-            raise VLMServiceError("OPENAI_UNSUPPORTED_INPUT_MODE", "OpenAI VLM accepts timestamped frames only")
-        content = await self._build_frame_content(_prompt_context_text(request.prompt.context), request.manifest.frames)
-        output = await self._parse_response(
-            request.prompt.text,
-            content,
-            _VLMVideoMemoryOutput,
-            "OPENAI_VIDEO_ANALYSIS_FAILED",
-            incident_id=request.incident_id,
-            operation="video_analysis",
-            description="Phân tích toàn bộ video và tạo VideoMemory có cấu trúc.",
-            metadata={"image_count": len(request.manifest.frames), "input_mode": "timestamped_frames"},
-        )
-        return _video_memory_from_model_output(output, analysis_mode=AnalysisMode.SINGLE_REQUEST)
-
-    async def reanalyze_claims(self, request: ReanalysisRequest) -> VideoMemoryPatch:
-        if request.frame_manifest is None:
-            raise VLMServiceError(
-                "OPENAI_REANALYSIS_FRAMES_REQUIRED",
-                "OpenAI re-analysis requires a timestamped frame manifest",
-            )
-        content = await self._build_frame_content(
-            _prompt_context_text(request.prompt.context),
-            request.frame_manifest.frames,
-        )
-        patch = await self._parse_response(
-            request.prompt.text,
-            content,
-            VideoMemoryPatch,
-            "OPENAI_REANALYSIS_FAILED",
-            incident_id=request.incident_id,
-            operation="claim_reanalysis",
-            description="Phân tích lại các claim được chọn trong cửa sổ video liên quan.",
-            metadata={
-                "image_count": len(request.frame_manifest.frames),
-                "target_claim_ids": request.target_claim_ids,
-            },
-        )
-        _validate_patch_targets(patch, request.target_claim_ids)
-        return patch
-
-    async def release_remote_resources(self, handles: list[RemoteMediaHandle]) -> None:
-        return None
-
-    async def _build_frame_content(self, prompt: str, frames: list[Any]) -> list[dict[str, Any]]:
-        image_limit = self._capabilities.max_images_per_request or 0
-        if len(frames) > image_limit:
-            raise VLMServiceError(
-                "OPENAI_FRAME_LIMIT_EXCEEDED",
-                f"received {len(frames)} frames; maximum is {image_limit}",
-            )
-        content: list[dict[str, Any]] = [{"type": "input_text", "text": prompt}]
-        for frame in frames:
-            content.append(
-                {
-                    "type": "input_text",
-                    "text": (
-                        f"frame_id={frame.frame_id}; sequence_index={frame.sequence_index}; "
-                        f"timestamp_s={frame.timestamp_s}; delta_from_previous_s={frame.delta_from_previous_s}"
-                    ),
-                }
-            )
-            content.append(
-                {
-                    "type": "input_image",
-                    "image_url": await _image_data_url(frame.image_uri, frame.mime_type),
-                    "detail": "low",
-                }
-            )
-        return content
-
-    async def _parse_response(
-        self,
-        system_prompt: str,
-        content: list[dict[str, Any]],
-        output_model: type[StructuredModel],
-        error_code: str,
-        *,
-        incident_id: str,
-        operation: str,
-        description: str,
-        metadata: dict[str, Any],
-    ) -> StructuredModel:
-        activity_id = None
-        response = None
-        if self._observability is not None:
-            activity_id = self._observability.start(
-                incident_id=incident_id,
-                step="vlm",
-                operation=operation,
-                description=description,
-                provider="openai",
-                model=self._model,
-                metadata=metadata,
-            )
-        try:
-            request_kwargs: dict[str, Any] = {
-                "model": self._model,
-                "input": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": content},
-                ],
-                "text_format": output_model,
-                "timeout": self._timeout_s,
-            }
-            if not self._model.startswith("gpt-5"):
-                request_kwargs["temperature"] = self._temperature
-            response = await self._client.responses.parse(
-                **request_kwargs,
-            )
-            parsed = getattr(response, "output_parsed", None)
-            if parsed is None:
-                output_text = getattr(response, "output_text", "")
-                parsed = json.loads(output_text)
-            if output_model is _VLMVideoMemoryOutput and isinstance(parsed, VideoMemory):
-                parsed = _video_memory_model_payload(parsed)
-            result = output_model.model_validate(parsed)
-            if activity_id is not None:
-                self._observability.complete(activity_id, response)
-            return result
-        except VLMServiceError:
-            raise
-        except ModelRequestBudgetError:
-            raise
-        except (ValidationError, ValueError, TypeError, json.JSONDecodeError) as exc:
-            if activity_id is not None:
-                self._observability.fail(activity_id, "VLM_STRUCTURED_OUTPUT_INVALID", response)
-            raise VLMServiceError("VLM_STRUCTURED_OUTPUT_INVALID", str(exc)) from exc
-        except AuthenticationError as exc:
-            if activity_id is not None:
-                self._observability.fail(activity_id, "OPENAI_AUTHENTICATION_FAILED", response)
-            raise VLMServiceError(
-                "OPENAI_AUTHENTICATION_FAILED",
-                "OpenAI authentication failed; check OPENAI_API_KEY",
-            ) from exc
-        except PermissionDeniedError as exc:
-            if activity_id is not None:
-                self._observability.fail(activity_id, "OPENAI_PERMISSION_DENIED", response)
-            raise VLMServiceError(
-                "OPENAI_PERMISSION_DENIED",
-                "OpenAI denied access to the configured video analysis model",
-            ) from exc
-        except RateLimitError as exc:
-            if activity_id is not None:
-                self._observability.fail(activity_id, "OPENAI_RATE_LIMITED", response)
-            raise VLMServiceError(
-                "OPENAI_RATE_LIMITED",
-                "OpenAI rate limit or quota was exceeded",
-                retryable=True,
-            ) from exc
-        except APITimeoutError as exc:
-            if activity_id is not None:
-                self._observability.fail(activity_id, "OPENAI_VIDEO_ANALYSIS_TIMEOUT", response)
-            raise VLMServiceError(
-                "OPENAI_VIDEO_ANALYSIS_TIMEOUT",
-                "OpenAI video analysis timed out",
-                retryable=True,
-            ) from exc
-        except APIConnectionError as exc:
-            if activity_id is not None:
-                self._observability.fail(activity_id, "OPENAI_CONNECTION_FAILED", response)
-            raise VLMServiceError(
-                "OPENAI_CONNECTION_FAILED",
-                "Could not connect to OpenAI",
-                retryable=True,
-            ) from exc
-        except (BadRequestError, NotFoundError) as exc:
-            if activity_id is not None:
-                self._observability.fail(activity_id, "OPENAI_VIDEO_ANALYSIS_REQUEST_INVALID", response)
-            raise VLMServiceError(
-                "OPENAI_VIDEO_ANALYSIS_REQUEST_INVALID",
-                "OpenAI rejected the configured video analysis model or structured request",
-            ) from exc
-        except Exception as exc:
-            if activity_id is not None:
-                self._observability.fail(activity_id, error_code, response)
-            raise VLMServiceError(error_code, str(exc), retryable=True) from exc
-
-
 class QwenNativeVideoVLMService:
-    """DashScope OpenAI-compatible adapter for Qwen3-VL-Flash native video."""
+    """DashScope adapter for Qwen3-VL-Flash native video."""
 
     def __init__(
         self,
@@ -642,16 +387,6 @@ class QwenNativeVideoVLMService:
         return f"data:video/mp4;base64,{encoded}"
 
 
-async def _image_data_url(uri: str, mime_type: str) -> str:
-    if uri.startswith("data:"):
-        return uri
-    path = Path(uri).resolve()
-    if not path.is_file():
-        raise VLMServiceError("OPENAI_FRAME_MISSING", f"frame does not exist: {uri}")
-    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-    return f"data:{mime_type};base64,{encoded}"
-
-
 def _parse_json_content(content: str | None) -> object:
     if not content:
         raise ValueError("Qwen returned empty content")
@@ -721,44 +456,6 @@ def _prepare_qwen_payload(
         for claim in claims
     ]
     return prepared
-
-
-def _video_memory_model_payload(memory: VideoMemory) -> dict[str, Any]:
-    return {
-        "global_scene": memory.global_scene,
-        "video_summary": memory.video_summary,
-        "incident_window": memory.incident_window.model_dump(mode="json"),
-        "representative_timestamp_s": memory.representative_timestamp_s,
-        "timeline": [
-            {"timestamp_s": event.timestamp_s, "description": event.description}
-            for event in memory.timeline
-        ],
-        "claims": [
-            {
-                "claim_id": claim.claim_id,
-                "text": claim.text,
-                "timestamp_s": claim.timestamp_s,
-                "verification_status": claim.verification_status,
-            }
-            for claim in memory.claims
-        ],
-    }
-
-
-def _video_memory_from_model_output(
-    output: _VLMVideoMemoryOutput,
-    *,
-    analysis_mode: AnalysisMode,
-) -> VideoMemory:
-    return VideoMemory(
-        global_scene=output.global_scene,
-        video_summary=output.video_summary,
-        incident_window=output.incident_window,
-        representative_timestamp_s=output.representative_timestamp_s,
-        timeline=[TimelineEvent(**event.model_dump()) for event in output.timeline],
-        claims=[Claim(**claim.model_dump()) for claim in output.claims],
-        analysis_mode=analysis_mode,
-    )
 
 
 def _validate_qwen_timestamp_bounds(result: BaseModel, minimum_s: float, maximum_s: float) -> None:

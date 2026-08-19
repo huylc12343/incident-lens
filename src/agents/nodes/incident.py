@@ -216,7 +216,6 @@ async def analyze_video_node(
             "status": "running",
             "video_memory": memory,
             "video_duration_s": video_duration_s,
-            "claims": memory.claims,
             "remote_media_handles": memory.remote_media_handles,
             "artifact_uris": {**state.get("artifact_uris", {}), **artifact_uris},
         }
@@ -315,7 +314,6 @@ async def cut_incident_video_node(
             "status": "awaiting_review" if state.get("draft_report") is not None else "running",
             "artifact_uris": artifact_uris,
             "video_memory": memory,
-            "claims": memory.claims,
         }
         output.update(_refresh_report_after_cut(state, memory=memory, artifact_uris=artifact_uris))
         return output
@@ -353,14 +351,12 @@ async def map_canonical_evidence_node(
         return {
             "status": "running",
             "video_memory": memory,
-            "claims": memory.claims,
             "canonical_evidence_mapped": True,
         }
     if not memory.claims and not memory.timeline:
         return {
             "status": "running",
             "video_memory": memory,
-            "claims": memory.claims,
             "canonical_evidence_mapped": True,
         }
 
@@ -398,7 +394,6 @@ async def map_canonical_evidence_node(
         return {
             "status": "running",
             "video_memory": mapped,
-            "claims": mapped.claims,
             "canonical_evidence_mapped": True,
             "artifact_uris": {
                 **state.get("artifact_uris", {}),
@@ -431,6 +426,21 @@ def _restore_claim_verification_statuses(
                     }
                 )
                 for claim in mapped.claims
+            ]
+        }
+    )
+
+
+def _project_verification_statuses(memory: VideoMemory, verification: VerificationResult) -> VideoMemory:
+    """Mirror the canonical verification result into UI-facing claim status."""
+    status_by_claim_id = {item.claim_id: item.status for item in verification.results}
+    return memory.model_copy(
+        update={
+            "claims": [
+                claim.model_copy(
+                    update={"verification_status": status_by_claim_id.get(claim.claim_id, claim.verification_status)}
+                )
+                for claim in memory.claims
             ]
         }
     )
@@ -529,7 +539,6 @@ async def align_and_verify_claims_node(
                 "status": "running",
                 "verification": state.get("verification"),
                 "video_memory": memory,
-                "claims": memory.claims,
                 "claim_log_summaries": state.get("claim_log_summaries", []),
             }
         claims_to_verify = (
@@ -567,20 +576,12 @@ async def align_and_verify_claims_node(
                 next_summaries=claim_log_summaries,
                 changed_claim_ids=set(changed_ids),
             )
-        status_by_claim_id = {item.claim_id: item.status for item in result.results}
-        verified_claims = [
-            claim.model_copy(
-                update={"verification_status": status_by_claim_id.get(claim.claim_id, claim.verification_status)}
-            )
-            for claim in memory.claims
-        ]
-        memory = memory.model_copy(update={"claims": verified_claims})
+        memory = _project_verification_statuses(memory, result)
         output: dict[str, object] = {
             "status": "running",
             "verification": result,
             "claim_log_summaries": claim_log_summaries,
             "video_memory": memory,
-            "claims": verified_claims,
         }
         if verification_log_uri:
             output["artifact_uris"] = artifact_uris
@@ -611,15 +612,13 @@ async def align_and_verify_claims_node(
             return {
                 "status": "running",
                 "verification": fallback_verification,
-                "video_memory": memory,
-                "claims": memory.claims,
+                "video_memory": _project_verification_statuses(memory, fallback_verification),
                 "warnings": list(dict.fromkeys([*state.get("warnings", []), warning])),
             }
         return {
             "status": "running",
             "verification": None,
             "video_memory": memory,
-            "claims": memory.claims,
             "warnings": list(dict.fromkeys([*state.get("warnings", []), warning])),
         }
 
@@ -680,7 +679,6 @@ async def auto_reanalyze_node(
         return {
             "status": "running",
             "video_memory": merged,
-            "claims": merged.claims,
             "remote_media_handles": merged.remote_media_handles,
             "artifact_uris": artifact_uris,
             "auto_reanalysis_count": state.get("auto_reanalysis_count", 0) + 1,
@@ -731,7 +729,6 @@ async def manual_reanalyze_node(
         return {
             "status": "running",
             "video_memory": merged,
-            "claims": merged.claims,
             "manual_reanalysis_changed_claim_ids": changed_claim_ids,
             "manual_reanalysis_count": state.get("manual_reanalysis_count", 0) + 1,
         }
@@ -903,7 +900,6 @@ async def build_draft_report_node(
     return {
         "status": "running",
         "video_memory": memory,
-        "claims": memory.claims,
         "report_narrative": narrative,
         "draft_report": draft_report,
         "warnings": warnings,

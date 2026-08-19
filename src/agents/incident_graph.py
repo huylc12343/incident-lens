@@ -247,7 +247,7 @@ class LangGraphIncidentRunner:
 
     @staticmethod
     def _public_state(value: dict[str, Any]) -> IncidentState:
-        return {key: item for key, item in value.items() if not key.startswith("__")}
+        return {key: item for key, item in value.items() if not key.startswith("__") and key != "claims"}
 
 
 def _with_model_activities(

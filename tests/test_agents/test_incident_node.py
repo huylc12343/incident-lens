@@ -380,7 +380,7 @@ async def test_native_cut_maps_fake_evidence_ids_to_sampled_artifacts(tmp_path: 
     claim = result["video_memory"].claims[0]
     assert [item.evidence_id for item in claim.evidence] == ["frame-000001"]
     assert claim.verification_status == VerificationStatus.SUPPORTED
-    assert result["claims"][0].verification_status == VerificationStatus.SUPPORTED
+    assert "claims" not in result
     frame_artifacts = {Path(frame.image_uri).stem for frame in manifest.frames}
     assert {item.evidence_id for item in claim.evidence}.issubset(frame_artifacts)
 
@@ -511,8 +511,9 @@ async def test_cut_after_early_mapping_keeps_canonical_evidence_and_samples_fina
 
     assert media.sample_frames.await_args.kwargs["start_s"] == 6
     assert media.sample_frames.await_args.kwargs["end_s"] == 8
-    assert result["claims"][0].evidence == memory.claims[0].evidence
-    assert result["claims"][0].verification_status == VerificationStatus.SUPPORTED
+    assert result["video_memory"].claims[0].evidence == memory.claims[0].evidence
+    assert result["video_memory"].claims[0].verification_status == VerificationStatus.SUPPORTED
+    assert "claims" not in result
 
 
 @pytest.mark.asyncio
@@ -677,8 +678,8 @@ async def test_align_and_verify_claims_builds_per_claim_log_summary(tmp_path: Pa
     assert result["status"] == "running"
     assert result["verification"] == verification
     assert result["claim_log_summaries"][0].claim_id == "claim-1"
-    assert result["claims"][0].verification_status == VerificationStatus.CONTRADICTED
     assert result["video_memory"].claims[0].verification_status == VerificationStatus.CONTRADICTED
+    assert "claims" not in result
     request = verifier.verify.await_args.args[0]
     assert request.claim_log_summaries[0].sample_count == 3
     assert request.claim_log_summaries[0].sample_start_s == 1.5
@@ -1262,7 +1263,8 @@ async def test_manual_reanalysis_verifies_only_changed_claims_and_merges_old_res
     assert [claim.claim_id for claim in request.claims] == ["claim-1"]
     assert [item.claim_id for item in result["verification"].results] == ["claim-1", "claim-2"]
     assert result["verification"].results[1].reason == "Keep this result"
-    assert result["claims"][1].verification_status == VerificationStatus.SUPPORTED
+    assert result["video_memory"].claims[1].verification_status == VerificationStatus.SUPPORTED
+    assert "claims" not in result
 
 
 @pytest.mark.asyncio
@@ -1648,7 +1650,8 @@ async def test_conflict_can_be_reanalyzed_once_then_verified_supported(tmp_path:
     )
 
     assert reanalyzed["auto_reanalysis_count"] == 1
-    assert verified["claims"][0].verification_status == VerificationStatus.SUPPORTED
+    assert verified["video_memory"].claims[0].verification_status == VerificationStatus.SUPPORTED
+    assert "claims" not in verified
     service.reanalyze_claims.assert_awaited_once()
 
 

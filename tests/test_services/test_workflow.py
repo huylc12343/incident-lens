@@ -66,7 +66,6 @@ def _review_state(incident_id: str) -> dict[str, object]:
         "incident_id": incident_id,
         "status": "awaiting_review",
         "video_memory": memory,
-        "claims": memory.claims,
         "report_narrative": _narrative(),
         "draft_report": _report(incident_id),
         "artifact_uris": {"incident_clip": "storage://clip.mp4"},
@@ -103,6 +102,31 @@ async def test_workflow_create_review_and_store_terminal_report() -> None:
     assert terminal.final_report == _report("INC-API")
     assert terminal.stored_at is not None
     assert repository.get("INC-API") is not None
+
+
+@pytest.mark.asyncio
+async def test_workflow_uses_video_memory_claims_over_legacy_top_level_claims() -> None:
+    initial = _review_state("INC-CANONICAL-CLAIMS")
+    initial["claims"] = [Claim(claim_id="stale-claim", text="Stale claim")]
+    terminal = {**initial, "status": "approved"}
+    runner = SimpleNamespace(start=AsyncMock(return_value=initial), resume=AsyncMock(return_value=terminal))
+    repository = InMemoryReportRepository()
+    service = WorkflowService(runner=runner, repository=repository)
+
+    pending = await service.create(
+        IncidentCreateRequest(
+            incident_id="INC-CANONICAL-CLAIMS",
+            video_uri="data_mock/front_camera.mp4",
+            analysis_prompt="Analyze the incident",
+        )
+    )
+    await service.review("INC-CANONICAL-CLAIMS", ReviewDecision(action="approve", reviewer="reviewer"))
+
+    assert [claim.claim_id for claim in pending.claims] == ["claim-1"]
+    assert "claims" not in service._states["INC-CANONICAL-CLAIMS"]
+    stored = repository.get("INC-CANONICAL-CLAIMS")
+    assert stored is not None
+    assert [claim.claim_id for claim in stored.claims] == ["claim-1"]
 
 
 @pytest.mark.asyncio

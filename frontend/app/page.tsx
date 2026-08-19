@@ -21,6 +21,7 @@ export default function Home() {
   const [isFading, setIsFading] = useState(false);
   const [quickGuideVisible, setQuickGuideVisible] = useState(false);
   const [quickGuidePosition, setQuickGuidePosition] = useState<CSSProperties>({});
+  const [heroCollapsed, setHeroCollapsed] = useState(false);
   const hasShownInitialMessage = useRef(false);
 
   useEffect(() => {
@@ -95,8 +96,8 @@ export default function Home() {
     <>
       <Header />
       <main className="page-shell dashboard-shell">
-        <section className="hero" aria-labelledby="page-title">
-          <div className="hero-content">
+        <section className={`hero${heroCollapsed ? " is-collapsed" : ""}`} aria-labelledby={heroCollapsed ? undefined : "page-title"}>
+          {!heroCollapsed && <div className="hero-content">
             <h1 id="page-title">{text("Review driving evidence with confidence.", "Rà soát bằng chứng hành trình một cách tin cậy.")}</h1>
             <p className="hero-copy">
               {text("Analyze synchronized video and telemetry, inspect every AI observation, and keep the engineer in control of the final decision.", "Phân tích video và dữ liệu telemetry đồng bộ, kiểm tra từng quan sát AI và đảm bảo kỹ sư kiểm soát quyết định cuối cùng.")}
@@ -109,7 +110,16 @@ export default function Home() {
               <span className="hero-ai-dots" aria-hidden="true"><i /><i /><i /></span>
               <p className={`hero-ai-message${isFading ? " is-fading" : ""}`} aria-live="off">{displayedMessage}</p>
             </div>
-          </div>
+          </div>}
+          <button
+            className="hero-collapse-toggle"
+            type="button"
+            onClick={() => setHeroCollapsed((collapsed) => !collapsed)}
+            aria-expanded={!heroCollapsed}
+            aria-label={heroCollapsed ? text("Expand introduction", "Mở rộng phần giới thiệu") : text("Collapse introduction", "Thu gọn phần giới thiệu")}
+          >
+            <span aria-hidden="true">{heroCollapsed ? "⌄" : "⌃"}</span>
+          </button>
         </section>
         <AnalysisForm highlighted={quickGuideVisible} />
         <RecentReviewsTable />

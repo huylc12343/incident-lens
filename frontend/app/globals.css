@@ -987,18 +987,62 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .page-shell { max-width: 1280px; padding: 38px 28px 68px; }
 .dashboard-shell { display: grid; gap: 22px; }
 .hero {
+    position: relative;
     display: block;
     max-width: none;
     margin: 4px 0 8px;
     padding: 32px 30px 30px;
-    overflow: hidden;
-    border: 1px solid #C0C0C2;
+    overflow: visible;
+    border: 1px solid rgba(255, 255, 255, 0.48);
     border-radius: 14px;
-    background: #fff;
+    background: rgba(148, 163, 184, 0.28);
+    backdrop-filter: blur(14px) saturate(135%);
+    -webkit-backdrop-filter: blur(14px) saturate(135%);
     text-align: center;
-    box-shadow: 0 5px 18px rgba(55,55,55,.06);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 5px 18px rgba(55, 55, 55, 0.12);
 }
 .hero-content { display: grid; justify-items: center; }
+.hero-collapse-toggle {
+    position: absolute;
+    right: 24px;
+    bottom: -17px;
+    z-index: 2;
+    display: grid;
+    width: 46px;
+    height: 34px;
+    padding: 0;
+    place-items: center;
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    border-top: 0;
+    border-radius: 0 0 11px 11px;
+    background: rgba(130, 145, 164, 0.52);
+    color: #374151;
+    box-shadow: 0 7px 13px rgba(55, 55, 55, 0.13);
+    backdrop-filter: blur(14px) saturate(135%);
+    -webkit-backdrop-filter: blur(14px) saturate(135%);
+    font-size: 20px;
+    font-weight: 800;
+    line-height: 1;
+    transition: background 180ms ease, color 180ms ease, transform 180ms ease;
+}
+.hero-collapse-toggle:hover { background: rgba(255, 255, 255, 0.52); color: #111827; transform: translateY(2px); }
+.hero.is-collapsed {
+    height: 0;
+    margin: 0;
+    padding: 0;
+    border-width: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+.hero.is-collapsed .hero-collapse-toggle {
+    top: -1px;
+    right: 0;
+    bottom: auto;
+    border-top: 1px solid rgba(255, 255, 255, 0.55);
+    border-radius: 0 0 11px 11px;
+}
 .hero h1 { max-width: 760px; margin: 0; color: #373737; font-family: Inter, Manrope, Arial, sans-serif; font-size: clamp(29px, 3.2vw, 42px); font-weight: 800; line-height: 1.12; letter-spacing: -1.6px; }
 .hero-copy { max-width: 720px; margin: 14px auto 0; color: #565656; font-family: Inter, Manrope, Arial, sans-serif; font-size: 14px; line-height: 1.65; }
 .hero-ai-status { display: grid; justify-items: center; margin-top: 19px; }
@@ -4631,4 +4675,58 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .quick-guide-overlay, .quick-guide-popover { animation: none; }
+}
+
+/* Evidence workspace glass panel; upload cards keep their existing treatment. */
+#upload-evidence.workspace-card {
+  border-color: rgba(255, 255, 255, 0.48);
+  background: rgba(148, 163, 184, 0.28);
+  backdrop-filter: blur(14px) saturate(135%);
+  -webkit-backdrop-filter: blur(14px) saturate(135%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 5px 18px rgba(55, 55, 55, 0.12);
+}
+
+#upload-evidence .analysis-section-title {
+  justify-content: center;
+  text-align: center;
+}
+
+#upload-evidence .analysis-section-title > div {
+  width: 100%;
+}
+
+#upload-evidence .analysis-section-title .eyebrow {
+  font-size: 12px;
+}
+
+#upload-evidence .analysis-section-title h2 {
+  font-size: clamp(24px, 3vw, 30px);
+  font-weight: 800;
+  letter-spacing: -0.6px;
+}
+
+#upload-evidence .analysis-section-title .section-description {
+  max-width: 720px;
+  margin-right: auto;
+  margin-left: auto;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+#recent-reviews.recent-section {
+  border-color: rgba(255, 255, 255, 0.48);
+  background: rgba(148, 163, 184, 0.28);
+  backdrop-filter: blur(14px) saturate(135%);
+  -webkit-backdrop-filter: blur(14px) saturate(135%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 5px 18px rgba(55, 55, 55, 0.12);
+}
+
+#recent-reviews thead th {
+  background: #6b7280;
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+#recent-reviews tbody tr.table-state-row:hover {
+  background: transparent;
 }

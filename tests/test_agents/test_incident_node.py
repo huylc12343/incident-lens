@@ -787,7 +787,6 @@ async def test_verification_uses_only_the_saved_union_log_artifact(tmp_path: Pat
         charts=charts,
         artifact_dir=str(tmp_path),
         timestamp_tolerance_s=0.5,
-        verification_incident_padding_s=1,
     )
     verifier = SimpleNamespace(
         verify=AsyncMock(
@@ -819,7 +818,6 @@ async def test_verification_uses_only_the_saved_union_log_artifact(tmp_path: Pat
         },
         verification=verifier,
         timestamp_tolerance_s=0.5,
-        verification_incident_padding_s=1,
     )
 
     with Path(analyzed["artifact_uris"]["verification_log"]).open(encoding="utf-8") as file:
@@ -832,11 +830,11 @@ async def test_verification_uses_only_the_saved_union_log_artifact(tmp_path: Pat
         for summary in request.claim_log_summaries
         for evidence in summary.evidence
     ]
-    assert saved_timestamps == {2.5, 3.0, 3.5, 5.0, 6.0, 12.0, 12.5, 13.0}
+    assert saved_timestamps == {2.5, 3.0, 3.5, 5.0, 6.0, 12.0, 12.5, 13.0, 14.0}
     assert incident_timestamps == [6.0, 12.0]
     assert set(evidence_timestamps) <= saved_timestamps
-    assert [item.timestamp_s for item in request.claim_log_summaries[0].evidence] == [2.5, 3.0, 3.5]
-    assert [item.timestamp_s for item in request.claim_log_summaries[1].evidence] == [12.0, 12.5]
+    assert [item.timestamp_s for item in request.claim_log_summaries[0].evidence] == [2.5, 3.0, 3.5, 5.0, 6.0]
+    assert [item.timestamp_s for item in request.claim_log_summaries[1].evidence] == [3.5, 5.0, 6.0, 12.0, 12.5, 13.0, 14.0]
 
 
 @pytest.mark.asyncio

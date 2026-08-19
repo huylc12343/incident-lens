@@ -184,7 +184,6 @@ async def incident_workflow_service(
         artifact_dir=settings.artifact_dir,
         timestamp_tolerance_s=settings.log_timestamp_tolerance_s,
         claim_log_sample_radius=settings.log_claim_sample_radius,
-        verification_incident_padding_s=settings.log_verification_incident_padding_s,
         reanalysis_prompt_version=settings.reanalysis_prompt_version,
         auto_reanalysis_enabled=settings.auto_reanalysis_enabled,
         cleanup_remote_resources=True,

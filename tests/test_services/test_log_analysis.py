@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from src.models.incidents import Claim, IncidentWindow
+from src.models.incidents import IncidentWindow
 from src.services.log_analysis import (
     LogAnalysisError,
     LogAnalysisService,
@@ -183,7 +183,7 @@ def test_analysis_emits_deterministic_anomaly_events_and_warnings(tmp_path: Path
     assert result.summary.metrics["strong_steering_change_time"] == 1
 
 
-def test_verification_log_artifact_unions_padded_incident_and_claim_windows(tmp_path: Path) -> None:
+def test_verification_log_artifact_keeps_full_video_log_for_claim_sampling(tmp_path: Path) -> None:
     source = tmp_path / "vehicle.csv"
     source.write_text(
         "timestamp_s,speed_kmh\n"
@@ -203,15 +203,11 @@ def test_verification_log_artifact_unions_padded_incident_and_claim_windows(tmp_
     artifact_uri = build_verification_log_artifact(
         str(source),
         str(tmp_path / "verification_log.csv"),
-        incident_window=IncidentWindow(t_start=6, t0=9, t_end=12),
-        claims=[Claim(claim_id="claim-early", text="Xe đang di chuyển", timestamp_s=3)],
-        claim_timestamp_tolerance_s=0.5,
-        incident_padding_s=1,
     )
 
     with Path(artifact_uri).open(encoding="utf-8") as file:
         rows = list(csv.DictReader(file))
-    assert [float(row["timestamp_s"]) for row in rows] == [2.5, 3.0, 3.5, 5.0, 6.0, 12.0, 12.5, 13.0]
+    assert [float(row["timestamp_s"]) for row in rows] == [2.5, 3.0, 3.5, 4.5, 5.0, 6.0, 12.0, 12.5, 13.0, 13.5]
 
 
 def test_verification_log_artifact_excludes_rows_after_video_end(tmp_path: Path) -> None:
@@ -227,10 +223,6 @@ def test_verification_log_artifact_excludes_rows_after_video_end(tmp_path: Path)
     artifact_uri = build_verification_log_artifact(
         str(source),
         str(tmp_path / "verification_log.csv"),
-        incident_window=IncidentWindow(t_start=40, t0=44, t_end=44.73),
-        claims=[],
-        claim_timestamp_tolerance_s=0.5,
-        incident_padding_s=1,
         video_duration_s=44.73,
     )
 

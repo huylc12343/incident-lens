@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Protocol
 
 from src.agents.incident_state import IncidentState
-from src.config import LOG_VERIFICATION_INCIDENT_PADDING_S_DEFAULT
 from src.models.incidents import (
     AccidentType,
     Claim,
@@ -432,7 +431,6 @@ async def analyze_log_node(
     charts: ChartWorkflowService,
     artifact_dir: str,
     timestamp_tolerance_s: float = 0.5,
-    verification_incident_padding_s: float = LOG_VERIFICATION_INCIDENT_PADDING_S_DEFAULT,
 ) -> dict[str, object]:
     incident_id = state.get("incident_id", "").strip()
     log_uri = (state.get("log_uri") or "").strip()
@@ -454,10 +452,6 @@ async def analyze_log_node(
         verification_log_uri = build_verification_log_artifact(
             log_uri,
             str(artifact_root / "verification_log.csv"),
-            incident_window=memory.incident_window,
-            claims=memory.claims,
-            claim_timestamp_tolerance_s=timestamp_tolerance_s,
-            incident_padding_s=verification_incident_padding_s,
             video_duration_s=_video_duration_s(state, memory),
         )
         chart_uris = charts.create_charts(
@@ -495,7 +489,6 @@ async def align_and_verify_claims_node(
     verification: VerificationService,
     timestamp_tolerance_s: float,
     sample_radius: int = 3,
-    verification_incident_padding_s: float = LOG_VERIFICATION_INCIDENT_PADDING_S_DEFAULT,
 ) -> dict[str, object]:
     incident_id = state.get("incident_id", "").strip()
     memory = state.get("video_memory")
@@ -516,10 +509,6 @@ async def align_and_verify_claims_node(
             verification_input_uri = build_verification_log_artifact(
                 log_uri,
                 verification_log_uri,
-                incident_window=memory.incident_window,
-                claims=memory.claims,
-                claim_timestamp_tolerance_s=timestamp_tolerance_s,
-                incident_padding_s=verification_incident_padding_s,
                 video_duration_s=_video_duration_s(state, memory),
             )
             artifact_uris["verification_log"] = verification_input_uri

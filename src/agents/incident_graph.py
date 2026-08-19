@@ -24,7 +24,6 @@ from src.agents.nodes.incident import (
     map_canonical_evidence_node,
 )
 from src.agents.nodes.review import human_review_interrupt_node
-from src.config import LOG_VERIFICATION_INCIDENT_PADDING_S_DEFAULT
 from src.models.api import ReviewDecision
 from src.models.incidents import ReportService, VerificationService
 from src.services.langsmith_tracing import LangSmithTracing
@@ -43,7 +42,6 @@ class IncidentGraphDependencies:
     artifact_dir: str
     timestamp_tolerance_s: float = 0.5
     claim_log_sample_radius: int = 3
-    verification_incident_padding_s: float = LOG_VERIFICATION_INCIDENT_PADDING_S_DEFAULT
     reanalysis_prompt_version: str = "v1"
     auto_reanalysis_enabled: bool = True
     cleanup_remote_resources: bool = True
@@ -77,7 +75,6 @@ def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointe
             charts=dependencies.charts,
             artifact_dir=dependencies.artifact_dir,
             timestamp_tolerance_s=dependencies.timestamp_tolerance_s,
-            verification_incident_padding_s=dependencies.verification_incident_padding_s,
         )
 
     async def verify(state: IncidentState) -> dict[str, object]:
@@ -86,7 +83,6 @@ def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointe
             verification=dependencies.verification,
             timestamp_tolerance_s=dependencies.timestamp_tolerance_s,
             sample_radius=dependencies.claim_log_sample_radius,
-            verification_incident_padding_s=dependencies.verification_incident_padding_s,
         )
         return _with_model_activities(state, result, dependencies.observability)
 

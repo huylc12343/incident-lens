@@ -22,7 +22,6 @@ def test_incident_clip_context_defaults() -> None:
     assert settings.log_claim_sample_radius == 3
     assert settings.vlm_structured_output_retries == 0
     assert settings.provider_network_retries == 0
-    assert settings.log_verification_incident_padding_s == 1
     assert settings.log_strong_deceleration_threshold_mps2 == -5
     assert settings.log_strong_acceleration_threshold_mps2 == 4
     assert settings.log_extreme_acceleration_threshold_mps2 == 8

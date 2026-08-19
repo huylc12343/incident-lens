@@ -8,7 +8,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Telemetry event thresholds are deliberately separate from the lower thresholds
 # used only to build qualitative VLM attention hints.
-LOG_VERIFICATION_INCIDENT_PADDING_S_DEFAULT = 1.0
 LOG_STRONG_DECELERATION_THRESHOLD_MPS2_DEFAULT = -5.0
 LOG_STRONG_ACCELERATION_THRESHOLD_MPS2_DEFAULT = 4.0
 LOG_EXTREME_ACCELERATION_THRESHOLD_MPS2_DEFAULT = 8.0
@@ -103,10 +102,6 @@ class Settings(BaseSettings):
     log_claim_sample_radius: int = Field(default=3, ge=0)
     log_brake_rise_threshold: float = Field(default=0.3, ge=0)
     log_steering_change_threshold: float = Field(default=10.0, ge=0)
-    log_verification_incident_padding_s: float = Field(
-        default=LOG_VERIFICATION_INCIDENT_PADDING_S_DEFAULT,
-        ge=0,
-    )
     log_strong_deceleration_threshold_mps2: float = Field(
         default=LOG_STRONG_DECELERATION_THRESHOLD_MPS2_DEFAULT,
         lt=0,

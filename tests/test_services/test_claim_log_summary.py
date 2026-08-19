@@ -1,7 +1,11 @@
 import pytest
 
 from src.models.incidents import Claim, IncidentWindow
-from src.services.log_analysis import build_claim_log_summaries, build_claim_verification_inputs
+from src.services.log_analysis import (
+    build_claim_log_summaries,
+    build_claim_verification_inputs,
+    build_verification_log_artifact,
+)
 
 
 def _write_log(path) -> None:
@@ -224,7 +228,7 @@ def test_claim_log_summary_formats_per_second_series_and_claim_acceleration(tmp_
     assert "Số mẫu log trong cửa sổ: 13" in summary.summary
     assert "Số dòng log model được phép dùng: 13" in summary.summary
     assert "brake [0, 1]: 0 là không phanh, 1 là đạp phanh hết cỡ;" in summary.summary
-    assert "steering < 0 rẽ trái" in summary.summary
+    assert "steering <= -0.02 rẽ trái" in summary.summary
     assert "| Timestamp | Speed (km/h) |" in summary.summary
     for timestamp_s, speed, _, brake, _ in rows:
         assert f"| {timestamp_s:.1f}s | {speed:g} |" in summary.summary
@@ -237,6 +241,58 @@ def test_claim_log_summary_formats_per_second_series_and_claim_acceleration(tmp_
     assert "Steering tại 10.0s: -0.34 => xe có xu hướng rẽ trái." in summary.summary
     assert summaries[0].metrics["speed_kmh"]["acceleration_at_claim"] == pytest.approx(-3.611111)
     assert summaries[1].metrics["speed_kmh"]["acceleration_at_claim"] == pytest.approx(-1.666667)
+
+
+@pytest.mark.parametrize(
+    ("steer", "expected_direction"),
+    [
+        (-0.02, "left"),
+        (-0.019, "straight"),
+        (0.0, "straight"),
+        (0.019, "straight"),
+        (0.02, "right"),
+    ],
+)
+def test_claim_verification_uses_steering_deadband(tmp_path, steer: float, expected_direction: str) -> None:
+    log = tmp_path / "steering.csv"
+    log.write_text(
+        f"timestamp_s,speed_kmh,steer\n10.0,20,{steer}\n",
+        encoding="utf-8",
+    )
+
+    _, contexts = build_claim_verification_inputs(
+        str(log),
+        [Claim(claim_id="turn", text="Hướng lái", timestamp_s=10.0)],
+        timestamp_tolerance_s=0.5,
+    )
+
+    assert contexts[0].derived.steer_direction_at_claim == expected_direction
+
+
+def test_claim_sample_radius_uses_full_verification_artifact_not_incident_window(tmp_path) -> None:
+    source = tmp_path / "vehicle.csv"
+    source.write_text(
+        "timestamp_s,speed_kmh,steer\n"
+        + "".join(f"{timestamp}.0,20,0\n" for timestamp in range(21)),
+        encoding="utf-8",
+    )
+    artifact = build_verification_log_artifact(
+        str(source),
+        str(tmp_path / "verification_log.csv"),
+        video_duration_s=20,
+    )
+
+    summaries, _ = build_claim_verification_inputs(
+        artifact,
+        [Claim(claim_id="claim-3", text="Xe tiếp tục chạy", timestamp_s=11.0)],
+        timestamp_tolerance_s=0.5,
+        sample_radius=128,
+        incident_window=IncidentWindow(t_start=10.5, t0=11.0, t_end=11.5),
+        video_duration_s=20,
+    )
+
+    assert summaries[0].sample_start_s == 0
+    assert summaries[0].sample_end_s == 20
 
 
 def test_claim_log_summary_includes_all_allowed_subsecond_rows(tmp_path) -> None:
@@ -351,9 +407,14 @@ def test_verification_claim_outside_incident_window_uses_full_video_bounds(tmp_p
     )
 
     assert summaries[0].within_tolerance is True
-    assert [item.timestamp_s for item in summaries[0].evidence] == [9.5, 10, 10.5]
+    assert [item.timestamp_s for item in summaries[0].evidence] == [9.5, 10, 10.5, 27]
     assert contexts[0].raw_telemetry.at_claim.timestamp_s == 10
-    assert contexts[0].allowed_evidence_ids == ["log-row:9.5", "log-row:10", "log-row:10.5"]
+    assert set(contexts[0].allowed_evidence_ids) == {
+        "log-row:9.5",
+        "log-row:10",
+        "log-row:10.5",
+        "log-row:27",
+    }
 
 
 def test_extreme_acceleration_is_preserved_in_claim_summary(tmp_path) -> None:

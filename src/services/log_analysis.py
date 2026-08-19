@@ -13,7 +13,6 @@ from src.config import (
     LOG_STRONG_ACCELERATION_THRESHOLD_MPS2_DEFAULT,
     LOG_STRONG_DECELERATION_THRESHOLD_MPS2_DEFAULT,
     LOG_STRONG_STEERING_DELTA_THRESHOLD_DEFAULT,
-    LOG_VERIFICATION_INCIDENT_PADDING_S_DEFAULT,
 )
 from src.models.incidents import (
     Claim,
@@ -37,6 +36,7 @@ ACCELERATION_ALIASES = ("acceleration_mps2", "accel_mps2", "acceleration")
 BRAKE_ALIASES = ("brake", "ego_brake", "brake_pedal", "brake_pressure")
 THROTTLE_ALIASES = ("throttle", "ego_throttle", "throttle_pedal")
 STEERING_ALIASES = ("steering_angle", "steer", "ego_steer", "steering")
+STEER_STRAIGHT_ABS_THRESHOLD = 0.02
 CAMERA_FRAME_ALIASES = ("camera_frame",)
 ACCELERATION_X_ALIASES = ("acceleration_x",)
 ACCELERATION_Y_ALIASES = ("acceleration_y",)
@@ -373,67 +373,33 @@ def build_verification_log_artifact(
     log_uri: str,
     output_uri: str,
     *,
-    incident_window: IncidentWindow,
-    claims: list[Claim],
-    claim_timestamp_tolerance_s: float,
-    incident_padding_s: float = LOG_VERIFICATION_INCIDENT_PADDING_S_DEFAULT,
     video_duration_s: float | None = None,
 ) -> str:
-    """Persist exactly the telemetry rows that verification may use.
+    """Persist all telemetry verification can sample within the video bounds.
 
-    Incident analysis remains scoped to the unpadded incident window.  This
-    separate artifact is the union of a padded incident span and each claim's
-    timestamp-tolerance span, so verification can support claims elsewhere in
-    the video without citing rows absent from its persisted input.
+    The claim sample radius is applied after this artifact is loaded.  Cutting
+    this file to an incident or claim span would silently cap that radius, so
+    incident-scoped analysis remains in the separate ``log_slice.csv`` file.
     """
-    if claim_timestamp_tolerance_s < 0 or incident_padding_s < 0:
-        raise ValueError("claim_timestamp_tolerance_s and incident_padding_s must be non-negative")
     if video_duration_s is not None and video_duration_s <= 0:
         raise ValueError("video_duration_s must be positive")
 
     fieldnames, records = load_log_records(log_uri)
-    spans = [
-        _bounded_log_span(
-            incident_window.t_start - incident_padding_s,
-            incident_window.t_end + incident_padding_s,
-            video_duration_s=video_duration_s,
-        )
-    ]
-    spans.extend(
-        _bounded_log_span(
-            claim.timestamp_s - claim_timestamp_tolerance_s,
-            claim.timestamp_s + claim_timestamp_tolerance_s,
-            video_duration_s=video_duration_s,
-        )
-        for claim in claims
-        if claim.timestamp_s is not None
-    )
     selected = [
         record
         for record in records
-        if any(start_s <= record.timestamp_s <= end_s for start_s, end_s in spans)
+        if video_duration_s is None or record.timestamp_s <= video_duration_s
     ]
     if not selected:
         raise LogAnalysisError(
             "LOG_VERIFICATION_WINDOW_EMPTY",
-            "log contains no rows in the verification artifact windows",
+            "log contains no rows within the video duration",
         )
 
     output = Path(output_uri).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     _write_log_slice(output, fieldnames, selected)
     return str(output)
-
-
-def _bounded_log_span(
-    start_s: float,
-    end_s: float,
-    *,
-    video_duration_s: float | None,
-) -> tuple[float, float]:
-    bounded_start_s = max(0.0, start_s)
-    bounded_end_s = end_s if video_duration_s is None else min(end_s, video_duration_s)
-    return bounded_start_s, max(bounded_start_s, bounded_end_s)
 
 
 def acceleration_series(records: list[LogRecord]) -> list[float | None]:
@@ -555,7 +521,7 @@ def build_claim_verification_inputs(
         log_uri,
         timestamp_tolerance_s=timestamp_tolerance_s,
         sample_radius=sample_radius,
-        incident_window=incident_window,
+        incident_window=None,
         video_duration_s=video_duration_s,
     )
     summaries = _build_claim_log_summaries_from_records(
@@ -563,7 +529,8 @@ def build_claim_verification_inputs(
         claims,
         timestamp_tolerance_s=timestamp_tolerance_s,
         sample_radius=sample_radius,
-        incident_window=None if video_duration_s is not None else incident_window,
+        incident_window=None,
+        sample_from_full_records=True,
     )
     contexts = [
         _claim_verification_context(records, claim, summary)
@@ -603,6 +570,7 @@ def _build_claim_log_summaries_from_records(
     timestamp_tolerance_s: float,
     sample_radius: int,
     incident_window: IncidentWindow | None,
+    sample_from_full_records: bool = False,
 ) -> list[ClaimLogSummary]:
     return [
         _claim_log_summary(
@@ -611,6 +579,7 @@ def _build_claim_log_summaries_from_records(
             timestamp_tolerance_s=timestamp_tolerance_s,
             sample_radius=sample_radius,
             incident_window=incident_window,
+            sample_from_full_records=sample_from_full_records,
         )
         for claim in claims
     ]
@@ -623,6 +592,7 @@ def _claim_log_summary(
     timestamp_tolerance_s: float,
     sample_radius: int,
     incident_window: IncidentWindow | None,
+    sample_from_full_records: bool = False,
 ) -> ClaimLogSummary:
     if claim.timestamp_s is None:
         return ClaimLogSummary(
@@ -644,20 +614,25 @@ def _claim_log_summary(
         incident_window is None
         or incident_window.t_start <= claim.timestamp_s <= incident_window.t_end
     )
-    eligible = [
-        record
-        for record in records
-        if abs(record.timestamp_s - claim.timestamp_s) <= timestamp_tolerance_s
-    ]
-    within_tolerance = claim_in_window and bool(eligible)
+    within_tolerance = claim_in_window and distance <= timestamp_tolerance_s
     if within_tolerance:
-        eligible_nearest_index = min(
-            range(len(eligible)),
-            key=lambda index: abs(eligible[index].timestamp_s - claim.timestamp_s),
-        )
-        start = max(0, eligible_nearest_index - sample_radius)
-        end = min(len(eligible), eligible_nearest_index + sample_radius + 1)
-        samples = eligible[start:end]
+        if sample_from_full_records:
+            start = max(0, nearest_index - sample_radius)
+            end = min(len(records), nearest_index + sample_radius + 1)
+            samples = records[start:end]
+        else:
+            eligible = [
+                record
+                for record in records
+                if abs(record.timestamp_s - claim.timestamp_s) <= timestamp_tolerance_s
+            ]
+            eligible_nearest_index = min(
+                range(len(eligible)),
+                key=lambda index: abs(eligible[index].timestamp_s - claim.timestamp_s),
+            )
+            start = max(0, eligible_nearest_index - sample_radius)
+            end = min(len(eligible), eligible_nearest_index + sample_radius + 1)
+            samples = eligible[start:end]
     else:
         samples = []
     if not samples:
@@ -806,12 +781,8 @@ def _telemetry_derived(raw: ClaimRawTelemetry) -> ClaimTelemetryDerived:
     steer_at_claim = raw.at_claim.steer
     if steer_at_claim is None:
         steer_direction = None
-    elif steer_at_claim < 0:
-        steer_direction = "left"
-    elif steer_at_claim > 0:
-        steer_direction = "right"
     else:
-        steer_direction = "straight"
+        steer_direction = _steer_direction(steer_at_claim)
 
     speed_start = raw.window_start.speed_kmh
     speed_end = raw.window_end.speed_kmh
@@ -1246,8 +1217,9 @@ def _available_signal_statements(
     if "steer" in signal_set:
         statements.extend(
             [
-                "steering [-1, 1]: steering < 0 rẽ trái, steering = 0 đi thẳng, steering > 0 rẽ phải;",
-                "hướng xe: được code suy ra từ dấu của steering tại timestamp claim.",
+                "steering [-1, 1]: steering <= -0.02 rẽ trái, -0.02 < steering < 0.02 đi thẳng, "
+                "steering >= 0.02 rẽ phải;",
+                "hướng xe: được code suy ra từ steering tại timestamp claim.",
             ]
         )
     if "yaw" in signal_set:
@@ -1319,13 +1291,22 @@ def _steering_direction_statement(records: list[LogRecord], claim_timestamp_s: f
         key=lambda item: item[0],
     )
     steering = float(value)
-    if steering > 0:
+    direction = _steer_direction(steering)
+    if direction == "right":
         state = "xe có xu hướng rẽ phải"
-    elif steering < 0:
+    elif direction == "left":
         state = "xe có xu hướng rẽ trái"
     else:
         state = "steering gần trung tâm"
     return f"Steering tại {_format_timestamp_s(timestamp_s)}s: {steering:g} => {state}."
+
+
+def _steer_direction(steering: float) -> Literal["left", "straight", "right"]:
+    if steering <= -STEER_STRAIGHT_ABS_THRESHOLD:
+        return "left"
+    if steering >= STEER_STRAIGHT_ABS_THRESHOLD:
+        return "right"
+    return "straight"
 
 
 def _acceleration_series(

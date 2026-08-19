@@ -1,8 +1,14 @@
 from unittest.mock import Mock, patch
+from uuid import uuid4
+
+from langchain_core.tracers.context import tracing_v2_callback_var
+from langchain_core.tracers.langchain import LangChainTracer
+from langgraph.errors import GraphInterrupt
 
 from src.config import Settings
 from src.services.langsmith_tracing import (
     LangSmithTracing,
+    _ReviewInterruptLangChainTracer,
     build_langsmith_tracing,
     sanitize_trace_payload,
 )
@@ -132,3 +138,41 @@ def test_enabled_tracing_builds_sanitizing_client() -> None:
         hide_outputs=sanitize_trace_payload,
         tracing_error_callback=client_type.call_args.kwargs["tracing_error_callback"],
     )
+
+
+def test_review_interrupt_is_traced_as_awaiting_review() -> None:
+    tracer = _ReviewInterruptLangChainTracer(client=Mock())
+    run_id = uuid4()
+
+    with patch.object(tracer, "on_chain_end", return_value=Mock()) as on_chain_end:
+        tracer.on_chain_error(GraphInterrupt(()), run_id=run_id)
+
+    on_chain_end.assert_called_once_with(
+        {"status": "awaiting_review", "waiting_for_human_review": True},
+        run_id=run_id,
+    )
+
+
+def test_real_chain_error_remains_an_error() -> None:
+    tracer = _ReviewInterruptLangChainTracer(client=Mock())
+    error = ValueError("verification failed")
+    run_id = uuid4()
+
+    with patch.object(LangChainTracer, "on_chain_error", return_value=Mock()) as on_chain_error:
+        tracer.on_chain_error(error, run_id=run_id)
+
+    on_chain_error.assert_called_once_with(error, run_id=run_id)
+
+
+def test_enabled_incident_context_installs_review_interrupt_tracer() -> None:
+    client = Mock()
+    tracing = LangSmithTracing(enabled=True, project_name="incident-test", client=client)
+    before = tracing_v2_callback_var.get()
+
+    with tracing.incident_context("INC-TRACE", "start"):
+        tracer = tracing_v2_callback_var.get()
+        assert isinstance(tracer, _ReviewInterruptLangChainTracer)
+        assert tracer.client is client
+        assert tracer.project_name == "incident-test"
+
+    assert tracing_v2_callback_var.get() is before

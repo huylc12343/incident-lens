@@ -805,7 +805,11 @@ async def test_qwen_reanalysis_short_clip_requires_global_source_timestamps() ->
         incident_id="INC-QWEN-SHORT-REANALYSIS",
         prompt=PromptEnvelope(
             text="Chỉ phân tích lại claim mục tiêu.",
-            context={"reanalysis_window": {"t_start": 24.5, "t0": 26.5, "t_end": 28.5}},
+            context={
+                "target_claims": [{"claim_id": "claim-1", "text": "Xe bắt đầu rẽ phải.", "timestamp_s": 26.5}],
+                "verification_reasons": {"claim-1": "Telemetry contradicts the turn claim."},
+                "reanalysis_window": [24.5, 28.5],
+            },
         ),
         target_claim_ids=["claim-1"],
         incident_window=memory.incident_window,
@@ -821,6 +825,9 @@ async def test_qwen_reanalysis_short_clip_requires_global_source_timestamps() ->
     call = client.chat.completions.create.await_args.kwargs
     structured_prompt = call["messages"][0]["content"]
     assert call["messages"][1]["content"][0]["video_url"]["url"] == request.normalized_video_uri
+    assert call["messages"][1]["content"][1]["text"] == (
+        '<context>{"reanalysis_window":[24.5,28.5],"target_claims":[{"claim_id":"claim-1","text":"Xe bắt đầu rẽ phải.","timestamp_s":26.5}],"verification_reasons":{"claim-1":"Telemetry contradicts the turn claim."}}</context>'
+    )
     assert "mốc 0s của clip này tương ứng với 24.5s của video gốc" in structured_prompt
     assert "Clip phủ vùng 24.5s đến 28.5s của video gốc" in structured_prompt
     assert "timestamp toàn cục của video gốc" in structured_prompt

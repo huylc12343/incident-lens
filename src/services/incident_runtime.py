@@ -170,14 +170,7 @@ async def incident_workflow_service(
     dependencies = IncidentGraphDependencies(
         media=media,
         video_workflow=video_workflow,
-        log_analysis=LogAnalysisService(
-            brake_rise_threshold=settings.log_brake_rise_threshold,
-            steering_change_threshold=settings.log_steering_change_threshold,
-            strong_deceleration_threshold_mps2=settings.log_strong_deceleration_threshold_mps2,
-            strong_acceleration_threshold_mps2=settings.log_strong_acceleration_threshold_mps2,
-            extreme_acceleration_threshold_mps2=settings.log_extreme_acceleration_threshold_mps2,
-            strong_steering_delta_threshold=settings.log_strong_steering_delta_threshold,
-        ),
+        log_analysis=LogAnalysisService(),
         charts=ChartService(),
         verification=verification,
         report=report,

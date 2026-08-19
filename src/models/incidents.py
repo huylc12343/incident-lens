@@ -167,6 +167,8 @@ class VideoMemory(ContractModel):
 class VideoMemoryPatch(ContractModel):
     target_claim_ids: list[str] = Field(min_length=1)
     claims: list[Claim] = Field(default_factory=list)
+    video_summary: str | None = Field(default=None, min_length=1)
+    timeline: list[TimelineEvent] | None = None
     remote_media_handles: list[RemoteMediaHandle] = Field(default_factory=list)
     base_revision: int = Field(ge=1)
 
@@ -264,7 +266,7 @@ class LogEvent(ContractModel):
 
 
 class LogAnalysisResult(ContractModel):
-    log_slice_uri: str = Field(min_length=1)
+    log_artifact_uri: str = Field(min_length=1)
     summary: LogEvidenceSummary
     events: list[LogEvent] = Field(default_factory=list)
     row_count: int = Field(gt=0)

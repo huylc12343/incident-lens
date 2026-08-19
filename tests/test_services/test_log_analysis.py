@@ -19,8 +19,8 @@ WINDOW = IncidentWindow(t_start=6, t0=7.5, t_end=14.5)
 def test_analyze_real_log_slices_window_and_derives_metrics(tmp_path: Path) -> None:
     result = LogAnalysisService().analyze(
         str(REAL_LOG),
-        str(tmp_path / "log_slice.csv"),
-        window=WINDOW,
+        str(tmp_path / "log_full_video.csv"),
+        video_duration_s=WINDOW.t_end,
     )
 
     assert result.row_count == 18
@@ -35,7 +35,7 @@ def test_analyze_real_log_slices_window_and_derives_metrics(tmp_path: Path) -> N
     assert "log-metric:max_deceleration" in result.summary.evidence_ids
     assert any(event.event_type == "brake_rise" for event in result.events)
 
-    with Path(result.log_slice_uri).open(encoding="utf-8") as file:
+    with Path(result.log_artifact_uri).open(encoding="utf-8") as file:
         rows = list(csv.DictReader(file))
     assert float(rows[0]["timestamp_s"]) == WINDOW.t_start
     assert float(rows[-1]["timestamp_s"]) == WINDOW.t_end
@@ -43,8 +43,8 @@ def test_analyze_real_log_slices_window_and_derives_metrics(tmp_path: Path) -> N
 
 def test_conflict_log_has_no_strong_brake_rise_near_incident(tmp_path: Path) -> None:
     service = LogAnalysisService()
-    real = service.analyze(str(REAL_LOG), str(tmp_path / "real.csv"), window=WINDOW)
-    conflict = service.analyze(str(CONFLICT_LOG), str(tmp_path / "conflict.csv"), window=WINDOW)
+    real = service.analyze(str(REAL_LOG), str(tmp_path / "real.csv"), video_duration_s=WINDOW.t_end)
+    conflict = service.analyze(str(CONFLICT_LOG), str(tmp_path / "conflict.csv"), video_duration_s=WINDOW.t_end)
 
     assert real.summary.metrics["brake_rise_time"] == 6.5
     assert "brake_rise_time" not in conflict.summary.metrics
@@ -66,7 +66,7 @@ def test_detects_disengagement_warning_and_error(tmp_path: Path) -> None:
     result = LogAnalysisService().analyze(
         str(source),
         str(tmp_path / "slice.csv"),
-        window=IncidentWindow(t_start=6, t0=7, t_end=8),
+        video_duration_s=8,
     )
 
     assert {event.event_type for event in result.events} == {"disengagement", "warning", "error"}
@@ -83,7 +83,7 @@ def test_rejects_non_increasing_timestamps(tmp_path: Path) -> None:
         LogAnalysisService().analyze(
             str(source),
             str(tmp_path / "slice.csv"),
-            window=IncidentWindow(t_start=0, t0=1, t_end=2),
+            video_duration_s=2,
         )
 
     assert exc_info.value.code == "LOG_TIMESTAMP_ORDER_INVALID"
@@ -97,7 +97,7 @@ def test_rejects_log_without_timestamp_column(tmp_path: Path) -> None:
         LogAnalysisService().analyze(
             str(source),
             str(tmp_path / "slice.csv"),
-            window=IncidentWindow(t_start=0, t0=1, t_end=2),
+            video_duration_s=2,
         )
 
     assert exc_info.value.code == "LOG_TIMESTAMP_MISSING"
@@ -116,7 +116,7 @@ def test_accepts_time_sec_timestamp_column(tmp_path: Path) -> None:
     result = LogAnalysisService().analyze(
         str(source),
         str(tmp_path / "slice.csv"),
-        window=IncidentWindow(t_start=0, t0=0.05, t_end=0.1),
+        video_duration_s=0.1,
     )
 
     assert result.row_count == 3
@@ -139,7 +139,7 @@ def test_analysis_preserves_extreme_acceleration_for_model_context(tmp_path: Pat
     result = LogAnalysisService().analyze(
         str(source),
         str(tmp_path / "slice.csv"),
-        window=IncidentWindow(t_start=0, t0=0.1, t_end=0.2),
+        video_duration_s=0.2,
     )
 
     assert result.summary.metrics["max_deceleration"] == pytest.approx(-27.777778)
@@ -151,36 +151,105 @@ def test_analysis_preserves_extreme_acceleration_for_model_context(tmp_path: Pat
     assert "Dải gia tốc" in result.summary.summary
 
 
-def test_analysis_emits_deterministic_anomaly_events_and_warnings(tmp_path: Path) -> None:
+def test_analysis_adaptively_detects_and_merges_telemetry_changes(tmp_path: Path) -> None:
     source = tmp_path / "anomalies.csv"
     source.write_text(
         "timestamp_s,speed_kmh,steer,acceleration_mps2\n"
         "0.0,30,0.0,0.0\n"
-        "1.0,30,0.4,-5.5\n"
-        "2.0,30,0.0,4.5\n"
-        "3.0,30,0.5,-8.0\n",
+        "1.0,30,0.0,0.0\n"
+        "2.0,30,0.0,0.0\n"
+        "3.0,30,0.0,0.0\n"
+        "4.0,30,0.0,0.0\n"
+        "5.0,30,0.0,0.0\n"
+        "6.0,30,0.5,-8.0\n"
+        "7.0,30,0.5,-8.0\n"
+        "8.0,30,0.0,0.0\n",
         encoding="utf-8",
     )
 
     result = LogAnalysisService().analyze(
         str(source),
         str(tmp_path / "slice.csv"),
-        window=IncidentWindow(t_start=0, t0=1, t_end=3),
+        video_duration_s=8,
     )
 
     event_types = [event.event_type for event in result.events]
-    assert "strong_deceleration" in event_types
-    assert "strong_acceleration" in event_types
     assert "extreme_acceleration" in event_types
-    assert "strong_steering_change" in event_types
-    assert "LOG_STRONG_DECELERATION" in "\n".join(result.summary.warnings)
-    assert "LOG_STRONG_ACCELERATION" in "\n".join(result.summary.warnings)
+    assert "steering_change" in event_types
+    assert "strong_acceleration" not in event_types
+    assert "strong_deceleration" not in event_types
+    assert "strong_steering_change" not in event_types
     assert "LOG_EXTREME_ACCELERATION" in "\n".join(result.summary.warnings)
-    assert "LOG_STRONG_STEERING_CHANGE" in "\n".join(result.summary.warnings)
-    assert result.summary.metrics["strong_deceleration_time"] == 1
-    assert result.summary.metrics["strong_acceleration_time"] == 2
-    assert result.summary.metrics["extreme_acceleration_time"] == 3
-    assert result.summary.metrics["strong_steering_change_time"] == 1
+    assert "LOG_ADAPTIVE_STEERING_CHANGE" in "\n".join(result.summary.warnings)
+    assert result.summary.metrics["extreme_acceleration_time"] == 6
+    assert result.summary.metrics["steering_change_time"] == 6
+    assert len([event for event in result.events if event.signal == "steering"]) == 1
+    assert len([event for event in result.events if event.signal == "acceleration_mps2"]) == 1
+    assert "merged from 6.000s to 8.000s" in "\n".join(event.details for event in result.events)
+
+
+def test_adaptive_candidates_require_physical_acceleration_and_steering_gates(tmp_path: Path) -> None:
+    source = tmp_path / "physical-gates.csv"
+    source.write_text(
+        "timestamp_s,speed_kmh,steer,acceleration_mps2\n"
+        "0,30,0.0002,3.211\n"
+        "1,30,0.0002,3.211\n"
+        "2,30,0.0002,3.211\n"
+        "3,30,0.0002,3.211\n"
+        "4,30,0.0002,3.211\n"
+        "5,30,0.0002,3.211\n"
+        "6,30,0.0007,2.472\n"
+        "7,30,0.0002,-0.105\n"
+        "8,30,0.644,-65.789\n",
+        encoding="utf-8",
+    )
+
+    result = LogAnalysisService().analyze(
+        str(source),
+        str(tmp_path / "slice.csv"),
+        video_duration_s=8,
+    )
+
+    assert [(event.event_type, event.timestamp_s) for event in result.events] == [
+        ("extreme_acceleration", 8.0),
+        ("steering_change", 8.0),
+    ]
+    hint = build_log_attention_hint(str(source), video_duration_s=8)
+    assert "Tại giây thứ 8.0" in hint
+    assert "3.211" not in hint
+    assert "2.472" not in hint
+    assert "-0.105" not in hint
+    assert "0.0007" not in hint
+
+
+def test_deceleration_metrics_use_the_peak_timestamp_not_the_first_event(tmp_path: Path) -> None:
+    source = tmp_path / "deceleration-peak.csv"
+    source.write_text(
+        "timestamp_s,speed_kmh,acceleration_mps2\n"
+        "0,30,0\n"
+        "1,30,0\n"
+        "2,30,0\n"
+        "3,30,-6\n"
+        "4,30,0\n"
+        "5,30,0\n"
+        "6,30,0\n"
+        "7,30,0\n"
+        "8,30,0\n"
+        "9,30,0\n"
+        "10.9,30,-65.789\n",
+        encoding="utf-8",
+    )
+
+    result = LogAnalysisService().analyze(
+        str(source),
+        str(tmp_path / "slice.csv"),
+        video_duration_s=10.9,
+    )
+
+    assert result.summary.metrics["max_deceleration"] == pytest.approx(-65.789)
+    assert result.summary.metrics["strong_deceleration_time"] == 10.9
+    assert result.summary.metrics["extreme_acceleration_time"] == 10.9
+    assert "Phát hiện gia tốc cực đoan tại 10.9 giây." in result.summary.summary
 
 
 def test_verification_log_artifact_keeps_full_video_log_for_claim_sampling(tmp_path: Path) -> None:
@@ -236,19 +305,25 @@ def test_build_log_attention_hint_contains_only_qualitative_changes(tmp_path: Pa
     source.write_text(
         "timestamp_s,throttle,brake,steering_angle,acceleration_mps2\n"
         "0.0,0.1,0.0,0.0,0.0\n"
-        "1.0,0.5,0.6,-0.5,-4.0\n"
-        "2.0,0.5,0.6,-0.5,0.0\n",
+        "1.0,0.1,0.0,0.0,0.0\n"
+        "2.0,0.1,0.0,0.0,0.0\n"
+        "3.0,0.1,0.0,0.0,0.0\n"
+        "4.0,0.1,0.0,0.0,0.0\n"
+        "5.0,0.1,0.0,0.0,0.0\n"
+        "6.0,0.5,0.6,-0.5,-6.0\n"
+        "7.0,0.5,0.6,-0.5,-6.0\n"
+        "8.0,0.1,0.0,0.0,0.0\n",
         encoding="utf-8",
     )
 
     hint = build_log_attention_hint(str(source))
 
-    assert "Tại giây thứ 1.0" in hint
-    assert "ga tăng đột ngột" in hint
-    assert "phanh tăng đột ngột" in hint
-    assert "góc đánh lái thay đổi đột ngột sang trái" in hint
-    assert "gia tốc giảm đột ngột" in hint
-    for raw_value in ("0.1", "0.5", "0.6", "-0.5", "-4.0"):
+    assert "Tại giây thứ 6.0" in hint
+    assert "ga tăng bất thường so với diễn biến gần đó" in hint
+    assert "phanh tăng bất thường so với diễn biến gần đó" in hint
+    assert "góc đánh lái thay đổi bất thường sang trái" in hint
+    assert "gia tốc giảm bất thường so với diễn biến gần đó" in hint
+    for raw_value in ("0.1", "0.5", "0.6", "-0.5", "-6.0"):
         assert raw_value not in hint
     assert "evidence_id" not in hint
 
@@ -258,16 +333,20 @@ def test_build_log_attention_hint_uses_acceleration_without_raw_values(tmp_path:
     source.write_text(
         "timestamp_s,throttle,brake,steering_angle,acceleration_mps2\n"
         "0.0,0.1,0.0,0.0,0.0\n"
-        "1.0,0.1,0.0,0.0,-4.0\n"
-        "2.0,0.1,0.0,0.0,-25.87\n",
+        "1.0,0.1,0.0,0.0,0.0\n"
+        "2.0,0.1,0.0,0.0,0.0\n"
+        "3.0,0.1,0.0,0.0,0.0\n"
+        "4.0,0.1,0.0,0.0,0.0\n"
+        "5.0,0.1,0.0,0.0,0.0\n"
+        "6.0,0.1,0.0,0.0,-4.0\n"
+        "7.0,0.1,0.0,0.0,-25.87\n",
         encoding="utf-8",
     )
 
     hint = build_log_attention_hint(str(source))
 
-    assert "Tại giây thứ 1.0" in hint
-    assert "Tại giây thứ 2.0" in hint
-    assert "gia tốc giảm đột ngột" in hint
+    assert "Tại giây thứ 7.0" in hint
+    assert "gia tốc giảm bất thường so với diễn biến gần đó" in hint
     assert "-4.0" not in hint
     assert "-25.87" not in hint
 
@@ -277,13 +356,18 @@ def test_build_log_attention_hint_derives_acceleration_from_speed(tmp_path: Path
     source.write_text(
         "timestamp_s,speed_kmh\n"
         "0.0,20\n"
-        "0.1,10\n"
-        "0.2,10\n",
+        "0.1,20\n"
+        "0.2,20\n"
+        "0.3,20\n"
+        "0.4,20\n"
+        "0.5,20\n"
+        "0.6,10\n"
+        "0.7,10\n",
         encoding="utf-8",
     )
 
     hint = build_log_attention_hint(str(source))
 
-    assert "Tại giây thứ 0.1" in hint
-    assert "gia tốc giảm đột ngột" in hint
+    assert "Tại giây thứ 0.6" in hint
+    assert "gia tốc giảm bất thường so với diễn biến gần đó" in hint
     assert "27.777" not in hint

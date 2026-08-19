@@ -15,6 +15,7 @@ from src.models.incidents import (
     NativeVideoAnalysisRequest,
     PromptEnvelope,
     SamplingMetadata,
+    TimelineEvent,
     TimestampedFrame,
     TimestampedFramesAnalysisRequest,
     VerificationStatus,
@@ -390,9 +391,8 @@ def merge_video_memory_patch(
     if len(patch_claims) != len(patch.claims):
         raise VideoMemoryError("VLM_PATCH_CLAIM_DUPLICATE", "memory patch contains duplicate claim IDs")
 
-    # A patch may omit a target when its short re-analysis clip has insufficient
-    # evidence.  That intentionally drops only that target; untouched claims
-    # retain both their contents and their previous verification result.
+    # An omitted target means Qwen could not improve it from the focused clip.
+    # Keep the original claim visible, including its verification result.
     merged_claims = []
     for previous_claim in memory.claims:
         claim_id = previous_claim.claim_id
@@ -401,6 +401,7 @@ def merge_video_memory_patch(
             continue
         next_claim = patch_claims.get(claim_id)
         if next_claim is None:
+            merged_claims.append(previous_claim)
             continue
         content_changed = _claim_semantics_changed(previous_claim, next_claim)
         merged_claims.append(
@@ -414,9 +415,12 @@ def merge_video_memory_patch(
         )
 
     handles = _merge_by_id(memory.remote_media_handles, patch.remote_media_handles, "name")
+    timeline = _merge_patch_timeline(memory.timeline, patch.timeline)
     merged = memory.model_copy(
         update={
             "claims": merged_claims,
+            "video_summary": patch.video_summary if patch.video_summary is not None else memory.video_summary,
+            "timeline": timeline,
             "remote_media_handles": handles,
             "revision": memory.revision + 1,
         }
@@ -432,6 +436,25 @@ def merge_video_memory_patch(
     if not allow_deferred_native_evidence and any(not claim.evidence for claim in merged.claims):
         raise VideoMemoryError("VLM_CLAIM_EVIDENCE_MISSING", "every claim must contain frame evidence")
     return merged
+
+
+def _merge_patch_timeline(
+    current_timeline: list[TimelineEvent],
+    patch_timeline: list[TimelineEvent] | None,
+) -> list[TimelineEvent]:
+    if patch_timeline is None:
+        return current_timeline
+    if len(patch_timeline) != len(current_timeline):
+        raise VideoMemoryError("VLM_PATCH_TIMELINE_INVALID", "memory patch must preserve the full timeline")
+    if any(
+        not math.isclose(next_event.timestamp_s, previous_event.timestamp_s, abs_tol=1e-6)
+        for previous_event, next_event in zip(current_timeline, patch_timeline, strict=True)
+    ):
+        raise VideoMemoryError("VLM_PATCH_TIMELINE_INVALID", "memory patch cannot change timeline timestamps")
+    return [
+        next_event.model_copy(update={"evidence_ids": previous_event.evidence_ids})
+        for previous_event, next_event in zip(current_timeline, patch_timeline, strict=True)
+    ]
 
 
 def merge_memory_only_patch(
@@ -493,6 +516,8 @@ def merge_memory_only_patch(
     return memory.model_copy(
         update={
             "claims": [current_claims[claim.claim_id] for claim in memory.claims],
+            "video_summary": patch.video_summary if patch.video_summary is not None else memory.video_summary,
+            "timeline": _merge_patch_timeline(memory.timeline, patch.timeline),
             "revision": memory.revision + 1,
         }
     )

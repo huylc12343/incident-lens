@@ -543,8 +543,8 @@ def test_memory_only_patch_keeps_verification_when_claim_content_is_unchanged() 
     assert merged.claims[0].verification_status == VerificationStatus.SUPPORTED
 
 
-def test_video_memory_patch_can_drop_only_its_target_without_resetting_other_claims() -> None:
-    """An unsupported focused reanalysis may omit its target, not unrelated claims."""
+def test_video_memory_patch_keeps_an_omitted_target_visible_with_its_prior_status() -> None:
+    """An omitted focused-reanalysis target must never disappear from user-visible state."""
     target_evidence = EvidenceReference(evidence_id="frame-target", timestamp_s=1)
     supported_evidence = EvidenceReference(evidence_id="frame-supported", timestamp_s=2)
     memory = VideoMemory(
@@ -577,9 +577,11 @@ def test_video_memory_patch_can_drop_only_its_target_without_resetting_other_cla
     merged = merge_video_memory_patch(memory, patch)
 
     assert merged.revision == 2
-    assert [claim.claim_id for claim in merged.claims] == ["claim-supported"]
-    assert merged.claims[0].verification_status == VerificationStatus.SUPPORTED
-    assert merged.claims[0].evidence == [supported_evidence]
+    assert [claim.claim_id for claim in merged.claims] == ["claim-target", "claim-supported"]
+    assert merged.claims[0].verification_status == VerificationStatus.CONTRADICTED
+    assert merged.claims[0].evidence == [target_evidence]
+    assert merged.claims[1].verification_status == VerificationStatus.SUPPORTED
+    assert merged.claims[1].evidence == [supported_evidence]
 
 
 @pytest.mark.asyncio

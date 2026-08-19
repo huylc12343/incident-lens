@@ -114,7 +114,13 @@ async def test_analyze_video_node_adds_qualitative_log_attention_hint(tmp_path: 
     log.write_text(
         "timestamp_s,throttle,brake,steering_angle,acceleration_mps2\n"
         "0.0,0.1,0.0,0.0,0.0\n"
-        "1.0,0.5,0.6,-0.5,-4.0\n",
+        "1.0,0.1,0.0,0.0,0.0\n"
+        "2.0,0.1,0.0,0.0,0.0\n"
+        "3.0,0.1,0.0,0.0,0.0\n"
+        "4.0,0.1,0.0,0.0,0.0\n"
+        "5.0,0.1,0.0,0.0,0.0\n"
+        "6.0,0.5,0.6,-0.5,-6.0\n"
+        "7.0,0.5,0.6,-0.5,-6.0\n",
         encoding="utf-8",
     )
     manifest = VideoSequenceManifest(
@@ -128,7 +134,7 @@ async def test_analyze_video_node_adds_qualitative_log_attention_hint(tmp_path: 
             )
         ],
         source_video_uri="video.mp4",
-        duration_s=2,
+        duration_s=8,
     )
     media = SimpleNamespace(sample_frames=AsyncMock(return_value=manifest), normalize_video=AsyncMock())
     service = _service(VLMInputMode.TIMESTAMPED_FRAMES, _memory(AnalysisMode.SINGLE_REQUEST, 2))
@@ -147,11 +153,11 @@ async def test_analyze_video_node_adds_qualitative_log_attention_hint(tmp_path: 
 
     context = service.analyze_video.await_args.args[0].prompt.context
     hint = context["log_attention_hint"]
-    assert "Tại giây thứ 1.0" in hint
-    assert "ga tăng đột ngột" in hint
-    assert "phanh tăng đột ngột" in hint
-    assert "gia tốc giảm đột ngột" in hint
-    assert "-4.0" not in hint
+    assert "Tại giây thứ 6.0" in hint
+    assert "ga tăng bất thường so với diễn biến gần đó" in hint
+    assert "phanh tăng bất thường so với diễn biến gần đó" in hint
+    assert "gia tốc giảm bất thường so với diễn biến gần đó" in hint
+    assert "-6.0" not in hint
     assert "0.5" not in hint
 
 
@@ -275,6 +281,37 @@ async def test_cut_incident_video_node_creates_clip_and_frames(tmp_path: Path) -
     }
     assert media.sample_frames.await_args.kwargs["start_s"] == memory.incident_window.t_start
     assert media.sample_frames.await_args.kwargs["end_s"] == memory.incident_window.t_end
+
+
+@pytest.mark.asyncio
+async def test_cut_incident_video_requires_a_representative_frame_before_review(tmp_path: Path) -> None:
+    memory = _memory(AnalysisMode.SINGLE_REQUEST, 2)
+    clip = NormalizedVideoArtifact(
+        uri=str(tmp_path / "incident_clip.mp4"),
+        metadata=NativeVideoMetadata(duration_s=2, width=160, height=90, fps=5, size_bytes=100),
+    )
+    media = SimpleNamespace(
+        cut_incident_clip=AsyncMock(return_value=clip),
+        sample_frames=AsyncMock(return_value=SimpleNamespace(frames=[])),
+    )
+    workflow = VideoMemoryWorkflow(
+        vlm=_service(VLMInputMode.TIMESTAMPED_FRAMES, memory),
+        config=VideoMemoryWorkflowConfig(artifact_dir=str(tmp_path)),
+    )
+
+    result = await cut_incident_video_node(
+        {
+            "incident_id": "INC-EMPTY-FRAMES",
+            "video_uri": "video.mp4",
+            "video_memory": memory,
+            "draft_report": Mock(),
+        },
+        media=media,
+        workflow=workflow,
+    )
+
+    assert result["status"] == "failed"
+    assert result["error_code"] == "INCIDENT_REVIEW_FRAMES_MISSING"
 
 
 @pytest.mark.asyncio
@@ -541,7 +578,7 @@ async def test_analyze_log_node_exposes_verification_artifacts(tmp_path: Path) -
     log_uri = tmp_path / "vehicle.csv"
     log_uri.write_text("timestamp_s,speed_kmh\n0,30\n1,20\n2,10\n", encoding="utf-8")
     analysis = LogAnalysisResult(
-        log_slice_uri=str(tmp_path / "log_slice.csv"),
+        log_artifact_uri=str(tmp_path / "log_full_video.csv"),
         summary=LogEvidenceSummary(metrics={"speed_start": 30}),
         row_count=3,
         signal_names=["timestamp_s", "speed_kmh"],
@@ -567,7 +604,7 @@ async def test_analyze_log_node_exposes_verification_artifacts(tmp_path: Path) -
     assert result["log_evidence_summary"] == analysis.summary
     assert result["chart_uris"] == [chart_uri]
     assert result["artifact_uris"]["incident_clip"] == "clip.mp4"
-    assert result["artifact_uris"]["log_slice"] == analysis.log_slice_uri
+    assert result["artifact_uris"]["log_full_video"] == analysis.log_artifact_uri
     assert Path(result["artifact_uris"]["verification_log"]).is_file()
     assert charts.create_charts.call_args.args[0] == str(log_uri)
 
@@ -822,8 +859,8 @@ async def test_verification_uses_only_the_saved_union_log_artifact(tmp_path: Pat
 
     with Path(analyzed["artifact_uris"]["verification_log"]).open(encoding="utf-8") as file:
         saved_timestamps = {float(row["timestamp_s"]) for row in csv.DictReader(file)}
-    with Path(analyzed["artifact_uris"]["log_slice"]).open(encoding="utf-8") as file:
-        incident_timestamps = [float(row["timestamp_s"]) for row in csv.DictReader(file)]
+    with Path(analyzed["artifact_uris"]["log_full_video"]).open(encoding="utf-8") as file:
+        full_video_timestamps = [float(row["timestamp_s"]) for row in csv.DictReader(file)]
     request = verifier.verify.await_args.args[0]
     evidence_timestamps = [
         evidence.timestamp_s
@@ -831,7 +868,7 @@ async def test_verification_uses_only_the_saved_union_log_artifact(tmp_path: Pat
         for evidence in summary.evidence
     ]
     assert saved_timestamps == {2.5, 3.0, 3.5, 5.0, 6.0, 12.0, 12.5, 13.0, 14.0}
-    assert incident_timestamps == [6.0, 12.0]
+    assert full_video_timestamps == [2.5, 3.0, 3.5, 5.0, 6.0, 12.0, 12.5, 13.0, 14.0]
     assert set(evidence_timestamps) <= saved_timestamps
     assert [item.timestamp_s for item in request.claim_log_summaries[0].evidence] == [2.5, 3.0, 3.5, 5.0, 6.0]
     assert [item.timestamp_s for item in request.claim_log_summaries[1].evidence] == [3.5, 5.0, 6.0, 12.0, 12.5, 13.0, 14.0]
@@ -921,11 +958,18 @@ async def test_verification_failure_continues_without_result(tmp_path: Path) -> 
 
 @pytest.mark.asyncio
 async def test_auto_reanalysis_resamples_claim_window_once(tmp_path: Path) -> None:
-    memory = _claim_memory(AnalysisMode.NATIVE_VIDEO)
+    memory = _claim_memory(AnalysisMode.NATIVE_VIDEO).model_copy(
+        update={
+            "video_summary": "Vehicle drives straight before braking.",
+            "timeline": [TimelineEvent(timestamp_s=0, description="Vehicle drives straight.")],
+        }
+    )
     service = _service(VLMInputMode.NATIVE_VIDEO, memory)
     service.reanalyze_claims.return_value = VideoMemoryPatch(
         target_claim_ids=["claim-1"],
         claims=[Claim(claim_id="claim-1", text="Vehicle does not brake", timestamp_s=2)],
+        video_summary="Vehicle drives before braking.",
+        timeline=[TimelineEvent(timestamp_s=0, description="Vehicle drives.")],
         base_revision=1,
     )
     workflow = VideoMemoryWorkflow(
@@ -981,6 +1025,8 @@ async def test_auto_reanalysis_resamples_claim_window_once(tmp_path: Path) -> No
     assert result["status"] == "running"
     assert result["auto_reanalysis_count"] == 1
     assert result["video_memory"].claims[0].text == "Vehicle does not brake"
+    assert result["video_memory"].video_summary == "Vehicle drives before braking."
+    assert result["video_memory"].timeline[0].description == "Vehicle drives."
     media.sample_frames.assert_awaited_once()
     assert media.sample_frames.await_args.kwargs["start_s"] == 0
     assert media.sample_frames.await_args.kwargs["end_s"] == 3
@@ -991,6 +1037,12 @@ async def test_auto_reanalysis_resamples_claim_window_once(tmp_path: Path) -> No
     assert request.normalized_video_uri == short_clip.uri
     assert request.input_video_start_s == 0
     assert request.input_video_end_s == 3
+    assert request.prompt.context == {
+        "target_claims": [{"claim_id": "claim-1", "text": "Vehicle brakes", "timestamp_s": 2}],
+        "verification_reasons": {"claim-1": "Log has no brake rise"},
+        "reanalysis_window": [0, 3],
+    }
+    assert "max_brake" not in str(request.prompt.context)
 
 
 @pytest.mark.asyncio
@@ -1271,7 +1323,7 @@ async def test_draft_report_marks_video_only_and_unresolved_conflict() -> None:
         report=report,
     )
 
-    assert result["status"] == "awaiting_review"
+    assert result["status"] == "running"
     assert result["report_narrative"].log_findings == "Không có dữ liệu log."
     assert result["draft_report"].log_findings.narrative == "Không có dữ liệu log."
     assert len(type(result["draft_report"]).model_fields) == 12
@@ -1297,7 +1349,7 @@ async def test_draft_report_falls_back_to_vlm_video_summary() -> None:
         report=report,
     )
 
-    assert result["status"] == "awaiting_review"
+    assert result["status"] == "running"
     assert result["draft_report"].summary == memory.video_summary
     assert result["draft_report"].type_of_accident == "other_unknown"
     assert result["draft_report"].alignment.verification is None
@@ -1321,7 +1373,7 @@ async def test_draft_report_skips_model_when_log_verification_is_unavailable() -
         report=report,
     )
 
-    assert result["status"] == "awaiting_review"
+    assert result["status"] == "running"
     assert result["draft_report"].summary == "Whole-video VLM summary."
     assert result["draft_report"].type_of_accident == "no_incident"
     assert any("Report model skipped" in warning for warning in result["warnings"])
@@ -1817,7 +1869,11 @@ async def test_auto_reanalysis_uses_short_native_clip_with_global_source_window(
     assert request.normalized_video_uri == short_clip.uri
     assert request.input_video_start_s == 24.5
     assert request.input_video_end_s == 28.5
-    assert request.prompt.context["reanalysis_window"] == expected_window.model_dump(mode="json")
+    assert request.prompt.context == {
+        "target_claims": [{"claim_id": "claim-1", "text": "Vehicle begins turning.", "timestamp_s": 26.5}],
+        "verification_reasons": {"claim-1": "Telemetry does not support the original turn claim."},
+        "reanalysis_window": [24.5, 28.5],
+    }
     assert result["auto_reanalysis_changed_claim_ids"] == ["claim-1"]
 
 

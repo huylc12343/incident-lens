@@ -4,16 +4,12 @@ from __future__ import annotations
 
 import csv
 import math
+from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from src.config import (
-    LOG_EXTREME_ACCELERATION_THRESHOLD_MPS2_DEFAULT,
-    LOG_STRONG_ACCELERATION_THRESHOLD_MPS2_DEFAULT,
-    LOG_STRONG_DECELERATION_THRESHOLD_MPS2_DEFAULT,
-    LOG_STRONG_STEERING_DELTA_THRESHOLD_DEFAULT,
-)
 from src.models.incidents import (
     Claim,
     ClaimLogEvidence,
@@ -65,11 +61,21 @@ NEAR_STOPPED_SPEED_KMH = 1.0
 STRONG_SPEED_DROP_KMH = 10.0
 CONTROL_ZERO_THRESHOLD = 0.01
 CONTROL_CHANGE_THRESHOLD = 0.1
-ATTENTION_THROTTLE_DELTA_THRESHOLD = 0.2
-ATTENTION_BRAKE_DELTA_THRESHOLD = 0.5
-ATTENTION_STEERING_DELTA_THRESHOLD = 0.3
-ATTENTION_ACCELERATION_MAGNITUDE_THRESHOLD_MPS2 = STRONG_SPEED_DROP_KMH / 3.6
-MAX_LOG_ATTENTION_TIMESTAMPS = 20
+ADAPTIVE_ROLLING_WINDOW = 20
+ADAPTIVE_MIN_BASELINE_SAMPLES = 5
+ADAPTIVE_EMA_ALPHA = 0.2
+ADAPTIVE_ENTER_Z_SCORE = 3.0
+ADAPTIVE_EXIT_Z_SCORE = 1.5
+ADAPTIVE_MERGE_GAP_SAMPLES = 1
+NUMERIC_EPSILON = 1e-9
+MAX_LOG_ATTENTION_TIMESTAMPS = 8
+PHYSICAL_MIN_BRAKE_RISE = 0.3
+PHYSICAL_MIN_THROTTLE_DELTA = 0.2
+PHYSICAL_MIN_BRAKE_DELTA_FOR_HINT = 0.5
+PHYSICAL_MIN_STEERING_DELTA = 0.3
+PHYSICAL_STRONG_DECELERATION_MPS2 = -5.0
+PHYSICAL_STRONG_ACCELERATION_MPS2 = 4.0
+PHYSICAL_EXTREME_ACCELERATION_MPS2 = 8.0
 MAX_VERIFICATION_EVIDENCE_ROWS = 5
 MAX_VERIFICATION_CHANGE_POINTS = 2
 
@@ -81,9 +87,9 @@ VERIFICATION_SIGNAL_ALIASES: dict[TelemetrySignalName, tuple[str, ...]] = {
 }
 VERIFICATION_CHANGE_THRESHOLDS: dict[TelemetrySignalName, float] = {
     "speed_kmh": STRONG_SPEED_DROP_KMH,
-    "throttle": ATTENTION_THROTTLE_DELTA_THRESHOLD,
-    "brake": ATTENTION_BRAKE_DELTA_THRESHOLD,
-    "steer": ATTENTION_STEERING_DELTA_THRESHOLD,
+    "throttle": 0.2,
+    "brake": 0.5,
+    "steer": 0.3,
 }
 
 
@@ -118,50 +124,35 @@ class LogRecord:
         return value or None
 
 
-class LogAnalysisService:
-    def __init__(
-        self,
-        *,
-        brake_rise_threshold: float = 0.3,
-        steering_change_threshold: float = 10.0,
-        strong_deceleration_threshold_mps2: float = LOG_STRONG_DECELERATION_THRESHOLD_MPS2_DEFAULT,
-        strong_acceleration_threshold_mps2: float = LOG_STRONG_ACCELERATION_THRESHOLD_MPS2_DEFAULT,
-        extreme_acceleration_threshold_mps2: float = LOG_EXTREME_ACCELERATION_THRESHOLD_MPS2_DEFAULT,
-        strong_steering_delta_threshold: float = LOG_STRONG_STEERING_DELTA_THRESHOLD_DEFAULT,
-    ) -> None:
-        if brake_rise_threshold < 0 or steering_change_threshold < 0:
-            raise ValueError("log thresholds must be non-negative")
-        if strong_deceleration_threshold_mps2 >= 0:
-            raise ValueError("strong_deceleration_threshold_mps2 must be negative")
-        if strong_acceleration_threshold_mps2 <= 0:
-            raise ValueError("strong_acceleration_threshold_mps2 must be positive")
-        if extreme_acceleration_threshold_mps2 <= 0:
-            raise ValueError("extreme_acceleration_threshold_mps2 must be positive")
-        if extreme_acceleration_threshold_mps2 < max(
-            abs(strong_deceleration_threshold_mps2),
-            strong_acceleration_threshold_mps2,
-        ):
-            raise ValueError("extreme_acceleration_threshold_mps2 must exceed strong acceleration thresholds")
-        if strong_steering_delta_threshold <= 0:
-            raise ValueError("strong_steering_delta_threshold must be positive")
-        self._brake_rise_threshold = brake_rise_threshold
-        self._steering_change_threshold = steering_change_threshold
-        self._strong_deceleration_threshold_mps2 = strong_deceleration_threshold_mps2
-        self._strong_acceleration_threshold_mps2 = strong_acceleration_threshold_mps2
-        self._extreme_acceleration_threshold_mps2 = extreme_acceleration_threshold_mps2
-        self._strong_steering_delta_threshold = strong_steering_delta_threshold
+@dataclass(frozen=True)
+class AdaptiveChange:
+    start_index: int
+    end_index: int
+    peak_index: int
+    direction: Literal[-1, 1]
+    peak_z_score: float
+    previous_value: float
+    value: float
 
+
+class LogAnalysisService:
     def analyze(
         self,
         log_uri: str,
         output_uri: str,
         *,
-        window: IncidentWindow,
+        video_duration_s: float | None = None,
     ) -> LogAnalysisResult:
         fieldnames, records = load_log_records(log_uri)
-        sliced = [record for record in records if window.t_start <= record.timestamp_s <= window.t_end]
+        if video_duration_s is not None and video_duration_s <= 0:
+            raise ValueError("video_duration_s must be positive")
+        sliced = [
+            record
+            for record in records
+            if video_duration_s is None or record.timestamp_s <= video_duration_s
+        ]
         if not sliced:
-            raise LogAnalysisError("LOG_WINDOW_EMPTY", "log contains no rows in the incident window")
+            raise LogAnalysisError("LOG_WINDOW_EMPTY", "log contains no rows within the video duration")
         output = Path(output_uri).resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
         _write_log_slice(output, fieldnames, sliced)
@@ -181,7 +172,10 @@ class LogAnalysisService:
         brake_values = [value for value in brake if value is not None]
         acceleration_values = [value for value in acceleration if value is not None]
         steering_changes = _changes(steering)
-        max_deceleration = min(acceleration_values) if acceleration_values else None
+        min_acceleration_index = _series_extreme_index(acceleration, smallest=True)
+        max_acceleration_index = _series_extreme_index(acceleration, smallest=False)
+        extreme_acceleration_index = _series_extreme_abs_index(acceleration)
+        max_deceleration = acceleration[min_acceleration_index] if min_acceleration_index is not None else None
         if max_deceleration is not None and max_deceleration > 0:
             max_deceleration = 0.0
         metrics: dict[str, float | int | str | bool | None] = {
@@ -197,9 +191,24 @@ class LogAnalysisService:
             "max_steering_change": max(steering_changes, default=None),
             "steering_change_time": _first_event_time(events, "steering_change"),
             "strong_steering_change_time": _first_event_time(events, "strong_steering_change"),
-            "strong_deceleration_time": _first_event_time(events, "strong_deceleration"),
-            "strong_acceleration_time": _first_event_time(events, "strong_acceleration"),
-            "extreme_acceleration_time": _first_event_time(events, "extreme_acceleration"),
+            "strong_deceleration_time": _acceleration_time_if(
+                sliced,
+                acceleration,
+                min_acceleration_index,
+                lambda value: value <= PHYSICAL_STRONG_DECELERATION_MPS2,
+            ),
+            "strong_acceleration_time": _acceleration_time_if(
+                sliced,
+                acceleration,
+                max_acceleration_index,
+                lambda value: value >= PHYSICAL_STRONG_ACCELERATION_MPS2,
+            ),
+            "extreme_acceleration_time": _acceleration_time_if(
+                sliced,
+                acceleration,
+                extreme_acceleration_index,
+                lambda value: abs(value) >= PHYSICAL_EXTREME_ACCELERATION_MPS2,
+            ),
             "disengagement_time": _first_event_time(events, "disengagement"),
         }
         metric_evidence_ids = [
@@ -207,7 +216,13 @@ class LogAnalysisService:
         ]
         available_metrics = {name: value for name, value in metrics.items() if value is not None}
         summary = LogEvidenceSummary(
-            summary=_build_summary(window, metrics, warnings, errors),
+            summary=_build_summary(
+                start_s=sliced[0].timestamp_s,
+                end_s=sliced[-1].timestamp_s,
+                metrics=metrics,
+                warnings=warnings,
+                errors=errors,
+            ),
             metrics=available_metrics,
             events=[event.model_dump(mode="json") for event in events],
             evidence_ids=[*metric_evidence_ids, *(event.evidence_id for event in events)],
@@ -215,7 +230,7 @@ class LogAnalysisService:
             errors=errors,
         )
         return LogAnalysisResult(
-            log_slice_uri=str(output),
+            log_artifact_uri=str(output),
             summary=summary,
             events=events,
             row_count=len(sliced),
@@ -230,82 +245,19 @@ class LogAnalysisService:
         acceleration: list[float | None],
     ) -> list[LogEvent]:
         events: list[LogEvent] = []
-        for index in range(1, len(records)):
-            current = records[index]
-            if brake[index] is not None and brake[index - 1] is not None:
-                brake_delta = brake[index] - brake[index - 1]
-                if brake_delta >= self._brake_rise_threshold:
-                    events.append(
-                        _event(
-                            "brake_rise",
-                            current.timestamp_s,
-                            "brake",
-                            brake[index],
-                            brake[index - 1],
-                            f"brake increased by {brake_delta:.3f}",
-                        )
-                    )
-            if steering[index] is not None and steering[index - 1] is not None:
-                steering_delta = abs(steering[index] - steering[index - 1])
-                if steering_delta >= self._strong_steering_delta_threshold:
-                    events.append(
-                        _event(
-                            "strong_steering_change",
-                            current.timestamp_s,
-                            "steering",
-                            steering[index],
-                            steering[index - 1],
-                            f"absolute steering change {steering_delta:.3f}",
-                        )
-                    )
-                if steering_delta >= self._steering_change_threshold:
-                    events.append(
-                        _event(
-                            "steering_change",
-                            current.timestamp_s,
-                            "steering",
-                            steering[index],
-                            steering[index - 1],
-                            f"absolute steering change {steering_delta:.3f}",
-                        )
-                    )
-
-        for record, value in zip(records, acceleration, strict=True):
-            if value is None:
-                continue
-            if abs(value) >= self._extreme_acceleration_threshold_mps2:
-                events.append(
-                    _event(
-                        "extreme_acceleration",
-                        record.timestamp_s,
-                        "acceleration_mps2",
-                        value,
-                        None,
-                        f"extreme acceleration {value:.3f} m/s²",
-                    )
-                )
-            elif value <= self._strong_deceleration_threshold_mps2:
-                events.append(
-                    _event(
-                        "strong_deceleration",
-                        record.timestamp_s,
-                        "acceleration_mps2",
-                        value,
-                        None,
-                        f"strong deceleration {value:.3f} m/s²",
-                    )
-                )
-            elif value >= self._strong_acceleration_threshold_mps2:
-                events.append(
-                    _event(
-                        "strong_acceleration",
-                        record.timestamp_s,
-                        "acceleration_mps2",
-                        value,
-                        None,
-                        f"strong acceleration {value:.3f} m/s²",
-                    )
-                )
+        for change in _adaptive_changes(brake, detect_delta=True):
+            change = _representative_control_change(change, brake)
+            if change.direction > 0 and _change_magnitude(change) >= PHYSICAL_MIN_BRAKE_RISE:
+                events.append(_adaptive_event("brake_rise", records, "brake", change))
+        for change in _adaptive_changes(steering, detect_delta=True):
+            change = _representative_control_change(change, steering)
+            if _change_magnitude(change) >= PHYSICAL_MIN_STEERING_DELTA:
+                events.append(_adaptive_event("steering_change", records, "steering", change))
+        for change in _adaptive_changes(acceleration, detect_delta=False):
+            change = _representative_acceleration_change(change, acceleration)
+            event_type = _acceleration_event_type(change.value)
+            if event_type is not None:
+                events.append(_adaptive_event(event_type, records, "acceleration_mps2", change))
 
         disengagement_time = _find_disengagement(records)
         if disengagement_time is not None:
@@ -407,9 +359,15 @@ def acceleration_series(records: list[LogRecord]) -> list[float | None]:
     return _acceleration_series(records, speed)
 
 
-def build_log_attention_hint(log_uri: str) -> str:
+def build_log_attention_hint(log_uri: str, *, video_duration_s: float | None = None) -> str:
     """Return qualitative timestamps that guide video attention without exposing telemetry values."""
     _, records = load_log_records(log_uri)
+    if video_duration_s is not None:
+        if video_duration_s <= 0:
+            raise ValueError("video_duration_s must be positive")
+        records = [record for record in records if record.timestamp_s <= video_duration_s]
+    if not records:
+        raise LogAnalysisError("LOG_WINDOW_EMPTY", "log contains no rows within the video duration")
     throttle = numeric_series(records, THROTTLE_ALIASES)
     brake = numeric_series(records, BRAKE_ALIASES)
     steering = numeric_series(records, STEERING_ALIASES)
@@ -423,41 +381,41 @@ def build_log_attention_hint(log_uri: str) -> str:
             descriptions.append(description)
         moment_scores[timestamp_s] = max(moment_scores.get(timestamp_s, 0.0), score)
 
-    control_rules = (
-        (throttle, ATTENTION_THROTTLE_DELTA_THRESHOLD, "ga"),
-        (brake, ATTENTION_BRAKE_DELTA_THRESHOLD, "phanh"),
-    )
-    for values, threshold, label in control_rules:
-        for index in range(1, len(records)):
-            previous, current = values[index - 1], values[index]
-            if previous is None or current is None:
+    for values, label, physical_gate in (
+        (throttle, "ga", PHYSICAL_MIN_THROTTLE_DELTA),
+        (brake, "phanh", PHYSICAL_MIN_BRAKE_DELTA_FOR_HINT),
+    ):
+        for change in _adaptive_changes(values, detect_delta=True):
+            change = _representative_control_change(change, values)
+            if _change_magnitude(change) < physical_gate:
                 continue
-            delta = current - previous
-            if abs(delta) > threshold:
-                direction = "tăng" if delta > 0 else "giảm"
-                add(records[index].timestamp_s, f"{label} {direction} đột ngột", abs(delta) / threshold)
-
-    for index in range(1, len(records)):
-        previous, current = steering[index - 1], steering[index]
-        if previous is None or current is None:
-            continue
-        delta = current - previous
-        if abs(delta) > ATTENTION_STEERING_DELTA_THRESHOLD:
-            direction = "phải" if delta > 0 else "trái"
+            direction = "tăng" if change.direction > 0 else "giảm"
             add(
-                records[index].timestamp_s,
-                f"góc đánh lái thay đổi đột ngột sang {direction}",
-                abs(delta) / ATTENTION_STEERING_DELTA_THRESHOLD,
+                records[change.peak_index].timestamp_s,
+                f"{label} {direction} bất thường so với diễn biến gần đó",
+                change.peak_z_score,
             )
 
-    for index, value in enumerate(acceleration):
-        if value is None or abs(value) < ATTENTION_ACCELERATION_MAGNITUDE_THRESHOLD_MPS2:
+    for change in _adaptive_changes(steering, detect_delta=True):
+        change = _representative_control_change(change, steering)
+        if _change_magnitude(change) < PHYSICAL_MIN_STEERING_DELTA:
             continue
-        direction = "tăng" if value > 0 else "giảm"
+        direction = "phải" if change.direction > 0 else "trái"
         add(
-            records[index].timestamp_s,
-            f"gia tốc {direction} đột ngột",
-            abs(value) / ATTENTION_ACCELERATION_MAGNITUDE_THRESHOLD_MPS2,
+            records[change.peak_index].timestamp_s,
+            f"góc đánh lái thay đổi bất thường sang {direction}",
+            change.peak_z_score,
+        )
+
+    for change in _adaptive_changes(acceleration, detect_delta=False):
+        change = _representative_acceleration_change(change, acceleration)
+        if _acceleration_event_type(change.value) is None:
+            continue
+        direction = "tăng" if change.direction > 0 else "giảm"
+        add(
+            records[change.peak_index].timestamp_s,
+            f"gia tốc {direction} bất thường so với diễn biến gần đó",
+            change.peak_z_score,
         )
 
     if not moments:
@@ -476,6 +434,185 @@ def build_log_attention_hint(log_uri: str) -> str:
             "Attention hint từ telemetry — chỉ gợi ý thời điểm cần xem kỹ, không phải bằng chứng:",
             *lines,
         ]
+    )
+
+
+def _adaptive_changes(
+    values: list[float | None],
+    *,
+    detect_delta: bool,
+) -> list[AdaptiveChange]:
+    """Detect sustained changes relative to each signal's rolling EMA baseline."""
+    observations: list[tuple[int, float, float, float]] = []
+    for index, value in enumerate(values):
+        if value is None:
+            continue
+        if detect_delta:
+            if index == 0 or values[index - 1] is None:
+                continue
+            previous_value = values[index - 1]
+            observations.append((index, value - previous_value, previous_value, value))
+        else:
+            previous_value = values[index - 1] if index > 0 and values[index - 1] is not None else value
+            observations.append((index, value, previous_value, value))
+    if len(observations) <= ADAPTIVE_MIN_BASELINE_SAMPLES:
+        return []
+
+    history: deque[float] = deque(maxlen=ADAPTIVE_ROLLING_WINDOW)
+    ema_mean = 0.0
+    ema_variance = 0.0
+    active: AdaptiveChange | None = None
+    completed: list[AdaptiveChange] = []
+    for position, (index, observation, previous_value, value) in enumerate(observations):
+        if history:
+            rolling_mean = sum(history) / len(history)
+            rolling_variance = sum((item - rolling_mean) ** 2 for item in history) / len(history)
+            baseline = (ema_mean + rolling_mean) / 2
+            scale = max(math.sqrt(ema_variance), math.sqrt(rolling_variance), NUMERIC_EPSILON)
+            signed_z_score = (observation - baseline) / scale
+        else:
+            signed_z_score = 0.0
+        score = abs(signed_z_score)
+        direction: Literal[-1, 1] = 1 if signed_z_score >= 0 else -1
+        baseline_ready = position >= ADAPTIVE_MIN_BASELINE_SAMPLES
+
+        if active is None:
+            if baseline_ready and score >= ADAPTIVE_ENTER_Z_SCORE:
+                active = AdaptiveChange(
+                    start_index=index,
+                    end_index=index,
+                    peak_index=index,
+                    direction=direction,
+                    peak_z_score=score,
+                    previous_value=previous_value,
+                    value=value,
+                )
+        elif direction == active.direction and score >= ADAPTIVE_EXIT_Z_SCORE:
+            peak_index = active.peak_index
+            peak_score = active.peak_z_score
+            peak_previous = active.previous_value
+            peak_value = active.value
+            if score > peak_score:
+                peak_index = index
+                peak_score = score
+                peak_previous = previous_value
+                peak_value = value
+            active = AdaptiveChange(
+                start_index=active.start_index,
+                end_index=index,
+                peak_index=peak_index,
+                direction=active.direction,
+                peak_z_score=peak_score,
+                previous_value=peak_previous,
+                value=peak_value,
+            )
+        else:
+            completed.append(active)
+            active = None
+            if baseline_ready and score >= ADAPTIVE_ENTER_Z_SCORE:
+                active = AdaptiveChange(
+                    start_index=index,
+                    end_index=index,
+                    peak_index=index,
+                    direction=direction,
+                    peak_z_score=score,
+                    previous_value=previous_value,
+                    value=value,
+                )
+
+        previous_ema_mean = ema_mean
+        if history:
+            ema_mean = (1 - ADAPTIVE_EMA_ALPHA) * ema_mean + ADAPTIVE_EMA_ALPHA * observation
+            ema_variance = (1 - ADAPTIVE_EMA_ALPHA) * (
+                ema_variance + ADAPTIVE_EMA_ALPHA * (observation - previous_ema_mean) ** 2
+            )
+        else:
+            ema_mean = observation
+            ema_variance = 0.0
+        history.append(observation)
+    if active is not None:
+        completed.append(active)
+    return _merge_adaptive_changes(completed)
+
+
+def _merge_adaptive_changes(changes: list[AdaptiveChange]) -> list[AdaptiveChange]:
+    if not changes:
+        return []
+    merged = [changes[0]]
+    for change in changes[1:]:
+        previous = merged[-1]
+        if change.start_index - previous.end_index <= ADAPTIVE_MERGE_GAP_SAMPLES + 1:
+            if change.peak_z_score > previous.peak_z_score:
+                merged[-1] = AdaptiveChange(
+                    start_index=previous.start_index,
+                    end_index=change.end_index,
+                    peak_index=change.peak_index,
+                    direction=previous.direction,
+                    peak_z_score=change.peak_z_score,
+                    previous_value=change.previous_value,
+                    value=change.value,
+                )
+            else:
+                merged[-1] = AdaptiveChange(
+                    start_index=previous.start_index,
+                    end_index=change.end_index,
+                    peak_index=previous.peak_index,
+                    direction=previous.direction,
+                    peak_z_score=previous.peak_z_score,
+                    previous_value=previous.previous_value,
+                    value=previous.value,
+                )
+        else:
+            merged.append(change)
+    return merged
+
+
+def _representative_control_change(
+    change: AdaptiveChange,
+    values: list[float | None],
+) -> AdaptiveChange:
+    candidates = [
+        (index, values[index - 1], values[index])
+        for index in range(max(change.start_index, 1), change.end_index + 1)
+        if values[index - 1] is not None and values[index] is not None
+    ]
+    if not candidates:
+        return change
+    index, previous_value, value = max(candidates, key=lambda item: abs(item[2] - item[1]))
+    direction: Literal[-1, 1] = 1 if value - previous_value >= 0 else -1
+    return AdaptiveChange(
+        start_index=change.start_index,
+        end_index=change.end_index,
+        peak_index=index,
+        direction=direction,
+        peak_z_score=change.peak_z_score,
+        previous_value=previous_value,
+        value=value,
+    )
+
+
+def _representative_acceleration_change(
+    change: AdaptiveChange,
+    values: list[float | None],
+) -> AdaptiveChange:
+    candidates = [
+        (index, value)
+        for index in range(change.start_index, change.end_index + 1)
+        if (value := values[index]) is not None
+    ]
+    if not candidates:
+        return change
+    index, value = max(candidates, key=lambda item: abs(item[1]))
+    previous_value = values[index - 1] if index > 0 and values[index - 1] is not None else value
+    direction: Literal[-1, 1] = 1 if value >= 0 else -1
+    return AdaptiveChange(
+        start_index=change.start_index,
+        end_index=change.end_index,
+        peak_index=index,
+        direction=direction,
+        peak_z_score=change.peak_z_score,
+        previous_value=previous_value,
+        value=value,
     )
 
 
@@ -1358,16 +1495,52 @@ def _event(
     )
 
 
+def _adaptive_event(
+    event_type: LogEventType,
+    records: list[LogRecord],
+    signal: str,
+    change: AdaptiveChange,
+) -> LogEvent:
+    start_s = records[change.start_index].timestamp_s
+    end_s = records[change.end_index].timestamp_s
+    details = (
+        f"adaptive change (peak z-score {change.peak_z_score:.2f}) "
+        f"merged from {start_s:.3f}s to {end_s:.3f}s"
+    )
+    return _event(
+        event_type,
+        records[change.peak_index].timestamp_s,
+        signal,
+        change.value,
+        change.previous_value,
+        details,
+    )
+
+
+def _change_magnitude(change: AdaptiveChange) -> float:
+    return abs(change.value - change.previous_value)
+
+
+def _acceleration_event_type(value: float) -> LogEventType | None:
+    if abs(value) >= PHYSICAL_EXTREME_ACCELERATION_MPS2:
+        return "extreme_acceleration"
+    if value <= PHYSICAL_STRONG_DECELERATION_MPS2:
+        return "strong_deceleration"
+    if value >= PHYSICAL_STRONG_ACCELERATION_MPS2:
+        return "strong_acceleration"
+    return None
+
+
 def _metric_evidence_id(name: str) -> str:
     return f"log-metric:{name}"
 
 
 def _anomaly_warnings(events: list[LogEvent]) -> list[str]:
     codes = {
-        "strong_deceleration": "LOG_STRONG_DECELERATION",
-        "strong_acceleration": "LOG_STRONG_ACCELERATION",
+        "strong_deceleration": "LOG_ADAPTIVE_DECELERATION",
+        "strong_acceleration": "LOG_ADAPTIVE_ACCELERATION",
         "extreme_acceleration": "LOG_EXTREME_ACCELERATION",
-        "strong_steering_change": "LOG_STRONG_STEERING_CHANGE",
+        "steering_change": "LOG_ADAPTIVE_STEERING_CHANGE",
     }
     return [
         f"{codes[event.event_type]} at {_format_timestamp_s(event.timestamp_s)}s: {event.details}"
@@ -1377,12 +1550,14 @@ def _anomaly_warnings(events: list[LogEvent]) -> list[str]:
 
 
 def _build_summary(
-    window: IncidentWindow,
+    *,
+    start_s: float,
+    end_s: float,
     metrics: dict[str, float | int | str | bool | None],
     warnings: list[str],
     errors: list[str],
 ) -> str:
-    statements = [f"Log được cắt trong khoảng [{window.t_start:g}, {window.t_end:g}] giây."]
+    statements = [f"Log toàn video được phân tích trong khoảng [{start_s:g}, {end_s:g}] giây."]
     speed_names = (
         ("speed_start", "Tốc độ đầu"),
         ("speed_end", "tốc độ cuối"),
@@ -1416,7 +1591,7 @@ def _build_summary(
     if metrics["brake_rise_time"] is not None:
         statements.append(f"Brake tăng mạnh lần đầu tại {metrics['brake_rise_time']:g} giây.")
     else:
-        statements.append("Không phát hiện brake tăng mạnh trong cửa sổ sự cố.")
+        statements.append("Không phát hiện brake tăng mạnh trong toàn bộ video.")
     if metrics["max_steering_change"] is not None:
         steering = f"Thay đổi steering angle lớn nhất là {metrics['max_steering_change']:g}"
         if metrics["steering_change_time"] is not None:
@@ -1439,6 +1614,32 @@ def _changes(values: list[float | None]) -> list[float]:
         for previous, current in zip(values, values[1:], strict=False)
         if previous is not None and current is not None
     ]
+
+
+def _series_extreme_index(values: list[float | None], *, smallest: bool) -> int | None:
+    indices = [index for index, value in enumerate(values) if value is not None]
+    if not indices:
+        return None
+    return (min if smallest else max)(indices, key=lambda index: values[index])
+
+
+def _series_extreme_abs_index(values: list[float | None]) -> int | None:
+    indices = [index for index, value in enumerate(values) if value is not None]
+    if not indices:
+        return None
+    return max(indices, key=lambda index: abs(values[index]))
+
+
+def _acceleration_time_if(
+    records: list[LogRecord],
+    acceleration: list[float | None],
+    index: int | None,
+    predicate: Callable[[float], bool],
+) -> float | None:
+    if index is None:
+        return None
+    value = acceleration[index]
+    return records[index].timestamp_s if value is not None and predicate(value) else None
 
 
 def _find_disengagement(records: list[LogRecord]) -> float | None:

@@ -456,7 +456,7 @@ def _prepare_qwen_payload(
     for field_name in ("revision", "analysis_mode", "sampling_metadata", "remote_media_handles"):
         prepared.pop(field_name, None)
     prepared.update(model_defaults or {})
-    if output_model is VideoMemory:
+    if output_model in {VideoMemory, VideoMemoryPatch}:
         timeline = prepared.get("timeline")
         if isinstance(timeline, list):
             prepared["timeline"] = [

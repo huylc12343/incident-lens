@@ -27,20 +27,21 @@ def test_auto_reanalysis_contains_only_automatic_context() -> None:
 
     assert prompt.source == PromptSource.AGENT_GENERATED
     assert prompt.version == "auto-v2"
-    assert set(prompt.context) == {
-        "conflict_claim",
-        "verification_reason",
-        "log_evidence_summary",
-        "timestamp_window",
-        "reanalysis_window",
-    }
+    assert set(prompt.context) == {"target_claims", "verification_reasons", "reanalysis_window"}
     assert "feedback" not in prompt.context
     assert "claim-1" not in prompt.text
-    assert prompt.context["conflict_claim"]["claim_id"] == "claim-1"
+    assert prompt.context["verification_reasons"] == {
+        "claim-1": "Brake signal did not rise near the claimed timestamp."
+    }
+    assert prompt.context["target_claims"] == [
+        {"claim_id": "claim-1", "text": "The vehicle braked hard", "timestamp_s": 12.5}
+    ]
+    assert prompt.context["reanalysis_window"] == [11.2, 15.1]
+    assert "log_evidence_summary" not in prompt.context
     assert "không trả evidence" in prompt.text
-    assert "Backend sẽ tự map" in prompt.text
-    assert "cùng sự kiện" in prompt.text
-    assert prompt.context["reanalysis_window"] == {"t_start": 11.2, "t0": 12.5, "t_end": 15.1}
+    assert "không có log telemetry" in prompt.text
+    assert "cùng sự kiện và ngữ cảnh" in prompt.text
+    assert "không bỏ claim" in prompt.text
 
 
 def test_human_reanalysis_contains_only_reviewer_context() -> None:

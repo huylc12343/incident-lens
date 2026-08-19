@@ -419,7 +419,7 @@ VLM chỉ dùng Qwen3-VL-Flash native video qua DashScope. Video được chuẩ
 | VLM limits       | `VLM_TIMEOUT_S`, `VLM_STRUCTURED_OUTPUT_RETRIES`, `VLM_REANALYSIS_FRAME_FPS`, `VLM_REANALYSIS_MAX_FRAMES` |
 | Model downstream | `VERIFICATION_MODEL_NAME`, `REPORT_MODEL_NAME`, timeout/temperature tương ứng                                                                                         |
 | Input            | `INCIDENT_INPUT_ROOTS`, `INCIDENT_UPLOAD_DIR`, `INCIDENT_MAX_LOG_BYTES`, `INCIDENT_MAX_DURATION_S`                                                                 |
-| Log              | `LOG_TIMESTAMP_TOLERANCE_S`, `LOG_BRAKE_RISE_THRESHOLD`, `LOG_STEERING_CHANGE_THRESHOLD`                                                                               |
+| Log              | `LOG_TIMESTAMP_TOLERANCE_S`, `LOG_CLAIM_SAMPLE_RADIUS`; event và VLM hint dùng adaptive detector nội bộ                                                               |
 | Storage          | `ARTIFACT_DIR`, `INCIDENT_DATABASE_PATH`, `INCIDENT_CHECKPOINT_PATH`                                                                                                   |
 | Qwen video       | `QWEN_BASE_URL`, `QWEN_VIDEO_FPS`, `QWEN_ENABLE_THINKING`, `QWEN_THINKING_BUDGET`                                                                                    |
 

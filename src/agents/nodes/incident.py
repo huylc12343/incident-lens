@@ -50,6 +50,7 @@ from src.services.log_analysis import (
 )
 from src.services.media import NormalizedVideoArtifact
 from src.services.video_memory import (
+    VideoMemoryError,
     VideoMemoryWorkflow,
     VideoMemoryWorkflowConfig,
     merge_memory_only_patch,
@@ -114,7 +115,7 @@ class LogWorkflowService(Protocol):
         log_uri: str,
         output_uri: str,
         *,
-        window: IncidentWindow,
+        video_duration_s: float | None = None,
     ) -> LogAnalysisResult: ...
 
 
@@ -149,18 +150,10 @@ async def analyze_video_node(
     config = workflow.config
     artifact_root = Path(config.artifact_dir).resolve() / _safe_incident_id(incident_id)
     mode = workflow.vlm.capabilities.input_mode
-    log_attention_hint = ""
-    log_uri = (state.get("log_uri") or "").strip()
-    if log_uri:
-        try:
-            log_attention_hint = build_log_attention_hint(log_uri)
-        except LogAnalysisError:
-            # Log validation still runs in its existing workflow node; a hint must never block video analysis.
-            pass
     prompt = build_video_analysis_prompt(
         analysis_prompt=analysis_prompt,
         input_mode=mode,
-        log_attention_hint=log_attention_hint,
+        log_attention_hint="",
         version=config.prompt_version,
     )
     try:
@@ -203,6 +196,21 @@ async def analyze_video_node(
             video_duration_s = request.metadata.duration_s
             artifact_uris = {"normalized_video": normalized.uri}
 
+        log_attention_hint = ""
+        log_uri = (state.get("log_uri") or "").strip()
+        if log_uri:
+            try:
+                log_attention_hint = build_log_attention_hint(log_uri, video_duration_s=video_duration_s)
+            except LogAnalysisError:
+                # Log validation still runs in its existing workflow node; a hint must never block video analysis.
+                pass
+        prompt = build_video_analysis_prompt(
+            analysis_prompt=analysis_prompt,
+            input_mode=mode,
+            log_attention_hint=log_attention_hint,
+            version=config.prompt_version,
+        )
+        request = request.model_copy(update={"prompt": prompt})
         memory = await workflow.analyze(request)
         return {
             "status": "running",
@@ -277,6 +285,11 @@ async def cut_incident_video_node(
             start_s=sample_start_s,
             end_s=sample_end_s,
         )
+        if not frames.frames:
+            raise VideoMemoryError(
+                "INCIDENT_REVIEW_FRAMES_MISSING",
+                "review artifacts require at least one sampled incident frame",
+            )
         if (
             workflow.vlm.capabilities.input_mode == VLMInputMode.NATIVE_VIDEO
             and not canonical_evidence_mapped
@@ -295,10 +308,9 @@ async def cut_incident_video_node(
             "incident_clip": clip.uri,
             "incident_frames": str(frame_dir),
         }
-        if frames.frames:
-            target_timestamp_s = _representative_timestamp(memory)
-            representative = min(frames.frames, key=lambda frame: abs(frame.timestamp_s - target_timestamp_s))
-            artifact_uris["representative_frame"] = representative.image_uri
+        target_timestamp_s = _representative_timestamp(memory)
+        representative = min(frames.frames, key=lambda frame: abs(frame.timestamp_s - target_timestamp_s))
+        artifact_uris["representative_frame"] = representative.image_uri
         output: dict[str, object] = {
             "status": "awaiting_review" if state.get("draft_report") is not None else "running",
             "artifact_uris": artifact_uris,
@@ -446,8 +458,8 @@ async def analyze_log_node(
     try:
         result = log_analysis.analyze(
             log_uri,
-            str(artifact_root / "log_slice.csv"),
-            window=memory.incident_window,
+            str(artifact_root / "log_full_video.csv"),
+            video_duration_s=_video_duration_s(state, memory),
         )
         verification_log_uri = build_verification_log_artifact(
             log_uri,
@@ -463,7 +475,7 @@ async def analyze_log_node(
         )
         artifact_uris = {
             **state.get("artifact_uris", {}),
-            "log_slice": result.log_slice_uri,
+            "log_full_video": result.log_artifact_uri,
             "verification_log": verification_log_uri,
             **{f"chart_{index}": uri for index, uri in enumerate(chart_uris, start=1)},
         }
@@ -621,9 +633,8 @@ async def auto_reanalyze_node(
 ) -> dict[str, object]:
     memory = state.get("video_memory")
     verification = state.get("verification")
-    log_summary = state.get("log_evidence_summary")
-    if memory is None or verification is None or log_summary is None:
-        return _failure("AUTO_REANALYSIS_INPUT_INVALID", "video memory, verification, and log summary are required")
+    if memory is None or verification is None:
+        return _failure("AUTO_REANALYSIS_INPUT_INVALID", "video memory and verification are required")
     if state.get("auto_reanalysis_count", 0) >= 1:
         return _failure("AUTO_REANALYSIS_LIMIT_REACHED", "automatic re-analysis is limited to one attempt")
     conflicts = [item for item in verification.results if item.status == VerificationStatus.CONTRADICTED]
@@ -646,8 +657,6 @@ async def auto_reanalyze_node(
             prompt = build_auto_reanalysis_prompt_for_conflicts(
                 conflict_claims=target_claims,
                 verification_reasons={claim_id: reasons[claim_id] for claim_id in group_ids},
-                log_evidence_summary=log_summary,
-                timestamp_window=merged.incident_window,
                 reanalysis_window=reanalysis_window,
                 version=prompt_version,
             )
@@ -892,7 +901,7 @@ async def build_draft_report_node(
         review_status="pending",
     )
     return {
-        "status": "awaiting_review",
+        "status": "running",
         "video_memory": memory,
         "claims": memory.claims,
         "report_narrative": narrative,
@@ -1255,4 +1264,4 @@ def _verification_alignment(verification: VerificationResult | None) -> str:
 def _backend_log_findings(summary: LogEvidenceSummary | None) -> str:
     if summary is None:
         return "Không có dữ liệu log."
-    return summary.summary or "Không có dữ liệu log có thể tổng hợp trong cửa sổ sự cố."
+    return summary.summary or "Không có dữ liệu log có thể tổng hợp trong toàn bộ video."

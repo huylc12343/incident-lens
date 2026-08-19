@@ -6,13 +6,6 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Telemetry event thresholds are deliberately separate from the lower thresholds
-# used only to build qualitative VLM attention hints.
-LOG_STRONG_DECELERATION_THRESHOLD_MPS2_DEFAULT = -5.0
-LOG_STRONG_ACCELERATION_THRESHOLD_MPS2_DEFAULT = 4.0
-LOG_EXTREME_ACCELERATION_THRESHOLD_MPS2_DEFAULT = 8.0
-LOG_STRONG_STEERING_DELTA_THRESHOLD_DEFAULT = 0.3
-
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -100,24 +93,6 @@ class Settings(BaseSettings):
     incident_clip_post_roll_s: float = Field(default=2.0, ge=0)
     log_timestamp_tolerance_s: float = Field(default=0.5, ge=0)
     log_claim_sample_radius: int = Field(default=3, ge=0)
-    log_brake_rise_threshold: float = Field(default=0.3, ge=0)
-    log_steering_change_threshold: float = Field(default=10.0, ge=0)
-    log_strong_deceleration_threshold_mps2: float = Field(
-        default=LOG_STRONG_DECELERATION_THRESHOLD_MPS2_DEFAULT,
-        lt=0,
-    )
-    log_strong_acceleration_threshold_mps2: float = Field(
-        default=LOG_STRONG_ACCELERATION_THRESHOLD_MPS2_DEFAULT,
-        gt=0,
-    )
-    log_extreme_acceleration_threshold_mps2: float = Field(
-        default=LOG_EXTREME_ACCELERATION_THRESHOLD_MPS2_DEFAULT,
-        gt=0,
-    )
-    log_strong_steering_delta_threshold: float = Field(
-        default=LOG_STRONG_STEERING_DELTA_THRESHOLD_DEFAULT,
-        gt=0,
-    )
     artifact_dir: str = "./data/artifacts"
     incident_database_path: str = "./data/incident_reports.sqlite3"
     incident_checkpoint_path: str = "./data/incident_checkpoints.sqlite3"

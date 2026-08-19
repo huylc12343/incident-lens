@@ -61,8 +61,8 @@ def build_verification_prompt(
         "video. Log chỉ có thẩm quyền với telemetry như speed, brake, throttle, steering và các signal trực tiếp "
         "khác có trong available_signals. Không dùng telemetry gián tiếp để phủ định hiện tượng hình ảnh.",
 
-        "Quy ước: speed_kmh>=0; brake và throttle thuộc [0,1]; steering<=-0.02 là trái, "
-        "-0.02<steering<0.02 là thẳng, steering>=0.02 là phải. Chỉ sử dụng signal có trong available_signals.",
+        "Quy ước: speed_kmh>=0; brake và throttle thuộc [0,1]; steering<=-0.1 là trái, "
+        "-0.1<steering<0.1 là thẳng, steering>=0.1 là phải. Chỉ sử dụng signal có trong available_signals.",
 
         "log_facts mô tả một cửa sổ quanh claim gồm raw_telemetry.window_start, at_claim, window_end; "
         "change_points ghi các thay đổi đáng chú ý; derived là kết quả deterministic do backend tính sẵn. "

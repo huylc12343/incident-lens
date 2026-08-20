@@ -55,6 +55,20 @@ export type DraftReport = {
   review_status?: string;
   [key: string]: unknown;
 };
+export type GroundTruth = {
+  source: "CARLA Incident" | "Human annotation" | "Reviewer verified";
+  incident_type?: string | null;
+  severity?: string | null;
+  timeline?: { t_start?: number | null; t0?: number | null; t_end?: number | null } | null;
+};
+export type AiGroundTruthEvaluation = {
+  overall_accuracy?: number | null;
+  incident_type_match?: boolean | null;
+  severity_match?: boolean | null;
+  t0_delta_s?: number | null;
+  timeline_iou?: number | null;
+  prediction?: { incident_type?: string | null; severity?: string | null; timeline?: { t_start?: number | null; t0?: number | null; t_end?: number | null } | null } | null;
+};
 export type IncidentSnapshot = {
   incident_id: string;
   status: IncidentStatus;
@@ -71,6 +85,8 @@ export type IncidentSnapshot = {
   review_audit: ReviewAudit[];
   model_activities: ModelActivity[];
   warnings: string[];
+  ground_truth?: GroundTruth | null;
+  ai_evaluation?: AiGroundTruthEvaluation | null;
   error_code?: string | null;
   error_message?: string | null;
   stored_at?: string | null;

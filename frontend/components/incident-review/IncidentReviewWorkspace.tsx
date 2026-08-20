@@ -8,6 +8,7 @@ import type { Claim, IncidentSnapshot, ReviewPayload } from "../../types/inciden
 import { ProcessingPipeline } from "../ProcessingPipeline";
 import { DecisionModal } from "./DecisionModal";
 import { EvidenceInspector } from "./EvidenceInspector";
+import { GroundTruthComparison } from "./GroundTruthComparison";
 import { IncidentHeader } from "./IncidentHeader";
 import { IncidentClipPlayer } from "./IncidentClipPlayer";
 import { IncidentNavigationSidebar } from "./IncidentNavigationSidebar";
@@ -98,7 +99,7 @@ export function IncidentReviewWorkspace() {
             <div className="incident-review-workspace" id="engineer-review">
               <main className="incident-evidence-column">
                 <IncidentClipPlayer clipUrl={clip} start={report?.incident_window?.t_start} focus={report?.incident_window?.t0} end={report?.incident_window?.t_end} claims={snapshot.claims} selectedId={selectedClaim?.claim_id ?? ""} onSelect={selectClaim} videoRef={videoRef} />
-                <TelemetryPanel summaries={snapshot.claim_log_summaries} selectedClaimId={selectedClaim?.claim_id ?? ""} hasLog={snapshot.has_log} chartUris={telemetryCharts} />
+                <TelemetryPanel summaries={snapshot.claim_log_summaries} selectedClaimId={selectedClaim?.claim_id ?? ""} hasLog={snapshot.has_log} chartUris={telemetryCharts} comparison={<GroundTruthComparison snapshot={snapshot} />} />
                 <div className="evidence-presentation-stack" id="selected-evidence"><EvidenceInspector snapshot={snapshot} claim={selectedClaim} /></div>
               </main>
               <div className="incident-decision-column">

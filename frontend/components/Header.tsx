@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { clearDemoSession } from "../lib/auth";
 import { uiText as text } from "../lib/ui-copy";
 const Icon = ({ children }: { children: React.ReactNode }) => (
   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -15,6 +17,7 @@ export function Header({
 }: {
   processing?: boolean;
 }) {
+  const router = useRouter();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLightOptionDark, setIsLightOptionDark] = useState(false);
 
@@ -28,6 +31,12 @@ export function Header({
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [isSettingsOpen]);
+
+  const handleLogout = () => {
+    clearDemoSession();
+    setIsSettingsOpen(false);
+    router.replace("/login");
+  };
 
   return (
     <header className="topbar">
@@ -103,7 +112,7 @@ export function Header({
               >
                 {text("Light", "Ánh sáng")}
               </button>
-              <button className="settings-logout-option" type="button">{text("Log out", "Đăng xuất")}</button>
+              <button className="settings-logout-option" type="button" onClick={handleLogout}>{text("Log out", "Đăng xuất")}</button>
             </div>
           </section>
         </div>

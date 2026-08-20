@@ -22,7 +22,7 @@ Trước khi đăng ký tài khoản, hãy hiểu bạn sẽ cần gì:
 |------------|-----------|----------|----------|
 | Backend | FastAPI + Python 3.11 | Render / Railway | API server cho AI Agent |
 | AI Agent | LangGraph + LangChain | — | Xử lý logic & workflow của agent |
-| LLM | GPT-4o-mini / Gemini / Mistral | OpenAI / Google / Mistral API | Bộ não AI — xử lý ngôn ngữ |
+| LLM | GPT-4o-mini / Mistral | OpenAI / Mistral API | Bộ não AI — xử lý ngôn ngữ |
 | Database | PostgreSQL + pgvector | Supabase | Lưu trữ dữ liệu & vector |
 | Vector Store | ChromaDB / Pinecone / Qdrant | Self-host / Cloud | Lưu trữ embedding để tìm kiếm ngữ nghĩa |
 | Frontend | Next.js / Streamlit | Vercel / Streamlit Cloud | Giao diện người dùng |
@@ -48,18 +48,6 @@ Trước khi đăng ký tài khoản, hãy hiểu bạn sẽ cần gì:
 > 💡 **MẸO:** Đây là gói LLM API miễn phí HÀO PHÓNG NHẤT hiện có. 1 tỷ token/tháng đủ để phát triển và demo nhiều lần. Ưu tiên đăng ký tài khoản này ĐẦU TIÊN!
 
 ![Giao diện đăng ký Mistral AI (console.mistral.ai)](book-media/free-accounts/mistral.jpg)
-
-### Google Gemini API — KHUYÊN DÙNG (Dễ đăng ký)
-
-- **Gói miễn phí:** Không cần thẻ tín dụng. Lấy API key ngay trên Google AI Studio.
-- **Model khuyên dùng:** Gemini 2.5 Flash: 10 RPM, ~250 request/ngày — nhanh & mạnh
-- **Model cao cấp:** Gemini 2.5 Pro: 5 RPM, ~25-100 request/ngày — giới hạn thấp hơn
-- **Lưu ý:** Giới hạn rate đã giảm đáng kể từ cuối 2025. Nên dùng Flash thay vì Pro.
-- **Đăng ký:** https://aistudio.google.com/apikey
-
-> 💡 **MẸO:** Chỉ cần tài khoản Google (Gmail). Lấy API key trong 30 giây. Flash model đủ mạnh cho hầu hết use case AI Agent.
-
-![Lấy API key trên Google AI Studio (aistudio.google.com/apikey)](book-media/free-accounts/gemini.jpg)
 
 ### Groq API — Tốc độ cực nhanh (Dùng cho demo)
 
@@ -316,11 +304,11 @@ Tên miền riêng **KHÔNG BẮT BUỘC** cho Demo Day — bạn hoàn toàn c�
 
 **Q: Tôi có cần thẻ tín dụng không?**
 
-A: Hầu hết **KHÔNG CẦN**. Mistral, Google Gemini, Groq, Together AI, Cohere, Supabase, Qdrant, Langfuse, GitHub, Docker Hub đều không yêu cầu thẻ tín dụng. Chỉ Render (cho một số tính năng) và Railway có thể yêu cầu.
+A: Hầu hết **KHÔNG CẦN**. Mistral, Groq, Together AI, Cohere, Supabase, Qdrant, Langfuse, GitHub, Docker Hub đều không yêu cầu thẻ tín dụng. Chỉ Render (cho một số tính năng) và Railway có thể yêu cầu.
 
 **Q: Tôi nên dùng LLM nào?**
 
-A: Khuyến nghị: Mistral (1 tỷ token free) làm chính, Google Gemini Flash làm backup, Groq cho demo cần tốc độ. Nếu template yêu cầu OpenAI cụ thể → đăng ký OpenAI và dùng GPT-4o-mini (rẻ nhất).
+A: Khuyến nghị: Mistral (1 tỷ token free) làm chính, Groq cho demo cần tốc độ. Nếu template yêu cầu OpenAI cụ thể → đăng ký OpenAI và dùng GPT-4o-mini (rẻ nhất).
 
 **Q: Free tier có đủ cho Demo Day không?**
 
@@ -328,7 +316,7 @@ A: CÓ. Tất cả các dịch vụ trên đều đủ cho 6 tuần phát triể
 
 **Q: Làm sao để tiết kiệm credit?**
 
-A: (1) Dùng Mistral/Gemini/Groq (free) thay vì OpenAI cho development. (2) Dùng GPT-4o-mini thay vì GPT-4o khi phải dùng OpenAI. (3) Tắt debug mode khi không cần. (4) Dùng ChromaDB local thay vì Pinecone cloud. (5) Giảm token output bằng prompt ngắn gọn.
+A: (1) Dùng Mistral/Groq (free) thay vì OpenAI cho development. (2) Dùng GPT-4o-mini thay vì GPT-4o khi phải dùng OpenAI. (3) Tắt debug mode khi không cần. (4) Dùng ChromaDB local thay vì Pinecone cloud. (5) Giảm token output bằng prompt ngắn gọn.
 
 **Q: Render sleep sau 15 phút — sao cho app luôn sẵn sàng cho Demo?**
 
@@ -338,7 +326,7 @@ A: (1) Dùng script ping mỗi 10 phút (cron job hoặc GitHub Actions). (2) Ho
 
 A: GitHub: Mỗi người 1 tài khoản → collaborate trên repo. Vercel/Render: 1 tài khoản đội → share login hoặc invite members. API keys: Share qua file `.env` (KHÔNG commit lên GitHub).
 
-**Q: Template dùng OpenAI, nhưng tôi muốn dùng Mistral/Gemini — được không?**
+**Q: Template dùng OpenAI, nhưng tôi muốn dùng Mistral — được không?**
 
 A: ĐƯỢC! Template dùng LangChain — hỗ trợ nhiều provider. Chỉ cần thay đổi `get_llm()` trong `src/services/llm.py`. Ví dụ: `ChatMistralAI` thay vì `ChatOpenAI`. Xem hướng dẫn trong `docs/guide/chapter-04.md` của template.
 
@@ -348,4 +336,4 @@ A: KHÔNG. ChatGPT Plus / Claude Pro là subscription cho chat interface, KHÔNG
 
 ---
 
-> 🔑 **ĐIỂM CHÍNH:** Đăng ký tài khoản trong Tuần 1, ưu tiên các dịch vụ KHUYÊN DÙNG (Mistral, Gemini, Render, Vercel, Supabase, GitHub, Langfuse). Chúc các đội xây dựng thành công ứng dụng AI! — *VinUni AI20K — Tìm Kiếm Nhân Tài Thực Chiến A.I*
+> 🔑 **ĐIỂM CHÍNH:** Đăng ký tài khoản trong Tuần 1, ưu tiên các dịch vụ KHUYÊN DÙNG (Mistral, Render, Vercel, Supabase, GitHub, Langfuse). Chúc các đội xây dựng thành công ứng dụng AI! — *VinUni AI20K — Tìm Kiếm Nhân Tài Thực Chiến A.I*

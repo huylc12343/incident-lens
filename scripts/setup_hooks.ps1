@@ -8,20 +8,18 @@ $HookFile = '.git/hooks/pre-push'
 # Git on Windows runs hooks via Git Bash, so the hook body must be bash.
 $HookBody = @'
 #!/usr/bin/env bash
-# Pre-push: sweep recent Antigravity / Gemini prompts, then submit AI logs.
+# Pre-push: sweep recent Antigravity / Gemini and Codex prompts, then submit AI logs.
 bash scripts/_pyrun.sh scripts/log_antigravity.py --auto || true
+bash scripts/_pyrun.sh scripts/log_codex.py --auto || true
 bash scripts/_pyrun.sh scripts/submit_log.py || true
 exit 0
 '@
 
-# Git executes hooks through a POSIX shell. Write LF endings and UTF-8 without
-# BOM; Windows PowerShell's Set-Content -Encoding UTF8 adds a BOM that breaks
-# the #! interpreter line and causes "cannot spawn ... No such file".
-$HookBody = $HookBody -replace "`r`n", "`n"
+$UnixHookBody = $HookBody.Replace("`r`n", "`n")
 [System.IO.File]::WriteAllText(
-    (Join-Path (Get-Location) $HookFile),
-    $HookBody,
-    [System.Text.UTF8Encoding]::new($false)
+  (Join-Path (Get-Location) $HookFile),
+  $UnixHookBody,
+  (New-Object System.Text.UTF8Encoding($false))
 )
 Write-Host "[ai-log] Git pre-push hook installed."
 

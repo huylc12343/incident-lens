@@ -36,16 +36,19 @@ graph TB
 ## Components
 
 ### 1. Frontend (React/Next.js)
+
 - **Purpose:** [mô tả]
 - **Key Features:** [danh sách]
 - **State Management:** [approach]
 
 ### 2. Backend (FastAPI)
+
 - **Purpose:** [mô tả]
 - **API Design:** RESTful
 - **Authentication:** [JWT/None]
 
 ### 3. AI Agent (LangGraph)
+
 - **Agent Type:** [ReAct / Plan-and-Execute / Custom]
 - **State:** [mô tả state schema]
 - **Nodes:** [danh sách nodes]
@@ -63,11 +66,13 @@ graph LR
 ```
 
 ### 4. Database
+
 - **Type:** [PostgreSQL / SQLite]
 - **Tables:** [danh sách]
 - **Migrations:** Alembic
 
 ### 5. Vector Store
+
 - **Type:** [ChromaDB / FAISS / Pinecone]
 - **Embeddings:** [model]
 - **Purpose:** [RAG / similarity search]
@@ -102,9 +107,9 @@ graph LR
 
 ## Design Decisions
 
-| Decision | Choice | Reason |
-|----------|--------|--------|
-| Framework | FastAPI | Async, auto-docs, type-safe |
-| Agent | LangGraph | Flexible state management |
-| Database | [choice] | [reason] |
-| Frontend | Next.js | [reason] |
+| Decision  | Choice    | Reason                      |
+| --------- | --------- | --------------------------- |
+| Framework | FastAPI   | Async, auto-docs, type-safe |
+| Agent     | LangGraph | Flexible state management   |
+| Database  | [choice]  | [reason]                    |
+| Frontend  | Next.js   | [reason]                    |

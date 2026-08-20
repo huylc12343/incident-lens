@@ -30,7 +30,6 @@ Thumbs.db
 
 # Data (never commit large data)
 data/
-frontend/mock-data/**/*.mp4
 *.db
 *.sqlite3
 
@@ -49,6 +48,7 @@ docker-compose.override.yml
 # Node (frontend)
 node_modules/
 .next/
+.next-local/
 out/
 .nuxt/
 
@@ -56,6 +56,13 @@ out/
 *.pyc
 *.pyo
 
-# AI logs — tracked structure, ignored content
-.ai-log/*.jsonl
-.ai-log/archive/
+# Local scripts and AI tooling/logs
+scripts/
+.ai-log/
+.codex/
+.cursor/
+.claude/
+.windsurf/
+.aider/
+.continue/
+.amazonq/

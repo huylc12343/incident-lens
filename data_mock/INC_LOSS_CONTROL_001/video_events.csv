@@ -1,0 +1,10 @@
+timestamp,frame,event_type,target,severity,value
+2.75,71898,collision,vehicle.audi.tt,critical,5663.53
+20.0,72243,lead_vehicle_loss_of_control,vehicle.audi.tt,high,-1.0
+20.0,72243,closing_distance,vehicle.audi.tt,high,4.47
+20.6,72255,lead_vehicle_swerve,vehicle.audi.tt,high,1.0
+21.35,72270,lead_vehicle_rotation,vehicle.audi.tt,high,
+23.5,72313,ego_emergency_brake,ego,high,1.0
+23.6,72315,rapid_deceleration,ego,high,5.12
+25.25,72348,vehicle_near_stop,ego,medium,1.92
+25.3,72349,vehicle_stopped,ego,medium,0.0

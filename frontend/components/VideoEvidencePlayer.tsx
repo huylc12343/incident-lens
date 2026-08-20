@@ -1,70 +1,17 @@
 "use client";
-import { RefObject, useState } from "react";
-const markers = [
-  { at: "36%", label: "OBS-01", time: "00:03:42.800" },
-  { at: "45%", label: "OBS-02", time: "00:03:44.100" },
-  { at: "55%", label: "DISENGAGEMENT", time: "00:03:45.200" },
-];
-type Props = {
-  videoUrl: string;
-  videoName: string;
-  videoRef: RefObject<HTMLVideoElement | null>;
-};
-export function VideoEvidencePlayer({ videoUrl, videoName, videoRef }: Props) {
-  const [selected, setSelected] = useState("DISENGAGEMENT");
+
+import { useState, type RefObject } from "react";
+
+export function VideoEvidencePlayer({ videoUrl, videoName, videoRef }: { videoUrl: string; videoName: string; videoRef: RefObject<HTMLVideoElement | null> }) {
+  const [playbackError, setPlaybackError] = useState(false);
   return (
-    <section className="video-panel">
-      <div className="panel-heading inline-heading">
-        <div>
-          <p className="eyebrow">Video evidence</p>
-          <h2>Event window playback</h2>
-        </div>
-        <span className="video-source">{videoName}</span>
+    <section className="workspace-video-panel original-video-card" aria-labelledby="original-video-title">
+      <header className="evidence-player-header"><div><span className="camera-live-dot" aria-hidden="true" /><div><p className="eyebrow">Primary source</p><h2 id="original-video-title">Original video recording</h2></div></div><span className="video-file-chip">{videoName}</span></header>
+      <div className="forensic-video-stage">
+        {videoUrl && !playbackError ? <video ref={videoRef} key={videoUrl} src={videoUrl} controls playsInline preload="metadata" onLoadedMetadata={() => setPlaybackError(false)} onError={() => setPlaybackError(true)} aria-label={`Original incident recording ${videoName}`} /> : <div className="video-empty-state"><span aria-hidden="true">{playbackError ? "!" : "▶"}</span><strong>{playbackError ? "Video could not be decoded" : "Original video unavailable"}</strong><p>{playbackError ? "The normalized artifact is unavailable or the browser cannot decode this recording." : "The recording will appear when its artifact is available."}</p></div>}
+        <div className="video-stage-label"><span>ORIGINAL</span><small>Normalized evidence source · browser playback</small></div>
       </div>
-      {videoUrl ? (
-        <div className="video-placeholder uploaded-video">
-          <video
-            ref={videoRef}
-            key={videoUrl}
-            src={videoUrl}
-            controls
-            preload="metadata"
-            aria-label={`Playback of ${videoName}`}
-          />
-          <div className="window-label">Full recording</div>
-        </div>
-      ) : (
-        <div
-          className="video-placeholder"
-          aria-label="Driving video placeholder"
-        >
-          <div className="road-lines" />
-          <div className="video-overlay">
-            <span>FRONT CAMERA</span>
-          </div>
-        </div>
-      )}
-      <div className="scrubber">
-        <div className="timeline-line">
-          {markers.map((marker) => (
-            <button
-              type="button"
-              key={marker.label}
-              className={`timeline-marker ${marker.label === "DISENGAGEMENT" ? "recorded" : ""} ${selected === marker.label ? "chosen" : ""}`}
-              style={{ left: marker.at }}
-              onClick={() => setSelected(marker.label)}
-              aria-label={`${marker.label} at ${marker.time}`}
-            >
-              <span>{marker.label === "DISENGAGEMENT" ? "◆" : "●"}</span>
-            </button>
-          ))}
-        </div>
-        <div className="timeline-ticks">
-          <span>Window start</span>
-          <b>{markers.find((marker) => marker.label === selected)?.time}</b>
-          <span>Window end</span>
-        </div>
-      </div>
+      <footer className="evidence-player-footer"><span><i className={`source-health-dot ${playbackError ? "failed" : ""}`} /> {playbackError ? "Playback error" : "Source connected"}</span><span>Timeline synchronized</span><span>Use event markers below to seek</span></footer>
     </section>
   );
 }

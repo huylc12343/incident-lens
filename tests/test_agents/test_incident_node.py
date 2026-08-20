@@ -616,7 +616,7 @@ async def test_analyze_log_node_exposes_verification_artifacts(tmp_path: Path) -
     log_uri.write_text("timestamp_s,speed_kmh\n0,30\n1,20\n2,10\n", encoding="utf-8")
     analysis = LogAnalysisResult(
         log_artifact_uri=str(tmp_path / "log_full_video.csv"),
-        summary=LogEvidenceSummary(metrics={"speed_start": 30}),
+        summary=LogEvidenceSummary(metrics={"speed_start": 30}, warnings=["TAKEOVER"]),
         row_count=3,
         signal_names=["timestamp_s", "speed_kmh"],
     )
@@ -631,6 +631,7 @@ async def test_analyze_log_node_exposes_verification_artifacts(tmp_path: Path) -
             "log_uri": str(log_uri),
             "video_memory": memory,
             "artifact_uris": {"incident_clip": "clip.mp4"},
+            "warnings": ["existing warning"],
         },
         log_analysis=log_analysis,
         charts=charts,
@@ -643,7 +644,62 @@ async def test_analyze_log_node_exposes_verification_artifacts(tmp_path: Path) -
     assert result["artifact_uris"]["incident_clip"] == "clip.mp4"
     assert result["artifact_uris"]["log_full_video"] == analysis.log_artifact_uri
     assert Path(result["artifact_uris"]["verification_log"]).is_file()
+    assert result["warnings"] == ["existing warning", "TAKEOVER"]
     assert charts.create_charts.call_args.args[0] == str(log_uri)
+
+
+@pytest.mark.asyncio
+async def test_analyze_log_uses_full_telemetry_for_evidence_and_charts(tmp_path: Path) -> None:
+    memory = VideoMemory(
+        global_scene="Road scene",
+        incident_window=IncidentWindow(t_start=10.5, t0=13.7, t_end=15.5),
+        analysis_mode=AnalysisMode.SINGLE_REQUEST,
+    )
+    log_uri = tmp_path / "vehicle.csv"
+    log_uri.write_text(
+        "timestamp_s,speed_kmh,acceleration_mps2\n"
+        "0.0,30,0\n"
+        "0.05,30,0\n"
+        "0.1,30,0\n"
+        "0.15,30,0\n"
+        "0.2,30,0\n"
+        "0.25,30,0\n"
+        "0.35,30,-29.555\n"
+        "9.5,30,0\n"
+        "10.0,30,0\n"
+        "10.5,30,0\n"
+        "11.0,30,0\n"
+        "12.0,30,0\n"
+        "13.0,30,0\n"
+        "13.8,30,-6\n"
+        "14.0,30,0\n"
+        "15.5,30,0\n"
+        "16.5,30,0\n",
+        encoding="utf-8",
+    )
+    charts = SimpleNamespace(create_charts=Mock(return_value=[]))
+
+    result = await analyze_log_node(
+        {
+            "incident_id": "INC-LOG-SCOPE",
+            "log_uri": str(log_uri),
+            "video_memory": memory,
+            "warnings": ["existing warning"],
+        },
+        log_analysis=LogAnalysisService(),
+        charts=charts,
+        artifact_dir=str(tmp_path),
+    )
+
+    with Path(result["artifact_uris"]["log_full_video"]).open(encoding="utf-8") as file:
+        full_timestamps = [float(row["timestamp_s"]) for row in csv.DictReader(file)]
+
+    assert 0.35 in full_timestamps
+    assert result["log_evidence_summary"].metrics["max_deceleration_time"] == 0.35
+    assert "Log toàn video" in result["log_evidence_summary"].summary
+    assert result["warnings"] == ["existing warning", *result["log_evidence_summary"].warnings]
+    assert any(event.timestamp_s == 0.35 for event in charts.create_charts.call_args.kwargs["events"])
+    assert any(event.timestamp_s == 0.35 for event in result["log_events"])
 
 
 def _claim_memory(mode: AnalysisMode) -> VideoMemory:
@@ -726,7 +782,7 @@ async def test_align_and_verify_claims_builds_per_claim_log_summary(tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_align_and_verify_clips_claim_log_to_incident_window(tmp_path: Path) -> None:
+async def test_align_and_verify_clips_claim_log_to_video_duration(tmp_path: Path) -> None:
     memory = VideoMemory(
         global_scene="Road scene",
         incident_window=IncidentWindow(t_start=1.0, t0=1.5, t_end=2.0),
@@ -760,6 +816,7 @@ async def test_align_and_verify_clips_claim_log_to_incident_window(tmp_path: Pat
         {
             "incident_id": "INC-WINDOW",
             "video_memory": memory,
+            "video_duration_s": 2,
             "log_uri": str(log),
             "log_evidence_summary": LogEvidenceSummary(),
         },
@@ -771,11 +828,11 @@ async def test_align_and_verify_clips_claim_log_to_incident_window(tmp_path: Pat
     request = verifier.verify.await_args.args[0]
     evidence = request.claim_log_summaries[0].evidence
     assert [item.timestamp_s for item in evidence] == [1.8, 2.0]
-    assert all(item.timestamp_s <= memory.incident_window.t_end for item in evidence)
+    assert all(item.timestamp_s <= 2.0 for item in evidence)
 
 
 @pytest.mark.asyncio
-async def test_align_and_verify_uses_video_bounds_for_claim_outside_incident_window(tmp_path: Path) -> None:
+async def test_align_and_verify_uses_full_telemetry_for_claim_outside_incident_window(tmp_path: Path) -> None:
     memory = VideoMemory(
         global_scene="Road scene",
         incident_window=IncidentWindow(t_start=25, t0=27, t_end=29),
@@ -825,7 +882,7 @@ async def test_align_and_verify_uses_video_bounds_for_claim_outside_incident_win
 
 
 @pytest.mark.asyncio
-async def test_verification_uses_only_the_saved_union_log_artifact(tmp_path: Path) -> None:
+async def test_verification_uses_only_the_saved_full_video_log_artifact(tmp_path: Path) -> None:
     memory = VideoMemory(
         global_scene="Road scene",
         incident_window=IncidentWindow(t_start=6, t0=9, t_end=12),
@@ -1434,6 +1491,7 @@ async def test_draft_report_uses_code_log_summary_and_verification_alignment() -
     log_summary = LogEvidenceSummary(
         summary="Tốc độ giảm và brake tăng mạnh tại 2 giây.",
         evidence_ids=["log-evidence:2:brake_rise"],
+        warnings=["TAKEOVER"],
     )
     narrative = ReportModelOutput(
         type_of_accident="rear_end_collision",
@@ -1452,6 +1510,7 @@ async def test_draft_report_uses_code_log_summary_and_verification_alignment() -
             "video_memory": memory,
             "log_evidence_summary": log_summary,
             "verification": verification,
+            "warnings": log_summary.warnings,
         },
         report=report,
     )
@@ -1462,6 +1521,7 @@ async def test_draft_report_uses_code_log_summary_and_verification_alignment() -
     assert draft.log_findings.narrative == log_summary.summary
     assert "claim-1 được log hỗ trợ" in draft.alignment.narrative
     assert "log-evidence:2:brake_rise" in draft.alignment.narrative
+    assert draft.evidence_and_warnings.warnings == ["TAKEOVER"]
 
 
 @pytest.mark.asyncio
@@ -1908,6 +1968,7 @@ async def test_auto_reanalysis_uses_short_native_clip_with_global_source_window(
     assert request.normalized_video_uri == short_clip.uri
     assert request.input_video_start_s == 24.5
     assert request.input_video_end_s == 28.5
+    assert "automatic reanalysis, không phải phân tích video ban đầu" in request.prompt.text
     assert request.prompt.context == {
         "target_claims": [{"claim_id": "claim-1", "text": "Vehicle begins turning.", "timestamp_s": 26.5}],
         "verification_reasons": {"claim-1": "Telemetry does not support the original turn claim."},

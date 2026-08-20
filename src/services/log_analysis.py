@@ -5,21 +5,21 @@ from __future__ import annotations
 import csv
 import math
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from src.models.incidents import (
     Claim,
+    ClaimDerivedDynamics,
+    ClaimDerivedDynamicsMetric,
     ClaimLogEvidence,
     ClaimLogSummary,
     ClaimRawTelemetry,
-    ClaimTelemetryChangePoint,
     ClaimTelemetryDerived,
     ClaimTelemetrySnapshot,
     ClaimVerificationContext,
-    IncidentWindow,
     LogAnalysisResult,
     LogEvent,
     LogEvidenceSummary,
@@ -67,7 +67,9 @@ ADAPTIVE_EMA_ALPHA = 0.2
 ADAPTIVE_ENTER_Z_SCORE = 3.0
 ADAPTIVE_EXIT_Z_SCORE = 1.5
 ADAPTIVE_MERGE_GAP_SAMPLES = 1
-NUMERIC_EPSILON = 1e-9
+ADAPTIVE_MIN_SCALE = 0.1
+ADAPTIVE_ACCELERATION_MIN_SCALE = 1.0
+ROBUST_SCALE_NORMALIZER = 1.4826
 MAX_LOG_ATTENTION_TIMESTAMPS = 8
 PHYSICAL_MIN_BRAKE_RISE = 0.3
 PHYSICAL_MIN_THROTTLE_DELTA = 0.2
@@ -77,7 +79,6 @@ PHYSICAL_STRONG_DECELERATION_MPS2 = -5.0
 PHYSICAL_STRONG_ACCELERATION_MPS2 = 4.0
 PHYSICAL_EXTREME_ACCELERATION_MPS2 = 8.0
 MAX_VERIFICATION_EVIDENCE_ROWS = 5
-MAX_VERIFICATION_CHANGE_POINTS = 2
 
 VERIFICATION_SIGNAL_ALIASES: dict[TelemetrySignalName, tuple[str, ...]] = {
     "speed_kmh": SPEED_ALIASES,
@@ -85,14 +86,6 @@ VERIFICATION_SIGNAL_ALIASES: dict[TelemetrySignalName, tuple[str, ...]] = {
     "brake": BRAKE_ALIASES,
     "steer": STEERING_ALIASES,
 }
-VERIFICATION_CHANGE_THRESHOLDS: dict[TelemetrySignalName, float] = {
-    "speed_kmh": STRONG_SPEED_DROP_KMH,
-    "throttle": 0.2,
-    "brake": 0.5,
-    "steer": 0.3,
-}
-
-
 class LogAnalysisError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
@@ -144,13 +137,7 @@ class LogAnalysisService:
         video_duration_s: float | None = None,
     ) -> LogAnalysisResult:
         fieldnames, records = load_log_records(log_uri)
-        if video_duration_s is not None and video_duration_s <= 0:
-            raise ValueError("video_duration_s must be positive")
-        sliced = [
-            record
-            for record in records
-            if video_duration_s is None or record.timestamp_s <= video_duration_s
-        ]
+        sliced = _select_records(records, video_duration_s=video_duration_s)
         if not sliced:
             raise LogAnalysisError("LOG_WINDOW_EMPTY", "log contains no rows within the video duration")
         output = Path(output_uri).resolve()
@@ -191,19 +178,19 @@ class LogAnalysisService:
             "max_steering_change": max(steering_changes, default=None),
             "steering_change_time": _first_event_time(events, "steering_change"),
             "strong_steering_change_time": _first_event_time(events, "strong_steering_change"),
-            "strong_deceleration_time": _acceleration_time_if(
+            "max_deceleration_time": _acceleration_time_if(
                 sliced,
                 acceleration,
                 min_acceleration_index,
                 lambda value: value <= PHYSICAL_STRONG_DECELERATION_MPS2,
             ),
-            "strong_acceleration_time": _acceleration_time_if(
+            "max_acceleration_time": _acceleration_time_if(
                 sliced,
                 acceleration,
                 max_acceleration_index,
                 lambda value: value >= PHYSICAL_STRONG_ACCELERATION_MPS2,
             ),
-            "extreme_acceleration_time": _acceleration_time_if(
+            "max_absolute_acceleration_time": _acceleration_time_if(
                 sliced,
                 acceleration,
                 extreme_acceleration_index,
@@ -253,7 +240,11 @@ class LogAnalysisService:
             change = _representative_control_change(change, steering)
             if _change_magnitude(change) >= PHYSICAL_MIN_STEERING_DELTA:
                 events.append(_adaptive_event("steering_change", records, "steering", change))
-        for change in _adaptive_changes(acceleration, detect_delta=False):
+        for change in _adaptive_changes(
+            acceleration,
+            detect_delta=False,
+            minimum_scale=ADAPTIVE_ACCELERATION_MIN_SCALE,
+        ):
             change = _representative_acceleration_change(change, acceleration)
             event_type = _acceleration_event_type(change.value)
             if event_type is not None:
@@ -321,27 +312,29 @@ def load_log_records(log_uri: str) -> tuple[list[str], list[LogRecord]]:
     return fieldnames, records
 
 
+def _select_records(
+    records: list[LogRecord],
+    *,
+    video_duration_s: float | None,
+) -> list[LogRecord]:
+    if video_duration_s is not None and video_duration_s <= 0:
+        raise ValueError("video_duration_s must be positive")
+    return [
+        record
+        for record in records
+        if video_duration_s is None or record.timestamp_s <= video_duration_s
+    ]
+
+
 def build_verification_log_artifact(
     log_uri: str,
     output_uri: str,
     *,
     video_duration_s: float | None = None,
 ) -> str:
-    """Persist all telemetry verification can sample within the video bounds.
-
-    The claim sample radius is applied after this artifact is loaded.  Cutting
-    this file to an incident or claim span would silently cap that radius, so
-    incident-scoped analysis remains in the separate ``log_slice.csv`` file.
-    """
-    if video_duration_s is not None and video_duration_s <= 0:
-        raise ValueError("video_duration_s must be positive")
-
+    """Persist all telemetry verification can sample within the video bounds."""
     fieldnames, records = load_log_records(log_uri)
-    selected = [
-        record
-        for record in records
-        if video_duration_s is None or record.timestamp_s <= video_duration_s
-    ]
+    selected = _select_records(records, video_duration_s=video_duration_s)
     if not selected:
         raise LogAnalysisError(
             "LOG_VERIFICATION_WINDOW_EMPTY",
@@ -407,7 +400,11 @@ def build_log_attention_hint(log_uri: str, *, video_duration_s: float | None = N
             change.peak_z_score,
         )
 
-    for change in _adaptive_changes(acceleration, detect_delta=False):
+    for change in _adaptive_changes(
+        acceleration,
+        detect_delta=False,
+        minimum_scale=ADAPTIVE_ACCELERATION_MIN_SCALE,
+    ):
         change = _representative_acceleration_change(change, acceleration)
         if _acceleration_event_type(change.value) is None:
             continue
@@ -441,8 +438,11 @@ def _adaptive_changes(
     values: list[float | None],
     *,
     detect_delta: bool,
+    minimum_scale: float = ADAPTIVE_MIN_SCALE,
 ) -> list[AdaptiveChange]:
     """Detect sustained changes relative to each signal's rolling EMA baseline."""
+    if minimum_scale <= 0:
+        raise ValueError("minimum_scale must be positive")
     observations: list[tuple[int, float, float, float]] = []
     for index, value in enumerate(values):
         if value is None:
@@ -466,9 +466,9 @@ def _adaptive_changes(
     for position, (index, observation, previous_value, value) in enumerate(observations):
         if history:
             rolling_mean = sum(history) / len(history)
-            rolling_variance = sum((item - rolling_mean) ** 2 for item in history) / len(history)
             baseline = (ema_mean + rolling_mean) / 2
-            scale = max(math.sqrt(ema_variance), math.sqrt(rolling_variance), NUMERIC_EPSILON)
+            robust_scale = max(math.sqrt(ema_variance), _mad_scale(history))
+            scale = max(robust_scale, minimum_scale)
             signed_z_score = (observation - baseline) / scale
         else:
             signed_z_score = 0.0
@@ -533,6 +533,22 @@ def _adaptive_changes(
     if active is not None:
         completed.append(active)
     return _merge_adaptive_changes(completed)
+
+
+def _mad_scale(values: deque[float]) -> float:
+    """Return a MAD-based scale so flat baselines cannot collapse the denominator."""
+    median = _median(values)
+    return ROBUST_SCALE_NORMALIZER * _median(abs(value - median) for value in values)
+
+
+def _median(values: Iterable[float]) -> float:
+    ordered = sorted(values)
+    if not ordered:
+        raise ValueError("median requires at least one value")
+    midpoint = len(ordered) // 2
+    if len(ordered) % 2:
+        return float(ordered[midpoint])
+    return (float(ordered[midpoint - 1]) + float(ordered[midpoint])) / 2
 
 
 def _merge_adaptive_changes(changes: list[AdaptiveChange]) -> list[AdaptiveChange]:
@@ -626,21 +642,18 @@ def build_claim_log_summaries(
     *,
     timestamp_tolerance_s: float,
     sample_radius: int = 3,
-    incident_window: IncidentWindow | None = None,
 ) -> list[ClaimLogSummary]:
     """Compute one deterministic, narrow log summary around each claim timestamp."""
     records = _claim_records(
         log_uri,
         timestamp_tolerance_s=timestamp_tolerance_s,
         sample_radius=sample_radius,
-        incident_window=incident_window,
     )
     return _build_claim_log_summaries_from_records(
         records,
         claims,
         timestamp_tolerance_s=timestamp_tolerance_s,
         sample_radius=sample_radius,
-        incident_window=incident_window,
     )
 
 
@@ -650,7 +663,6 @@ def build_claim_verification_inputs(
     *,
     timestamp_tolerance_s: float,
     sample_radius: int = 3,
-    incident_window: IncidentWindow | None = None,
     video_duration_s: float | None = None,
 ) -> tuple[list[ClaimLogSummary], list[ClaimVerificationContext]]:
     """Build rich summaries plus compact, deterministic telemetry for the verification LLM."""
@@ -658,7 +670,6 @@ def build_claim_verification_inputs(
         log_uri,
         timestamp_tolerance_s=timestamp_tolerance_s,
         sample_radius=sample_radius,
-        incident_window=None,
         video_duration_s=video_duration_s,
     )
     summaries = _build_claim_log_summaries_from_records(
@@ -666,7 +677,6 @@ def build_claim_verification_inputs(
         claims,
         timestamp_tolerance_s=timestamp_tolerance_s,
         sample_radius=sample_radius,
-        incident_window=None,
         sample_from_full_records=True,
     )
     contexts = [
@@ -681,23 +691,15 @@ def _claim_records(
     *,
     timestamp_tolerance_s: float,
     sample_radius: int,
-    incident_window: IncidentWindow | None,
     video_duration_s: float | None = None,
 ) -> list[LogRecord]:
     if timestamp_tolerance_s < 0 or sample_radius < 0:
         raise ValueError("timestamp_tolerance_s and sample_radius must be non-negative")
-    if video_duration_s is not None and video_duration_s <= 0:
-        raise ValueError("video_duration_s must be positive")
     _, records = load_log_records(log_uri)
-    if video_duration_s is not None:
-        return [record for record in records if record.timestamp_s <= video_duration_s]
-    if incident_window is None:
-        return records
-    return [
-        record
-        for record in records
-        if incident_window.t_start <= record.timestamp_s <= incident_window.t_end
-    ]
+    return _select_records(
+        records,
+        video_duration_s=video_duration_s,
+    )
 
 
 def _build_claim_log_summaries_from_records(
@@ -706,7 +708,6 @@ def _build_claim_log_summaries_from_records(
     *,
     timestamp_tolerance_s: float,
     sample_radius: int,
-    incident_window: IncidentWindow | None,
     sample_from_full_records: bool = False,
 ) -> list[ClaimLogSummary]:
     return [
@@ -715,7 +716,6 @@ def _build_claim_log_summaries_from_records(
             claim,
             timestamp_tolerance_s=timestamp_tolerance_s,
             sample_radius=sample_radius,
-            incident_window=incident_window,
             sample_from_full_records=sample_from_full_records,
         )
         for claim in claims
@@ -728,7 +728,6 @@ def _claim_log_summary(
     *,
     timestamp_tolerance_s: float,
     sample_radius: int,
-    incident_window: IncidentWindow | None,
     sample_from_full_records: bool = False,
 ) -> ClaimLogSummary:
     if claim.timestamp_s is None:
@@ -743,15 +742,11 @@ def _claim_log_summary(
             ),
         )
     if not records:
-        return _claim_log_summary_without_samples(claim, "Không có dòng log nào trong incident_window.")
+        return _claim_log_summary_without_samples(claim, "Không có dòng log nào trong telemetry của video.")
     nearest_index = min(range(len(records)), key=lambda index: abs(records[index].timestamp_s - claim.timestamp_s))
     nearest = records[nearest_index]
     distance = abs(nearest.timestamp_s - claim.timestamp_s)
-    claim_in_window = (
-        incident_window is None
-        or incident_window.t_start <= claim.timestamp_s <= incident_window.t_end
-    )
-    within_tolerance = claim_in_window and distance <= timestamp_tolerance_s
+    within_tolerance = distance <= timestamp_tolerance_s
     if within_tolerance:
         if sample_from_full_records:
             start = max(0, nearest_index - sample_radius)
@@ -775,7 +770,7 @@ def _claim_log_summary(
     if not samples:
         return _claim_log_summary_without_samples(
             claim,
-            "Mẫu gần nhất nằm ngoài tolerance hoặc incident_window; không dùng log để xác nhận hoặc bác bỏ claim.",
+            "Mẫu gần nhất nằm ngoài tolerance; không dùng log để xác nhận hoặc bác bỏ claim.",
             nearest_timestamp_s=nearest.timestamp_s,
             timestamp_distance_s=distance,
         )
@@ -882,13 +877,12 @@ def _claim_verification_context(
     allowed_evidence_ids = list(
         dict.fromkeys(_row_evidence_id(record.timestamp_s) for record in snapshot_records)
     )
-    change_points = _important_change_points(samples, allowed_evidence_ids)
     return ClaimVerificationContext(
         claim_id=claim.claim_id,
         available_signals=available_signals,
         raw_telemetry=raw_telemetry,
         derived=_telemetry_derived(raw_telemetry),
-        change_points=change_points,
+        derived_dynamics=_derived_dynamics(samples),
         allowed_evidence_ids=allowed_evidence_ids,
     )
 
@@ -942,58 +936,95 @@ def _telemetry_derived(raw: ClaimRawTelemetry) -> ClaimTelemetryDerived:
     )
 
 
-def _important_change_points(
-    records: list[LogRecord],
-    allowed_evidence_ids: list[str],
-) -> list[ClaimTelemetryChangePoint]:
-    candidates: list[tuple[float, float, TelemetrySignalName, float, float, list[str]]] = []
-    for signal, aliases in VERIFICATION_SIGNAL_ALIASES.items():
-        threshold = VERIFICATION_CHANGE_THRESHOLDS[signal]
-        values = numeric_series(records, aliases)
-        for index in range(1, len(records)):
-            previous, current = values[index - 1], values[index]
-            if previous is None or current is None:
-                continue
-            delta = current - previous
-            if abs(delta) <= threshold:
-                continue
-            source_ids = [
-                _row_evidence_id(records[index - 1].timestamp_s),
-                _row_evidence_id(records[index].timestamp_s),
-            ]
-            candidates.append(
-                (
-                    abs(delta) / threshold,
-                    records[index].timestamp_s,
-                    signal,
-                    previous,
-                    current,
-                    source_ids,
-                )
-            )
+def _derived_dynamics(records: list[LogRecord]) -> ClaimDerivedDynamics:
+    max_deceleration = _positive_max_deceleration(records)
+    steering_activity = _steering_activity(records)
+    max_brake = max(
+        (value for value in numeric_series(records, BRAKE_ALIASES) if value is not None),
+        default=None,
+    )
+    decel_brake_mismatch = (
+        max_deceleration * (1 - max_brake)
+        if max_deceleration is not None and max_brake is not None
+        else None
+    )
+    return ClaimDerivedDynamics(
+        max_deceleration_mps2=_dynamics_metric(
+            max_deceleration,
+            mild_threshold=3,
+            strong_threshold=7,
+            texts=(
+                "Không đủ dữ liệu tốc độ để tính giảm tốc.",
+                "Không ghi nhận giảm tốc đáng kể trong khoảng claim.",
+                "Xe có giảm tốc đáng chú ý trong khoảng claim.",
+                "Xe có giảm tốc rất mạnh trong khoảng claim.",
+            ),
+        ),
+        steering_activity=_dynamics_metric(
+            steering_activity,
+            mild_threshold=0.03,
+            strong_threshold=0.10,
+            texts=(
+                "Không đủ dữ liệu steering để đánh giá biến động.",
+                "Không ghi nhận biến động steering đáng kể.",
+                "Steering có biến động đáng chú ý trong khoảng claim.",
+                "Steering biến động rất mạnh trong khoảng claim.",
+            ),
+        ),
+        decel_brake_mismatch=_dynamics_metric(
+            decel_brake_mismatch,
+            mild_threshold=3,
+            strong_threshold=7,
+            texts=(
+                "Không đủ dữ liệu tốc độ hoặc brake để đánh giá mức không tương xứng.",
+                "Giảm tốc và tín hiệu brake không có mismatch đáng kể.",
+                "Giảm tốc và tín hiệu brake có mismatch đáng chú ý.",
+                "Xe giảm tốc rất mạnh nhưng mức brake ghi nhận không tương xứng; "
+                "diễn biến này cần được chú ý khi đối chiếu với video.",
+            ),
+        ),
+    )
 
-    selected = []
-    for _, timestamp_s, signal, previous, current, source_ids in sorted(
-        candidates,
-        key=lambda item: (-item[0], item[1], item[2]),
-    ):
-        expanded_evidence = list(dict.fromkeys([*allowed_evidence_ids, *source_ids]))
-        if len(expanded_evidence) > MAX_VERIFICATION_EVIDENCE_ROWS:
-            continue
-        allowed_evidence_ids[:] = expanded_evidence
-        selected.append(
-            ClaimTelemetryChangePoint(
-                signal=signal,
-                timestamp_s=timestamp_s,
-                from_value=previous,
-                to_value=current,
-                delta=current - previous,
-                evidence_ids=source_ids,
-            )
+
+def _positive_max_deceleration(records: list[LogRecord]) -> float | None:
+    speed_values = numeric_series(records, SPEED_ALIASES)
+    values = [
+        max(
+            0.0,
+            -((current - previous) / 3.6) / (records[index].timestamp_s - records[index - 1].timestamp_s),
         )
-        if len(selected) == MAX_VERIFICATION_CHANGE_POINTS:
-            break
-    return selected
+        for index, (previous, current) in enumerate(zip(speed_values, speed_values[1:]), start=1)
+        if previous is not None
+        and current is not None
+        and records[index].timestamp_s > records[index - 1].timestamp_s
+    ]
+    return max(values, default=None)
+
+
+def _steering_activity(records: list[LogRecord]) -> float | None:
+    values = numeric_series(records, STEERING_ALIASES)
+    changes = [
+        abs(current - previous)
+        for previous, current in zip(values, values[1:])
+        if previous is not None and current is not None
+    ]
+    return sum(changes) / len(changes) if changes else None
+
+
+def _dynamics_metric(
+    value: float | None,
+    *,
+    mild_threshold: float,
+    strong_threshold: float,
+    texts: tuple[str, str, str, str],
+) -> ClaimDerivedDynamicsMetric:
+    if value is None:
+        return ClaimDerivedDynamicsMetric(text=texts[0])
+    if value < mild_threshold:
+        return ClaimDerivedDynamicsMetric(value=value, level="normal", text=texts[1])
+    if value < strong_threshold:
+        return ClaimDerivedDynamicsMetric(value=value, level="mild_abnormal", text=texts[2])
+    return ClaimDerivedDynamicsMetric(value=value, level="strong_abnormal", text=texts[3])
 
 
 def _claim_metrics(
@@ -1574,17 +1605,18 @@ def _build_summary(
             f"Dải gia tốc từ {float(metrics['acceleration_min']):.3f} đến "
             f"{float(metrics['acceleration_max']):.3f} m/s²."
         )
-    if metrics["extreme_acceleration_time"] is not None:
+    if metrics["max_absolute_acceleration_time"] is not None:
         statements.append(
-            f"Phát hiện gia tốc cực đoan tại {float(metrics['extreme_acceleration_time']):g} giây."
+            "Đỉnh trị tuyệt đối gia tốc tại "
+            f"{float(metrics['max_absolute_acceleration_time']):g} giây."
         )
-    elif metrics["strong_deceleration_time"] is not None:
+    elif metrics["max_deceleration_time"] is not None:
         statements.append(
-            f"Phát hiện giảm tốc mạnh tại {float(metrics['strong_deceleration_time']):g} giây."
+            f"Giảm tốc cực đại tại {float(metrics['max_deceleration_time']):g} giây."
         )
-    elif metrics["strong_acceleration_time"] is not None:
+    elif metrics["max_acceleration_time"] is not None:
         statements.append(
-            f"Phát hiện tăng tốc mạnh tại {float(metrics['strong_acceleration_time']):g} giây."
+            f"Tăng tốc cực đại tại {float(metrics['max_acceleration_time']):g} giây."
         )
     if metrics["max_brake"] is not None:
         statements.append(f"Giá trị brake lớn nhất là {metrics['max_brake']:g}.")

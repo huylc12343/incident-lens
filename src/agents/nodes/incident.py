@@ -40,7 +40,8 @@ from src.models.incidents import (
     VideoSequenceManifest,
     VLMInputMode,
 )
-from src.prompts.reanalysis import build_auto_reanalysis_prompt_for_conflicts, build_human_reanalysis_prompt
+from src.prompts.auto_reanalysis import build_auto_reanalysis_prompt_for_conflicts
+from src.prompts.reanalysis import build_human_reanalysis_prompt
 from src.prompts.video_analysis import build_video_analysis_prompt
 from src.services.log_analysis import (
     LogAnalysisError,
@@ -491,16 +492,17 @@ async def analyze_log_node(
         }
 
     artifact_root = Path(artifact_dir).resolve() / _safe_incident_id(incident_id)
+    telemetry_duration_s = _telemetry_duration_s(state, memory)
     try:
         result = log_analysis.analyze(
             log_uri,
             str(artifact_root / "log_full_video.csv"),
-            video_duration_s=_video_duration_s(state, memory),
+            video_duration_s=telemetry_duration_s,
         )
         verification_log_uri = build_verification_log_artifact(
             log_uri,
             str(artifact_root / "verification_log.csv"),
-            video_duration_s=_video_duration_s(state, memory),
+            video_duration_s=telemetry_duration_s,
         )
         chart_uris = charts.create_charts(
             log_uri,
@@ -522,6 +524,7 @@ async def analyze_log_node(
             "log_events": result.events,
             "chart_uris": chart_uris,
             "artifact_uris": artifact_uris,
+            "warnings": list(dict.fromkeys([*state.get("warnings", []), *result.summary.warnings])),
         }
     except Exception as exc:
         return {
@@ -549,6 +552,7 @@ async def align_and_verify_claims_node(
             "error_message": "incident_id, video_memory, log_uri, and log_evidence_summary are required",
         }
     changed_ids = _reanalysis_changed_claim_ids(state)
+    telemetry_duration_s = _telemetry_duration_s(state, memory)
     try:
         artifact_uris = dict(state.get("artifact_uris", {}))
         verification_log_uri = artifact_uris.get("verification_log")
@@ -557,7 +561,7 @@ async def align_and_verify_claims_node(
             verification_input_uri = build_verification_log_artifact(
                 log_uri,
                 verification_log_uri,
-                video_duration_s=_video_duration_s(state, memory),
+                video_duration_s=telemetry_duration_s,
             )
             artifact_uris["verification_log"] = verification_input_uri
         if changed_ids == []:
@@ -578,8 +582,7 @@ async def align_and_verify_claims_node(
                 claims_to_verify,
                 timestamp_tolerance_s=timestamp_tolerance_s,
                 sample_radius=sample_radius,
-                incident_window=memory.incident_window,
-                video_duration_s=_video_duration_s(state, memory),
+                video_duration_s=telemetry_duration_s,
             )
             result = await verification.verify(
                 VerificationRequest(
@@ -1184,6 +1187,16 @@ def _video_duration_s(state: IncidentState, memory: VideoMemory) -> float:
         *(evidence.timestamp_s for claim in memory.claims for evidence in claim.evidence),
     ]
     return max(timestamps)
+
+
+def _telemetry_duration_s(state: IncidentState, memory: VideoMemory) -> float | None:
+    """Return a known video bound without inferring one from the incident window."""
+    duration_s = state.get("video_duration_s")
+    if duration_s is not None:
+        return duration_s
+    if memory.sampling_metadata is not None:
+        return memory.sampling_metadata.source_duration_s
+    return None
 
 
 def _representative_timestamp(memory: VideoMemory) -> float:

@@ -9,7 +9,8 @@ from src.models.incidents import (
     PromptSource,
     VideoMemory,
 )
-from src.prompts.reanalysis import build_auto_reanalysis_prompt, build_human_reanalysis_prompt
+from src.prompts.auto_reanalysis import build_auto_reanalysis_prompt
+from src.prompts.reanalysis import build_human_reanalysis_prompt
 
 
 def test_auto_reanalysis_contains_only_automatic_context() -> None:

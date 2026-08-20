@@ -1,8 +1,10 @@
 """Deterministic prompt builders for incident analysis services."""
 
-from src.prompts.reanalysis import (
+from src.prompts.auto_reanalysis import (
     build_auto_reanalysis_prompt,
     build_auto_reanalysis_prompt_for_conflicts,
+)
+from src.prompts.reanalysis import (
     build_human_reanalysis_prompt,
 )
 from src.prompts.reporting import build_report_prompt

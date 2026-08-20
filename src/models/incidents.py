@@ -313,19 +313,26 @@ class ClaimRawTelemetry(ContractModel):
     window_end: ClaimTelemetrySnapshot
 
 
-class ClaimTelemetryChangePoint(ContractModel):
-    signal: TelemetrySignalName
-    timestamp_s: float = Field(ge=0)
-    from_value: float
-    to_value: float
-    delta: float
-    evidence_ids: list[str] = Field(min_length=1)
-
-
 class ClaimTelemetryDerived(ContractModel):
     movement_state_at_claim: Literal["stopped", "near_stopped", "moving"] | None = None
     steer_direction_at_claim: Literal["left", "straight", "right"] | None = None
     speed_trend: Literal["strong_decrease", "decrease", "stable", "increase"] | None = None
+
+
+class ClaimDerivedDynamicsMetric(ContractModel):
+    value: float | None = None
+    level: Literal["normal", "mild_abnormal", "strong_abnormal"] | None = None
+    text: str = ""
+
+
+class ClaimDerivedDynamics(ContractModel):
+    max_deceleration_mps2: ClaimDerivedDynamicsMetric = Field(
+        default_factory=ClaimDerivedDynamicsMetric
+    )
+    steering_activity: ClaimDerivedDynamicsMetric = Field(default_factory=ClaimDerivedDynamicsMetric)
+    decel_brake_mismatch: ClaimDerivedDynamicsMetric = Field(
+        default_factory=ClaimDerivedDynamicsMetric
+    )
 
 
 class ClaimVerificationContext(ContractModel):
@@ -333,7 +340,7 @@ class ClaimVerificationContext(ContractModel):
     available_signals: list[TelemetrySignalName] = Field(default_factory=list)
     raw_telemetry: ClaimRawTelemetry
     derived: ClaimTelemetryDerived
-    change_points: list[ClaimTelemetryChangePoint] = Field(default_factory=list)
+    derived_dynamics: ClaimDerivedDynamics = Field(default_factory=ClaimDerivedDynamics)
     allowed_evidence_ids: list[str] = Field(default_factory=list, max_length=5)
 
 

@@ -41,7 +41,7 @@ def test_verification_system_prompt_matches_approved_text_exactly() -> None:
     )
 
     assert sha256(prompt.text.encode("utf-8")).hexdigest() == (
-        "342ab57f327e12d05227825ea1219e89126a373da6e76b11784137d3918113cd"
+        "da2a9f12bd9c4b9b6d8313ab77dd51a91b32f4dbc3dcb810c168477129917aa6"
     )
 
 
@@ -106,6 +106,22 @@ def test_verification_prompt_requires_one_result_per_claim() -> None:
     assert '"metrics"' not in prompt.text
     assert "log_evidence_summary" not in prompt.context
     assert "raw_telemetry" in item["log_facts"]
+    assert item["log_facts"]["derived_dynamics"] == {
+        "max_deceleration_mps2": {
+            "value": None,
+            "text": "",
+        },
+        "steering_activity": {
+            "value": None,
+            "text": "",
+        },
+        "decel_brake_mismatch": {
+            "value": None,
+            "text": "",
+        },
+    }
+    assert "change_points" not in item["log_facts"]
+    assert "level" not in str(item["log_facts"]["derived_dynamics"])
 
 
 def test_verification_prompt_is_deterministic() -> None:
@@ -153,9 +169,11 @@ def test_verification_prompt_uses_compact_timestamp_semantics(tmp_path) -> None:
     assert turn_raw["at_claim"]["steer"] == -0.3
     assert turn_raw["at_claim"]["brake"] is None
     assert turn["log_facts"]["derived"]["steer_direction_at_claim"] == "left"
-    steer_change = next(item for item in turn["log_facts"]["change_points"] if item["signal"] == "steer")
-    assert steer_change["from_value"] == 0.3
-    assert steer_change["to_value"] == -0.3
+    turn_dynamics = turn["log_facts"]["derived_dynamics"]
+    assert turn_dynamics["max_deceleration_mps2"]["value"] == pytest.approx(11.223889)
+    assert turn_dynamics["max_deceleration_mps2"]["text"] == "Xe có giảm tốc rất mạnh trong khoảng claim."
+    assert turn_dynamics["steering_activity"]["value"] == pytest.approx(0.2)
+    assert turn_dynamics["decel_brake_mismatch"]["value"] == 0
 
     stop_raw = stop["log_facts"]["raw_telemetry"]
     assert stop_raw["at_claim"]["speed_kmh"] == 20.902

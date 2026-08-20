@@ -181,7 +181,7 @@ def test_analysis_adaptively_detects_and_merges_telemetry_changes(tmp_path: Path
     assert "strong_steering_change" not in event_types
     assert "LOG_EXTREME_ACCELERATION" in "\n".join(result.summary.warnings)
     assert "LOG_ADAPTIVE_STEERING_CHANGE" in "\n".join(result.summary.warnings)
-    assert result.summary.metrics["extreme_acceleration_time"] == 6
+    assert result.summary.metrics["max_absolute_acceleration_time"] == 6
     assert result.summary.metrics["steering_change_time"] == 6
     assert len([event for event in result.events if event.signal == "steering"]) == 1
     assert len([event for event in result.events if event.signal == "acceleration_mps2"]) == 1
@@ -247,9 +247,37 @@ def test_deceleration_metrics_use_the_peak_timestamp_not_the_first_event(tmp_pat
     )
 
     assert result.summary.metrics["max_deceleration"] == pytest.approx(-65.789)
-    assert result.summary.metrics["strong_deceleration_time"] == 10.9
-    assert result.summary.metrics["extreme_acceleration_time"] == 10.9
-    assert "Phát hiện gia tốc cực đoan tại 10.9 giây." in result.summary.summary
+    assert result.summary.metrics["max_deceleration_time"] == 10.9
+    assert result.summary.metrics["max_absolute_acceleration_time"] == 10.9
+    assert "Đỉnh trị tuyệt đối gia tốc tại 10.9 giây." in result.summary.summary
+
+
+def test_adaptive_detector_uses_a_minimum_scale_for_flat_baselines(tmp_path: Path) -> None:
+    source = tmp_path / "flat-baseline.csv"
+    source.write_text(
+        "timestamp_s,speed_kmh,steer,acceleration_mps2\n"
+        "0,30,0,0\n"
+        "1,30,0,0\n"
+        "2,30,0,0\n"
+        "3,30,0,0\n"
+        "4,30,0,0\n"
+        "5,30,0,0\n"
+        "6,30,-0.36,-20\n"
+        "7,30,-0.36,-20\n"
+        "8,30,0,0\n",
+        encoding="utf-8",
+    )
+
+    result = LogAnalysisService().analyze(
+        str(source),
+        str(tmp_path / "slice.csv"),
+        video_duration_s=8,
+    )
+
+    details = "\n".join(event.details for event in result.events)
+    assert "peak z-score 3.60" in details
+    assert "peak z-score 20.00" in details
+    assert "000000" not in details
 
 
 def test_verification_log_artifact_keeps_full_video_log_for_claim_sampling(tmp_path: Path) -> None:

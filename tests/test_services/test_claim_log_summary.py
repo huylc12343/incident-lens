@@ -1,6 +1,6 @@
 import pytest
 
-from src.models.incidents import Claim, IncidentWindow
+from src.models.incidents import Claim
 from src.services.log_analysis import (
     build_claim_log_summaries,
     build_claim_verification_inputs,
@@ -269,7 +269,7 @@ def test_claim_verification_uses_steering_deadband(tmp_path, steer: float, expec
     assert contexts[0].derived.steer_direction_at_claim == expected_direction
 
 
-def test_claim_sample_radius_uses_full_verification_artifact_not_incident_window(tmp_path) -> None:
+def test_claim_sample_radius_uses_full_verification_artifact(tmp_path) -> None:
     source = tmp_path / "vehicle.csv"
     source.write_text(
         "timestamp_s,speed_kmh,steer\n"
@@ -287,7 +287,6 @@ def test_claim_sample_radius_uses_full_verification_artifact_not_incident_window
         [Claim(claim_id="claim-3", text="Xe tiếp tục chạy", timestamp_s=11.0)],
         timestamp_tolerance_s=0.5,
         sample_radius=128,
-        incident_window=IncidentWindow(t_start=10.5, t0=11.0, t_end=11.5),
         video_duration_s=20,
     )
 
@@ -359,7 +358,7 @@ def test_model_visible_rows_exactly_match_allowed_evidence(tmp_path) -> None:
     assert "12.4s" not in summary.summary
 
 
-def test_claim_evidence_is_clipped_to_incident_window(tmp_path) -> None:
+def test_claim_evidence_uses_full_telemetry(tmp_path) -> None:
     log = tmp_path / "video-end.csv"
     log.write_text(
         "timestamp,speed_kmh,brake\n"
@@ -376,16 +375,21 @@ def test_claim_evidence_is_clipped_to_incident_window(tmp_path) -> None:
         [Claim(claim_id="claim-end", text="Video kết thúc", timestamp_s=44.72)],
         timestamp_tolerance_s=0.3,
         sample_radius=10,
-        incident_window=IncidentWindow(t_start=40.0, t0=44.0, t_end=44.73),
     )[0]
 
-    assert [item.timestamp_s for item in summary.evidence] == [44.7]
-    assert summary.allowed_evidence_ids == ["log-row:44.7"]
-    assert summary.sample_end_s == 44.7
-    assert "44.75" not in summary.summary
+    assert [item.timestamp_s for item in summary.evidence] == [44.7, 44.75, 44.8, 44.85, 44.9]
+    assert summary.allowed_evidence_ids == [
+        "log-row:44.7",
+        "log-row:44.75",
+        "log-row:44.8",
+        "log-row:44.85",
+        "log-row:44.9",
+    ]
+    assert summary.sample_end_s == 44.9
+    assert "44.75" in summary.summary
 
 
-def test_verification_claim_outside_incident_window_uses_full_video_bounds(tmp_path) -> None:
+def test_verification_claim_outside_incident_window_uses_full_video_telemetry(tmp_path) -> None:
     log = tmp_path / "full-video.csv"
     log.write_text(
         "timestamp,speed_kmh,brake\n"
@@ -402,18 +406,52 @@ def test_verification_claim_outside_incident_window_uses_full_video_bounds(tmp_p
         [Claim(claim_id="claim-early", text="Xe giảm tốc ở đầu video", timestamp_s=10)],
         timestamp_tolerance_s=0.5,
         sample_radius=10,
-        incident_window=IncidentWindow(t_start=25, t0=27, t_end=29),
         video_duration_s=45,
     )
 
     assert summaries[0].within_tolerance is True
     assert [item.timestamp_s for item in summaries[0].evidence] == [9.5, 10, 10.5, 27]
     assert contexts[0].raw_telemetry.at_claim.timestamp_s == 10
-    assert set(contexts[0].allowed_evidence_ids) == {
+    assert contexts[0].allowed_evidence_ids == [
         "log-row:9.5",
         "log-row:10",
-        "log-row:10.5",
         "log-row:27",
+    ]
+
+
+def test_claim_verification_derives_dynamics_without_change_points(tmp_path) -> None:
+    log = tmp_path / "derived-dynamics.csv"
+    log.write_text(
+        "timestamp,speed_kmh,brake,steer\n"
+        "26.0,25,0,0.3\n"
+        "26.5,23,,-0.3\n"
+        "27.0,20.902,0,-0.3\n"
+        "27.5,0.699,1,-0.3\n",
+        encoding="utf-8",
+    )
+
+    _, contexts = build_claim_verification_inputs(
+        str(log),
+        [Claim(claim_id="claim-1", text="Xe giảm tốc", timestamp_s=26.5)],
+        timestamp_tolerance_s=0.5,
+        sample_radius=48,
+    )
+
+    dynamics = contexts[0].derived_dynamics
+    assert dynamics.max_deceleration_mps2.model_dump() == {
+        "value": pytest.approx(11.223889),
+        "level": "strong_abnormal",
+        "text": "Xe có giảm tốc rất mạnh trong khoảng claim.",
+    }
+    assert dynamics.steering_activity.model_dump() == {
+        "value": pytest.approx(0.2),
+        "level": "strong_abnormal",
+        "text": "Steering biến động rất mạnh trong khoảng claim.",
+    }
+    assert dynamics.decel_brake_mismatch.model_dump() == {
+        "value": 0,
+        "level": "normal",
+        "text": "Giảm tốc và tín hiệu brake không có mismatch đáng kể.",
     }
 
 

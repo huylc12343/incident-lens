@@ -170,8 +170,13 @@ async def test_analyze_video_node_builds_native_request(tmp_path: Path) -> None:
         fps=15,
         size_bytes=100,
     )
-    normalized = NormalizedVideoArtifact(uri=str(tmp_path / "normalized.mp4"), metadata=metadata)
-    media = SimpleNamespace(sample_frames=AsyncMock(), normalize_video=AsyncMock(return_value=normalized))
+    normalized = NormalizedVideoArtifact(uri=str(tmp_path / "normalized_source.mp4"), metadata=metadata)
+    redacted = NormalizedVideoArtifact(uri=str(tmp_path / "normalized.mp4"), metadata=metadata)
+    media = SimpleNamespace(
+        sample_frames=AsyncMock(),
+        normalize_video=AsyncMock(return_value=normalized),
+        redact_video=AsyncMock(return_value=redacted),
+    )
     service = _service(VLMInputMode.NATIVE_VIDEO, _memory(AnalysisMode.NATIVE_VIDEO, 2))
     workflow = VideoMemoryWorkflow(
         vlm=service,
@@ -192,7 +197,7 @@ async def test_analyze_video_node_builds_native_request(tmp_path: Path) -> None:
     assert result["video_duration_s"] == 2
     media.normalize_video.assert_awaited_once_with(
         "video.mp4",
-        str(tmp_path.resolve() / "INC-002" / "normalized.mp4"),
+        str(tmp_path.resolve() / "INC-002" / "normalized_source.mp4"),
         width=1280,
         height=720,
         fps=15,
@@ -201,8 +206,15 @@ async def test_analyze_video_node_builds_native_request(tmp_path: Path) -> None:
         max_output_bytes=100_000_000,
         max_duration_s=60,
     )
+    media.redact_video.assert_awaited_once_with(
+        normalized.uri,
+        str(tmp_path.resolve() / "INC-002" / "normalized.mp4"),
+    )
     media.sample_frames.assert_not_awaited()
-    assert result["artifact_uris"] == {"normalized_video": normalized.uri}
+    request = service.analyze_video.await_args.args[0]
+    assert request.normalized_video_uri == redacted.uri
+    assert result["video_uri"] == redacted.uri
+    assert result["artifact_uris"] == {"normalized_video": redacted.uri}
 
 
 @pytest.mark.asyncio
@@ -217,6 +229,30 @@ async def test_analyze_video_node_rejects_missing_input_without_dependencies() -
     assert result["error_code"] == "VIDEO_ANALYSIS_INPUT_INVALID"
     media.sample_frames.assert_not_awaited()
     service.analyze_video.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_analyze_video_node_skips_redaction_when_disabled(tmp_path: Path) -> None:
+    metadata = NativeVideoMetadata(duration_s=2, width=512, height=288, fps=10, size_bytes=100)
+    normalized = NormalizedVideoArtifact(uri=str(tmp_path / "normalized.mp4"), metadata=metadata)
+    media = SimpleNamespace(
+        normalize_video=AsyncMock(return_value=normalized),
+        redact_video=AsyncMock(),
+    )
+    service = _service(VLMInputMode.NATIVE_VIDEO, _memory(AnalysisMode.NATIVE_VIDEO, 2))
+    workflow = VideoMemoryWorkflow(
+        vlm=service,
+        config=VideoMemoryWorkflowConfig(artifact_dir=str(tmp_path), video_redaction_enabled=False),
+    )
+
+    result = await analyze_video_node(
+        {"incident_id": "INC-NO-REDACTION", "video_uri": "video.mp4", "analysis_prompt": "Find incident"},
+        media=media,
+        workflow=workflow,
+    )
+
+    media.redact_video.assert_not_awaited()
+    assert result["video_uri"] == normalized.uri
 
 
 @pytest.mark.asyncio

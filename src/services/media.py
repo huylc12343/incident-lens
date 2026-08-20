@@ -28,10 +28,11 @@ class NormalizedVideoArtifact:
 
 
 class MediaService:
-    def __init__(self, *, command_timeout_s: float = 120.0) -> None:
-        if command_timeout_s <= 0:
-            raise ValueError("command_timeout_s must be positive")
+    def __init__(self, *, command_timeout_s: float = 120.0, redaction_image_size: int = 512) -> None:
+        if command_timeout_s <= 0 or redaction_image_size <= 0:
+            raise ValueError("command timeout and redaction image size must be positive")
         self._command_timeout_s = command_timeout_s
+        self._redaction_image_size = redaction_image_size
         self._ffmpeg = shutil.which("ffmpeg") or get_ffmpeg_exe()
         self._ffprobe = shutil.which("ffprobe")
 
@@ -158,6 +159,20 @@ class MediaService:
 
         metadata = await self.probe_video(str(output))
         return NormalizedVideoArtifact(uri=str(output), metadata=metadata)
+
+    async def redact_video(self, video_uri: str, output_uri: str) -> NormalizedVideoArtifact:
+        """Run local face and license-plate redaction without blocking the event loop."""
+        try:
+            from src.services.detect_and_blur import redact_video
+
+            return await asyncio.to_thread(
+                redact_video,
+                video_uri,
+                output_uri,
+                imgsz=self._redaction_image_size,
+            )
+        except Exception as exc:
+            raise MediaServiceError("VIDEO_REDACTION_FAILED", "video redaction failed") from exc
 
     async def cut_incident_clip(
         self,

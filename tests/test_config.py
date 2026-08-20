@@ -22,6 +22,8 @@ def test_incident_clip_context_defaults() -> None:
     assert settings.log_claim_sample_radius == 3
     assert settings.vlm_structured_output_retries == 0
     assert settings.provider_network_retries == 0
+    assert settings.video_redaction_enabled is True
+    assert settings.redaction_image_size == 512
     assert not hasattr(settings, "log_strong_deceleration_threshold_mps2")
     assert not hasattr(settings, "log_brake_rise_threshold")
 
@@ -30,6 +32,18 @@ def test_claim_log_sample_radius_is_configurable() -> None:
     settings = Settings(_env_file=None, log_claim_sample_radius=5)
 
     assert settings.log_claim_sample_radius == 5
+
+
+def test_redaction_image_size_is_configurable() -> None:
+    settings = Settings(_env_file=None, redaction_image_size=640)
+
+    assert settings.redaction_image_size == 640
+
+
+def test_video_redaction_can_be_disabled() -> None:
+    settings = Settings(_env_file=None, video_redaction_enabled=False)
+
+    assert settings.video_redaction_enabled is False
 
 
 def test_claim_log_sample_radius_rejects_negative_values() -> None:

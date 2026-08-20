@@ -58,6 +58,8 @@ class Settings(BaseSettings):
     vlm_video_codec: str = "libx264"
     vlm_video_pixel_format: str = "yuv420p"
     vlm_video_max_output_bytes: int = Field(default=100_000_000, gt=0)
+    video_redaction_enabled: bool = True
+    redaction_image_size: int = Field(default=512, gt=0)
 
     # Frame artifacts used to canonicalize Qwen timestamps after analysis.
     vlm_frame_width: int = Field(default=1024, gt=0)

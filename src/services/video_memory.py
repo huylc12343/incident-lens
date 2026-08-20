@@ -71,6 +71,7 @@ class VideoMemoryWorkflowConfig:
     video_codec: str = "libx264"
     video_pixel_format: str = "yuv420p"
     video_max_output_bytes: int = 100_000_000
+    video_redaction_enabled: bool = True
     max_duration_s: float = 60.0
     prompt_version: str = "v1"
     limits: VideoMemoryLimits = VideoMemoryLimits()

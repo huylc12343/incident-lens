@@ -66,6 +66,8 @@ REANALYSIS_CLIP_RADIUS_S = 2.0
 
 
 class MediaWorkflowService(Protocol):
+    async def redact_video(self, video_uri: str, output_uri: str) -> NormalizedVideoArtifact: ...
+
     async def cut_incident_clip(
         self,
         video_uri: str,
@@ -156,6 +158,7 @@ async def analyze_video_node(
         log_attention_hint="",
         version=config.prompt_version,
     )
+    processed_video_uri = video_uri
     try:
         if mode == VLMInputMode.TIMESTAMPED_FRAMES:
             manifest = await media.sample_frames(
@@ -176,25 +179,47 @@ async def analyze_video_node(
             video_duration_s = manifest.duration_s
             artifact_uris = {"frames": str(artifact_root / "frames")}
         else:
-            normalized = await media.normalize_video(
-                video_uri,
-                str(artifact_root / "normalized.mp4"),
-                width=config.video_target_width,
-                height=config.video_target_height,
-                fps=config.video_target_fps,
-                codec=config.video_codec,
-                pixel_format=config.video_pixel_format,
-                max_output_bytes=config.video_max_output_bytes,
-                max_duration_s=config.max_duration_s,
-            )
+            if config.video_redaction_enabled:
+                normalized_source = artifact_root / "normalized_source.mp4"
+                normalized = await media.normalize_video(
+                    video_uri,
+                    str(normalized_source),
+                    width=config.video_target_width,
+                    height=config.video_target_height,
+                    fps=config.video_target_fps,
+                    codec=config.video_codec,
+                    pixel_format=config.video_pixel_format,
+                    max_output_bytes=config.video_max_output_bytes,
+                    max_duration_s=config.max_duration_s,
+                )
+                try:
+                    processed_video = await media.redact_video(
+                        normalized.uri,
+                        str(artifact_root / "normalized.mp4"),
+                    )
+                finally:
+                    normalized_source.unlink(missing_ok=True)
+            else:
+                processed_video = await media.normalize_video(
+                    video_uri,
+                    str(artifact_root / "normalized.mp4"),
+                    width=config.video_target_width,
+                    height=config.video_target_height,
+                    fps=config.video_target_fps,
+                    codec=config.video_codec,
+                    pixel_format=config.video_pixel_format,
+                    max_output_bytes=config.video_max_output_bytes,
+                    max_duration_s=config.max_duration_s,
+                )
             request = NativeVideoAnalysisRequest(
                 incident_id=incident_id,
                 prompt=prompt,
-                normalized_video_uri=normalized.uri,
-                metadata=NativeVideoMetadata.model_validate(normalized.metadata),
+                normalized_video_uri=processed_video.uri,
+                metadata=NativeVideoMetadata.model_validate(processed_video.metadata),
             )
             video_duration_s = request.metadata.duration_s
-            artifact_uris = {"normalized_video": normalized.uri}
+            artifact_uris = {"normalized_video": processed_video.uri}
+            processed_video_uri = processed_video.uri
 
         log_attention_hint = ""
         log_uri = (state.get("log_uri") or "").strip()
@@ -214,6 +239,7 @@ async def analyze_video_node(
         memory = await workflow.analyze(request)
         return {
             "status": "running",
+            "video_uri": processed_video_uri,
             "video_memory": memory,
             "video_duration_s": video_duration_s,
             "remote_media_handles": memory.remote_media_handles,

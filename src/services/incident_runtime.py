@@ -108,7 +108,7 @@ async def incident_workflow_service(
     clients: ProviderClients | None = None,
 ) -> AsyncIterator[WorkflowService]:
     clients = clients or ProviderClients()
-    media = MediaService()
+    media = MediaService(redaction_image_size=settings.redaction_image_size)
     tracing = build_langsmith_tracing(settings)
     observability = ModelActivityRegistry(
         max_provider_requests_per_incident=settings.provider_request_limit_per_incident,
@@ -134,6 +134,7 @@ async def incident_workflow_service(
             video_target_fps=settings.vlm_video_target_fps,
             video_codec=settings.vlm_video_codec,
             video_pixel_format=settings.vlm_video_pixel_format,
+            video_redaction_enabled=settings.video_redaction_enabled,
             video_max_output_bytes=(
                 min(settings.vlm_video_max_output_bytes, settings.qwen_base64_max_video_bytes)
                 if not settings.qwen_artifact_url_base.strip()

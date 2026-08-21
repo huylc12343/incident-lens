@@ -60,6 +60,7 @@ def _request() -> VerificationRequest:
 @pytest.mark.asyncio
 async def test_openai_verification_uses_structured_output() -> None:
     verification = VerificationResult(
+        has_accident=True,
         results=[
             ClaimVerification(
                 claim_id="claim-1",
@@ -77,6 +78,7 @@ async def test_openai_verification_uses_structured_output() -> None:
     result = await service.verify(_request())
 
     assert result == verification
+    assert result.has_accident is True
     call = client.responses.parse.await_args.kwargs
     assert call["text_format"] is VerificationResult
     assert [message["role"] for message in call["input"]] == ["system", "user"]

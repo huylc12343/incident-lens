@@ -364,6 +364,7 @@ class ClaimVerification(ContractModel):
 
 
 class VerificationResult(ContractModel):
+    has_accident: bool | None = None
     results: list[ClaimVerification]
 
 

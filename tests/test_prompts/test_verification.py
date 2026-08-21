@@ -41,7 +41,7 @@ def test_verification_system_prompt_matches_approved_text_exactly() -> None:
     )
 
     assert sha256(prompt.text.encode("utf-8")).hexdigest() == (
-        "da2a9f12bd9c4b9b6d8313ab77dd51a91b32f4dbc3dcb810c168477129917aa6"
+        "3e0ca11938e3e78dd10a9eb8e6c51d1889bc4e9a7a303646db9d80b76fe58fa6"
     )
 
 
@@ -79,6 +79,7 @@ def test_verification_prompt_requires_one_result_per_claim() -> None:
     assert "supported, contradicted, unverified" in prompt.text
     assert "Log chỉ có thẩm quyền với telemetry" in prompt.text
     assert "Không suy ra có/không có va chạm" in prompt.text
+    assert "has_accident" in prompt.text
     assert "reason phải ngắn, rõ" in prompt.text
     item = prompt.context["verification_items"][0]
     assert item["allowed_evidence_ids"] == ["log-row:12.5"]

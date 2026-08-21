@@ -979,8 +979,8 @@ def _derived_dynamics(records: list[LogRecord]) -> ClaimDerivedDynamics:
                 "Không đủ dữ liệu tốc độ hoặc brake để đánh giá mức không tương xứng.",
                 "Giảm tốc và tín hiệu brake không có mismatch đáng kể.",
                 "Giảm tốc và tín hiệu brake có mismatch đáng chú ý.",
-                "Xe giảm tốc rất mạnh nhưng mức brake ghi nhận không tương xứng; "
-                "diễn biến này cần được chú ý khi đối chiếu với video.",
+                "Xe giảm tốc rất mạnh nhưng mức brake ghi nhận thấp; "
+                "diễn biến này có thể sảy ra tai nạn cần được chú ý.",
             ),
         ),
     )
@@ -1385,8 +1385,8 @@ def _available_signal_statements(
     if "steer" in signal_set:
         statements.extend(
             [
-                "steering [-1, 1]: steering <= -0.02 rẽ trái, -0.02 < steering < 0.02 đi thẳng, "
-                "steering >= 0.02 rẽ phải;",
+                "steering [-1, 1]: steering <= -0.1 rẽ trái, -0.1 < steering < 0.1 đi thẳng, "
+                "steering >= 0.1 rẽ phải;",
                 "hướng xe: được code suy ra từ steering tại timestamp claim.",
             ]
         )

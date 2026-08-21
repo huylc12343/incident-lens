@@ -1312,6 +1312,7 @@ async def test_manual_reanalysis_verifies_only_changed_claims_and_merges_old_res
         analysis_mode=AnalysisMode.SINGLE_REQUEST,
     )
     previous = VerificationResult(
+        has_accident=True,
         results=[
             ClaimVerification(
                 claim_id="claim-1",
@@ -1327,6 +1328,7 @@ async def test_manual_reanalysis_verifies_only_changed_claims_and_merges_old_res
         ]
     )
     updated = VerificationResult(
+        has_accident=False,
         results=[
             ClaimVerification(
                 claim_id="claim-1",
@@ -1355,6 +1357,7 @@ async def test_manual_reanalysis_verifies_only_changed_claims_and_merges_old_res
     request = verifier.verify.await_args.args[0]
     assert [claim.claim_id for claim in request.claims] == ["claim-1"]
     assert [item.claim_id for item in result["verification"].results] == ["claim-1", "claim-2"]
+    assert result["verification"].has_accident is True
     assert result["verification"].results[1].reason == "Keep this result"
     assert result["video_memory"].claims[1].verification_status == VerificationStatus.SUPPORTED
     assert "claims" not in result

@@ -60,7 +60,7 @@ def build_verification_prompt(
     context = {"verification_items": verification_items}
     text = "\n".join(
         [
-        "Nhiệm vụ: đối chiếu từng claim từ video với telemetry trong log_facts để phát hiện phần phù hợp, "
+        "Nhiệm vụ: đối chiếu từng claim từ video với telemetry trong log_facts để phát hiện phần phù hợp về vấn đề chuyển động của xe,"
         "mâu thuẫn hoặc không thể kiểm tra. Chỉ đánh giá những hiện tượng log thực sự quan sát được.",
 
         "Video/VLM là nguồn cho hình ảnh, vật thể, môi trường, rời làn/đường và va chạm nhìn thấy hoặc suy ra từ "
@@ -68,26 +68,16 @@ def build_verification_prompt(
         "khác có trong available_signals. Không dùng telemetry gián tiếp để phủ định hiện tượng hình ảnh.",
 
         "Quy ước: speed_kmh>=0; brake và throttle thuộc [0,1]; steering<=-0.1 là trái, "
-        "-0.1<steering<0.1 là thẳng, steering>=0.1 là phải. Chỉ sử dụng signal có trong available_signals.",
+        "-0.1<steering<0.1 là thẳng, steering>=0.1 là phải, max_deceleration: càng lớn → có cú giảm tốc càng mạnh/đột ngột, ",
+        "steering_activity: 0 = tay lái gần như không đổi; càng gần 2 = steering biến động cực mạnh, decel_brake_mismatch: 0 = không có mismatch đáng kể; càng lớn = xe giảm tốc mạnh nhưng tín hiệu brake thấp. Chỉ sử dụng signal có trong available_signals.",
 
         "log_facts mô tả một cửa sổ quanh claim gồm raw_telemetry.window_start, at_claim, window_end; "
-        "derived và derived_dynamics là kết quả deterministic do backend tính sẵn. Không bịa thêm mẫu log, "
-        "sensor hoặc phép đo.",
-
-        "derived_dynamics chỉ gồm value và text: max_deceleration_mps2 là giảm tốc dương lớn nhất trong "
-        "cửa sổ (m/s²; 0 nghĩa là không giảm tốc, càng lớn càng giảm tốc mạnh); steering_activity là trung "
-        "bình |steer_i-steer_{i-1}| (0 nghĩa là tay lái gần như không đổi, càng lớn càng biến động mạnh); "
-        "decel_brake_mismatch = max_deceleration_mps2 × (1 - max_brake) (càng lớn càng cho thấy giảm tốc "
-        "mạnh nhưng brake không giải thích tương xứng). Các ngưỡng backend: max_deceleration_mps2 và "
-        "decel_brake_mismatch: <3 normal, 3→<7 mild_abnormal, >=7 strong_abnormal; steering_activity: "
-        "<0.03 normal, 0.03→<0.10 mild_abnormal, >=0.10 strong_abnormal. Không tự tính lại hoặc suy ra "
-        "metric ngoài dữ liệu đã cung cấp.",
+        "derived và derived_dynamics.",
 
         "Trước khi quyết định, xác định nội bộ claim thuộc loại nào:",
 
         "- STATE: mô tả trạng thái tại một thời điểm, ví dụ 'xe đang dừng', 'xe đang di chuyển', "
-        "'steering hướng phải tại mốc đó'. Với STATE, ưu tiên at_claim; start/end chỉ dùng để kiểm tra ngữ cảnh "
-        "và tránh coi một mẫu nhiễu tức thời là trạng thái đại diện.",
+        "'steering hướng phải tại mốc đó'. Với STATE, ưu tiên nhìn toàn bộ khoảng thay vì at_claim.",
 
         "- EVENT/TRANSITION: mô tả một diễn biến trong thời gian, ví dụ 'xe bắt đầu rẽ phải', 'giảm tốc mạnh', "
         "'dừng lại', 'đổi hướng'. Với EVENT, phải đánh giá TOÀN BỘ window_start → at_claim → window_end cùng "
@@ -99,11 +89,16 @@ def build_verification_prompt(
         "vì at_claim hoặc window_end đang là trái. Chỉ contradicted khi cửa sổ liên quan không có diễn biến trực "
         "tiếp phù hợp và telemetry rõ ràng thể hiện điều ngược lại.",
 
-        "Chỉ xét phần claim log có thể kiểm tra; bỏ qua màu sắc, loại vật thể, cây/cầu/tường, vị trí ngoại cảnh, "
-        "mức che khuất, tiếp xúc vật lý hoặc rời phần đường nếu log không có signal trực tiếp tương ứng. Việc log "
-        "không quan sát được phần này không làm toàn claim thành unverified.",
+        "Chỉ xét phần claim log có thể kiểm tra bằng telemetry của XE EGO (speed, brake, throttle, steering và các "
+        "derived signal có trong available_signals). Bỏ qua hoàn toàn các phần sau nếu log không có signal trực tiếp "
+        "tương ứng: màu sắc, loại vật thể, cây/cầu/tường, vị trí ngoại cảnh, mức che khuất, tiếp xúc vật lý, rời phần "
+        "đường, VÀ chuyển động/hành vi của bất kỳ xe hoặc vật thể nào khác không phải xe ego (đổi làn, cắt ngang quỹ "
+        "đạo, tạt đầu, v.v. của xe khác). Việc log không quan sát được các phần này không làm toàn claim thành "
+        "unverified, nhưng cũng không được dùng làm nội dung để mô tả lại trong reason.",
 
-        "Trả chính xác một result cho mỗi claim_id theo thứ tự. status chỉ gồm supported, contradicted, unverified.",
+        "Trả chính xác một result cho mỗi claim_id theo thứ tự. status chỉ gồm supported, contradicted, unverified. "
+        "Đồng thời trả has_accident ở cấp output: true có tai nạn; ngược lại "
+        "trả false. Không nên chỉ dựa mỗi vào mô tả vidieo mà phải nhìn cả log. Các trường hợp mà xe giảm tốc mạnh mà không có brake thì là tai nạn.",
 
         "Quy tắc quyết định cố định:",
 
@@ -118,15 +113,18 @@ def build_verification_prompt(
         "4. Nếu không có phần nào kiểm tra đáng tin cậy hoặc dữ liệu không đủ phân biệt → unverified. "
         "Khi phân vân contradicted hay unverified, chọn unverified.",
 
-        "Không suy ra có/không có va chạm từ speed, brake, throttle, acceleration hoặc steering nếu không có "
-        "signal trực tiếp về va chạm. Xe còn tốc độ sau thời điểm nghi va chạm không phủ định va chạm.",
-
         "Không suy ra root cause từ brake=0, steering thay đổi hoặc giảm tốc. Verification chỉ đối chiếu claim, "
         "không giải thích nguyên nhân tai nạn.",
 
-        "reason phải ngắn, rõ và nêu đúng phần claim được đối chiếu. Với EVENT, mô tả diễn biến trong cửa sổ nếu "
-        "đó là cơ sở kết luận; với STATE, nêu trạng thái tại claim. Không liệt kê chi tiết ngoại cảnh mà log không "
-        "quan sát được trừ khi cần nói rõ giới hạn của status.",
+        "reason phải ngắn, rõ, và CHỈ mô tả những gì telemetry của xe ego thực sự cho thấy (ví dụ: steering giữ nguyên "
+        "hướng trong cửa sổ, speed giảm bao nhiêu, brake=bao nhiêu...). Với EVENT, mô tả diễn biến ego trong cửa sổ nếu "
+        "đó là cơ sở kết luận; với STATE, nêu trạng thái ego tại claim. TUYỆT ĐỐI không lặp lại, mô tả lại hoặc bàn luận "
+        "phần hình ảnh không log-observable của claim (màu xe, xe khác, cắt ngang, vị trí ngoại cảnh...) dù là để giải "
+        "thích lý do unverified. Khi unverified vì claim không có phần nào liên quan đến telemetry ego, dùng đúng mẫu "
+        "câu: 'Log không có signal trực tiếp liên quan đến chuyển động của xe ego cho phần claim này.' Nếu có ego-signal "
+        "liên quan nhưng không đủ để xác nhận, dùng mẫu: 'Log không có signal trực tiếp phù hợp; telemetry ego cho thấy "
+        "<nêu ngắn gọn ego-signal, ví dụ steering/speed không đổi trong cửa sổ>.' Không nhắc lại chi tiết claim gốc "
+        "trong cả hai trường hợp.",
 
         "evidence_ids chỉ chọn nguyên văn từ allowed_evidence_ids của claim và chỉ chọn các dòng thực sự dùng "
         "cho kết luận. Nếu unverified vì không có signal phù hợp, trả evidence_ids=[].",

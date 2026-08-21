@@ -798,6 +798,11 @@ def _merge_selective_verification(
     }
     result_by_claim_id.update({item.claim_id: item for item in next_verification.results})
     merged_result = VerificationResult(
+        has_accident=(
+            previous_verification.has_accident
+            if previous_verification is not None and previous_verification.has_accident is not None
+            else next_verification.has_accident
+        ),
         results=[
             result_by_claim_id[claim.claim_id]
             for claim in memory.claims

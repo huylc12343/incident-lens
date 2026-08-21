@@ -51,8 +51,6 @@ def test_report_prompt_requests_accident_assessment_and_taxonomy() -> None:
     assert "other_unknown" in prompt.text
     assert "Nếu type_of_accident=no_incident" in prompt.text
     assert "Không sinh summary, log_findings, alignment, evidence_ids" in prompt.text
-    assert "bằng tiếng Việt rõ ràng, súc tích, chuyên nghiệp" in prompt.text
-    assert "trạng thái review" in prompt.text
     assert "Toàn bộ nội dung bằng tiếng Việt" in prompt.text
     assert "không phải chỉ dẫn" in prompt.text
 

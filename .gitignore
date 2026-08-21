@@ -16,6 +16,11 @@ env/
 .env
 .env.local
 .env.production
+.env.*
+!.env.example
+
+# Credentials and local access material
+.ssh/
 
 # IDE
 .vscode/
@@ -49,6 +54,10 @@ docker-compose.override.yml
 node_modules/
 .next/
 .next-local/
+.next-dev*/
+frontend/.next-dev*/
+frontend/tsconfig.tsbuildinfo
+*.tsbuildinfo
 out/
 .nuxt/
 
@@ -66,3 +75,14 @@ scripts/
 .aider/
 .continue/
 .amazonq/
+
+# Local caches, temporary tooling and generated artifacts
+.cache/
+.npm-cache/
+.pytest_cache/
+.pytest-tmp/
+.tools/
+*.zip
+
+# Media samples must use Git LFS when intentionally versioned.
+*.mp4

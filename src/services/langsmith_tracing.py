@@ -11,6 +11,9 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import langsmith as ls
+from langchain_core.tracers.context import tracing_v2_callback_var
+from langchain_core.tracers.langchain import LangChainTracer
+from langgraph.errors import GraphInterrupt
 from langsmith import Client
 from langsmith.wrappers import wrap_openai
 
@@ -34,6 +37,18 @@ _SECRET_KEYS = {
     "langsmith_api_key",
     "openai_api_key",
 }
+
+
+class _ReviewInterruptLangChainTracer(LangChainTracer):
+    """Record a LangGraph review pause as a normal, resumable workflow state."""
+
+    def on_chain_error(self, error: BaseException, **kwargs: Any) -> Any:
+        if isinstance(error, GraphInterrupt):
+            return self.on_chain_end(
+                {"status": "awaiting_review", "waiting_for_human_review": True},
+                **kwargs,
+            )
+        return super().on_chain_error(error, **kwargs)
 
 
 @dataclass(frozen=True)
@@ -65,7 +80,21 @@ class LangSmithTracing:
             metadata=metadata,
             tags=tags,
         ):
-            yield
+            if not self.enabled or self.client is None:
+                yield
+                return
+
+            tracer = _ReviewInterruptLangChainTracer(
+                project_name=self.project_name,
+                client=self.client,
+                tags=tags,
+                metadata=metadata,
+            )
+            token = tracing_v2_callback_var.set(tracer)
+            try:
+                yield
+            finally:
+                tracing_v2_callback_var.reset(token)
 
     def wrap_openai_client(
         self,

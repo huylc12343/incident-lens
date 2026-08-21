@@ -110,7 +110,7 @@ class WorkflowService:
             if isinstance(exc, WorkflowError):
                 raise
             raise WorkflowError("WORKFLOW_EXECUTION_FAILED", "incident workflow could not start") from exc
-        state = cast(IncidentState, {**initial, **result})
+        state = _without_legacy_claim_projection({**initial, **result})
         try:
             snapshot = self._snapshot(state)
         except Exception as exc:
@@ -219,7 +219,8 @@ class WorkflowService:
             if state.get("status") != "awaiting_review":
                 raise WorkflowError("INVALID_REVIEW_TRANSITION", "incident is not awaiting review")
             if decision.action == "reanalyze":
-                claim_ids = {claim.claim_id for claim in state.get("claims", [])}
+                memory = state.get("video_memory")
+                claim_ids = {claim.claim_id for claim in memory.claims} if memory is not None else set()
                 invalid_targets = set(decision.target_claim_ids) - claim_ids
                 if invalid_targets:
                     raise WorkflowError("REANALYSIS_TARGET_INVALID", "re-analysis target claim does not exist")
@@ -232,7 +233,7 @@ class WorkflowService:
                 if isinstance(exc, WorkflowError):
                     raise
                 raise WorkflowError("WORKFLOW_EXECUTION_FAILED", "incident workflow could not resume") from exc
-            updated = cast(IncidentState, {**state, **result})
+            updated = _without_legacy_claim_projection({**state, **result})
             try:
                 self._snapshot(updated)
             except Exception as exc:
@@ -278,7 +279,8 @@ class WorkflowService:
 
     async def _checkpoint_state(self, incident_id: str) -> IncidentState | None:
         getter = getattr(self._runner, "get", None)
-        return await getter(incident_id) if getter is not None else None
+        state = await getter(incident_id) if getter is not None else None
+        return _without_legacy_claim_projection(state) if state is not None else None
 
     async def _store_terminal(self, state: IncidentState, decision: ReviewDecision) -> StoredReport:
         status = state.get("status")
@@ -303,7 +305,7 @@ class WorkflowService:
                     status=cast(str, status),
                     has_log=bool(state.get("log_uri")),
                     artifact_uris=state.get("artifact_uris", {}),
-                    claims=state.get("claims", []),
+                    claims=memory.claims if memory is not None else [],
                     warnings=state.get("warnings", []),
                     review_audit=state.get("review_audit", []),
                     model_activities=state.get("model_activities", []),
@@ -322,7 +324,8 @@ class WorkflowService:
 
     def _snapshot(self, state: IncidentState) -> IncidentSnapshot:
         incident_id = state["incident_id"]
-        claims = state.get("claims") or (state["video_memory"].claims if state.get("video_memory") else [])
+        memory = state.get("video_memory")
+        claims = memory.claims if memory is not None else []
         verification = state.get("verification")
         conflicts = [
             item.claim_id for item in (verification.results if verification else [])
@@ -330,7 +333,6 @@ class WorkflowService:
         ]
         status = state.get("status", "failed")
         report = state.get("draft_report")
-        memory = state.get("video_memory")
         video_summary = ""
         if memory is not None:
             video_summary = memory.video_summary or memory.global_scene
@@ -361,6 +363,10 @@ class WorkflowService:
         )
 
 
+def _without_legacy_claim_projection(state: dict[str, object]) -> IncidentState:
+    return cast(IncidentState, {key: value for key, value in state.items() if key != "claims"})
+
+
 def _stored_snapshot(stored: StoredReport) -> IncidentSnapshot:
     return IncidentSnapshot(
         incident_id=stored.incident_id,
@@ -388,14 +394,9 @@ def _safe_processing_error(code: str | None) -> str:
             "OpenAI hết quota hoặc đang rate-limit. Kiểm tra Billing/Usage rồi thử lại với incident ID mới."
         ),
         "OPENAI_VERIFICATION_TIMEOUT": "OpenAI verification quá thời gian chờ. Thử lại hoặc tăng VERIFICATION_TIMEOUT_S.",
-        "OPENAI_VIDEO_ANALYSIS_TIMEOUT": "OpenAI phân tích video quá thời gian chờ. Thử lại hoặc tăng VLM_TIMEOUT_S.",
         "OPENAI_CONNECTION_FAILED": "Backend không kết nối được tới OpenAI. Kiểm tra mạng/proxy của máy chạy FastAPI.",
         "OPENAI_VERIFICATION_REQUEST_INVALID": (
             "OpenAI từ chối model hoặc structured request verification. Kiểm tra VERIFICATION_MODEL_NAME."
-        ),
-        "OPENAI_VIDEO_ANALYSIS_REQUEST_INVALID": (
-            "OpenAI từ chối model phân tích video, ảnh đầu vào hoặc structured request. "
-            "Kiểm tra OPENAI_VLM_MODEL_NAME và cấu hình VLM."
         ),
         "DASHSCOPE_AUTHENTICATION_FAILED": (
             "DashScope từ chối API key. Kiểm tra DASHSCOPE_API_KEY rồi khởi động lại FastAPI."

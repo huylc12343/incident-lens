@@ -41,7 +41,7 @@ def test_verification_system_prompt_matches_approved_text_exactly() -> None:
     )
 
     assert sha256(prompt.text.encode("utf-8")).hexdigest() == (
-        "580ea4a37b914b17fec286f7c871217e254e9a62064a6d1eebed583e7dce8b72"
+        "da2a9f12bd9c4b9b6d8313ab77dd51a91b32f4dbc3dcb810c168477129917aa6"
     )
 
 
@@ -74,12 +74,12 @@ def test_verification_prompt_requires_one_result_per_claim() -> None:
         timestamp_tolerance_s=0.5,
     )
 
-    assert "chính xác một kết quả cho mỗi claim_id" in prompt.text
+    assert "Trả chính xác một result cho mỗi claim_id" in prompt.text
     assert "supported" in prompt.text
-    assert "supported, contradicted hoặc unverified" in prompt.text
-    assert "Log chỉ đo lường trạng thái vận hành cơ khí" in prompt.text
-    assert "Không suy ra va chạm" in prompt.text
-    assert "reason phải ngắn gọn bằng tiếng Việt" in prompt.text
+    assert "supported, contradicted, unverified" in prompt.text
+    assert "Log chỉ có thẩm quyền với telemetry" in prompt.text
+    assert "Không suy ra có/không có va chạm" in prompt.text
+    assert "reason phải ngắn, rõ" in prompt.text
     item = prompt.context["verification_items"][0]
     assert item["allowed_evidence_ids"] == ["log-row:12.5"]
     assert item["within_tolerance"] is True
@@ -99,13 +99,29 @@ def test_verification_prompt_requires_one_result_per_claim() -> None:
     }
     assert "verification_items" not in prompt.text
     assert "Brake tăng mạnh tại 12.5 giây." not in prompt.text
-    assert "brake [0,1]" in prompt.text
+    assert "brake và throttle thuộc [0,1]" in prompt.text
     assert "Trong tolerance:" not in str(item)
     assert "Log có thể kiểm tra" not in str(item)
     assert "claim_log_summary" not in prompt.text
     assert '"metrics"' not in prompt.text
     assert "log_evidence_summary" not in prompt.context
     assert "raw_telemetry" in item["log_facts"]
+    assert item["log_facts"]["derived_dynamics"] == {
+        "max_deceleration_mps2": {
+            "value": None,
+            "text": "",
+        },
+        "steering_activity": {
+            "value": None,
+            "text": "",
+        },
+        "decel_brake_mismatch": {
+            "value": None,
+            "text": "",
+        },
+    }
+    assert "change_points" not in item["log_facts"]
+    assert "level" not in str(item["log_facts"]["derived_dynamics"])
 
 
 def test_verification_prompt_is_deterministic() -> None:
@@ -153,9 +169,11 @@ def test_verification_prompt_uses_compact_timestamp_semantics(tmp_path) -> None:
     assert turn_raw["at_claim"]["steer"] == -0.3
     assert turn_raw["at_claim"]["brake"] is None
     assert turn["log_facts"]["derived"]["steer_direction_at_claim"] == "left"
-    assert turn["log_facts"]["change_points"][0]["signal"] == "steer"
-    assert turn["log_facts"]["change_points"][0]["from_value"] == 0.3
-    assert turn["log_facts"]["change_points"][0]["to_value"] == -0.3
+    turn_dynamics = turn["log_facts"]["derived_dynamics"]
+    assert turn_dynamics["max_deceleration_mps2"]["value"] == pytest.approx(11.223889)
+    assert turn_dynamics["max_deceleration_mps2"]["text"] == "Xe có giảm tốc rất mạnh trong khoảng claim."
+    assert turn_dynamics["steering_activity"]["value"] == pytest.approx(0.2)
+    assert turn_dynamics["decel_brake_mismatch"]["value"] == 0
 
     stop_raw = stop["log_facts"]["raw_telemetry"]
     assert stop_raw["at_claim"]["speed_kmh"] == 20.902

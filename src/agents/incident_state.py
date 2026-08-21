@@ -6,7 +6,6 @@ from typing import Any, Literal, TypedDict
 
 from src.models.api import ModelActivity, ReviewAuditEntry
 from src.models.incidents import (
-    Claim,
     ClaimLogSummary,
     DraftReport,
     LogAnalysisResult,
@@ -36,7 +35,8 @@ class IncidentState(TypedDict, total=False):
         "cancelled",
     ]
     video_memory: VideoMemory
-    claims: list[Claim]
+    canonical_evidence_mapped: bool
+    canonical_evidence_phase: Literal["initial", "auto_reanalysis", "manual_reanalysis"]
     log_evidence_summary: LogEvidenceSummary
     claim_log_summaries: list[ClaimLogSummary]
     log_analysis: LogAnalysisResult
@@ -50,6 +50,7 @@ class IncidentState(TypedDict, total=False):
     manual_reanalysis_count: int
     review_target_claim_ids: list[str]
     review_feedback: str
+    auto_reanalysis_changed_claim_ids: list[str]
     manual_reanalysis_changed_claim_ids: list[str]
     last_review_action: Literal["approve", "edit", "reanalyze", "not_incident"]
     review_audit: list[ReviewAuditEntry]

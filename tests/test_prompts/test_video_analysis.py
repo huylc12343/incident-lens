@@ -36,6 +36,7 @@ def test_video_analysis_prompt_selects_mode_instruction(
     assert "timeline = []; claims = []" not in prompt.text
     assert "khẳng định quan trọng về diễn biến của video" in prompt.text
     assert "Timeline các sự kiện quan trọng" in prompt.text
+    assert "Timeline mô tả toàn bộ video bằng 3–6 mốc" in prompt.text
     assert "[0, video_duration]" in prompt.text
     assert "không mở rộng incident_window" in prompt.text
     assert "[incident_window.t_start, incident_window.t_end]" not in prompt.text

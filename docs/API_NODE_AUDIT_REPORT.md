@@ -779,7 +779,7 @@ Delete xóa checkpoint/report nhưng không xóa normalized video, clip, frames,
 |---|---|---|
 | [`src/services/llm.py`](../src/services/llm.py) | `get_llm()` | Không có caller trong `src`, `tests`, `main_test.py` |
 | [`src/agents/tools/example_tool.py`](../src/agents/tools/example_tool.py) | `search_knowledge`, `calculate`, `_eval_node` | Không được graph/router import |
-| [`src/prompts/reanalysis.py:14-35`](../src/prompts/reanalysis.py#L14) | `build_auto_reanalysis_prompt` single-claim | Production dùng plural `build_auto_reanalysis_prompt_for_conflicts`; single version chỉ còn tests/export |
+| [`src/prompts/auto_reanalysis.py:6-23`](../src/prompts/auto_reanalysis.py#L6) | `build_auto_reanalysis_prompt` single-claim | Production dùng plural `build_auto_reanalysis_prompt_for_conflicts`; single version chỉ còn tests/export |
 | [`main_test.py:177-204`](../main_test.py#L177) | `_upload_and_start` sync | UI chỉ gọi `_upload_and_start_async` tại line 79 |
 
 Nếu giữ endpoint `/chat` placeholder thì `src/agents/graph.py`, `state.py`, `nodes/example_node.py` vẫn đang dùng; chúng không hoàn toàn dead. Tuy nhiên đây là demo echo, không phải incident system.

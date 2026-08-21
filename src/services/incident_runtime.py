@@ -17,7 +17,6 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from src.agents.incident_graph import IncidentGraphDependencies, LangGraphIncidentRunner, build_incident_graph
 from src.config import Settings
 from src.models.api import IncidentCreateRequest
-from src.models.incidents import VLMProvider
 from src.services.async_worker import AsyncWorker
 from src.services.charts import ChartService
 from src.services.langsmith_tracing import LangSmithTracing, build_langsmith_tracing
@@ -28,13 +27,12 @@ from src.services.report_repository import SQLiteReportRepository
 from src.services.reporting import OpenAIReportService
 from src.services.verification import OpenAIVerificationService
 from src.services.video_memory import VideoMemoryLimits, VideoMemoryWorkflow, VideoMemoryWorkflowConfig
-from src.services.vlm import OpenAIVLMService, QwenNativeVideoVLMService
+from src.services.vlm import QwenNativeVideoVLMService
 from src.services.workflow import WorkflowError, WorkflowService
 
 
 @dataclass(frozen=True)
 class ProviderClients:
-    openai_vlm: Any | None = None
     openai_verification: Any | None = None
     openai_report: Any | None = None
     qwen: Any | None = None
@@ -110,7 +108,7 @@ async def incident_workflow_service(
     clients: ProviderClients | None = None,
 ) -> AsyncIterator[WorkflowService]:
     clients = clients or ProviderClients()
-    media = MediaService()
+    media = MediaService(redaction_image_size=settings.redaction_image_size)
     tracing = build_langsmith_tracing(settings)
     observability = ModelActivityRegistry(
         max_provider_requests_per_incident=settings.provider_request_limit_per_incident,
@@ -122,17 +120,10 @@ async def incident_workflow_service(
         vlm=vlm,
         config=VideoMemoryWorkflowConfig(
             artifact_dir=settings.artifact_dir,
-            frame_fps=settings.vlm_frame_fps,
             frame_width=settings.vlm_frame_width,
             frame_height=settings.vlm_frame_height,
             frame_format=settings.vlm_frame_format,
             frame_jpeg_quality=settings.vlm_frame_jpeg_quality,
-            max_frames=settings.vlm_max_frames,
-            max_frames_per_request=settings.vlm_max_frames_per_request,
-            frame_overflow_strategy=settings.vlm_frame_overflow_strategy,
-            frame_batch_size=settings.vlm_frame_batch_size,
-            frame_batch_overlap=settings.vlm_frame_batch_overlap,
-            frame_max_batches=settings.vlm_frame_max_batches,
             incident_frame_fps=settings.vlm_reanalysis_frame_fps,
             incident_max_frames=settings.vlm_reanalysis_max_frames,
             incident_clip_min_duration_s=settings.incident_clip_min_duration_s,
@@ -143,9 +134,10 @@ async def incident_workflow_service(
             video_target_fps=settings.vlm_video_target_fps,
             video_codec=settings.vlm_video_codec,
             video_pixel_format=settings.vlm_video_pixel_format,
+            video_redaction_enabled=settings.video_redaction_enabled,
             video_max_output_bytes=(
                 min(settings.vlm_video_max_output_bytes, settings.qwen_base64_max_video_bytes)
-                if settings.vlm_provider == VLMProvider.QWEN and not settings.qwen_artifact_url_base.strip()
+                if not settings.qwen_artifact_url_base.strip()
                 else settings.vlm_video_max_output_bytes
             ),
             max_duration_s=settings.incident_max_duration_s,
@@ -179,10 +171,7 @@ async def incident_workflow_service(
     dependencies = IncidentGraphDependencies(
         media=media,
         video_workflow=video_workflow,
-        log_analysis=LogAnalysisService(
-            brake_rise_threshold=settings.log_brake_rise_threshold,
-            steering_change_threshold=settings.log_steering_change_threshold,
-        ),
+        log_analysis=LogAnalysisService(),
         charts=ChartService(),
         verification=verification,
         report=report,
@@ -233,40 +222,27 @@ def _build_vlm(
     clients: ProviderClients,
     observability: ModelActivityRegistry | None = None,
     tracing: LangSmithTracing | None = None,
-) -> OpenAIVLMService | QwenNativeVideoVLMService:
-    if settings.vlm_provider == VLMProvider.OPENAI:
-        return OpenAIVLMService(
-            model=settings.openai_vlm_model_name,
-            client=clients.openai_vlm,
-            api_key=_openai_key(settings, clients.openai_vlm),
-            timeout_s=settings.vlm_timeout_s,
-            temperature=settings.vlm_temperature,
-            max_images_per_request=settings.vlm_max_frames_per_request,
-            observability=observability,
-            tracing=tracing,
-        )
-    if settings.vlm_provider == VLMProvider.QWEN:
-        if clients.qwen is None and not settings.dashscope_api_key.strip():
-            raise ValueError("DASHSCOPE_API_KEY is required for the configured Qwen VLM provider")
-        return QwenNativeVideoVLMService(
-            model=settings.qwen_vlm_model_name,
-            client=clients.qwen,
-            api_key=settings.dashscope_api_key or None,
-            base_url=settings.qwen_base_url,
-            artifact_dir=settings.artifact_dir,
-            artifact_url_base=settings.qwen_artifact_url_base,
-            base64_max_video_bytes=settings.qwen_base64_max_video_bytes,
-            timeout_s=settings.vlm_timeout_s,
-            temperature=0.0,
-            video_fps=settings.qwen_video_fps,
-            enable_thinking=settings.qwen_enable_thinking,
-            thinking_budget=settings.qwen_thinking_budget,
-            max_structured_output_retries=settings.vlm_structured_output_retries,
-            max_network_retries=settings.provider_network_retries,
-            observability=observability,
-            tracing=tracing,
-        )
-    raise ValueError(f"unsupported VLM provider: {settings.vlm_provider.value}")
+) -> QwenNativeVideoVLMService:
+    if clients.qwen is None and not settings.dashscope_api_key.strip():
+        raise ValueError("DASHSCOPE_API_KEY is required for the Qwen VLM")
+    return QwenNativeVideoVLMService(
+        model=settings.qwen_vlm_model_name,
+        client=clients.qwen,
+        api_key=settings.dashscope_api_key or None,
+        base_url=settings.qwen_base_url,
+        artifact_dir=settings.artifact_dir,
+        artifact_url_base=settings.qwen_artifact_url_base,
+        base64_max_video_bytes=settings.qwen_base64_max_video_bytes,
+        timeout_s=settings.vlm_timeout_s,
+        temperature=0.0,
+        video_fps=settings.qwen_video_fps,
+        enable_thinking=settings.qwen_enable_thinking,
+        thinking_budget=settings.qwen_thinking_budget,
+        max_structured_output_retries=settings.vlm_structured_output_retries,
+        max_network_retries=settings.provider_network_retries,
+        observability=observability,
+        tracing=tracing,
+    )
 
 
 def _openai_key(settings: Settings, client: Any | None) -> str | None:

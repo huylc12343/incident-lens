@@ -68,7 +68,7 @@ async def test_qwen_sends_native_video_to_dashscope_chat_completions() -> None:
     assert call["response_format"] == {"type": "json_object"}
     structured_prompt = call["messages"][0]["content"]
     assert "<json_schema>" in structured_prompt
-    assert '"analysis_mode"' in structured_prompt
+    assert '"analysis_mode"' not in structured_prompt
     assert "Quy tắc phân tích hệ thống." in structured_prompt
     assert "Tập trung vào va chạm chính." not in structured_prompt
     assert "Video bắt đầu tại 0s và kết thúc tại 2s" in structured_prompt
@@ -260,6 +260,15 @@ async def test_qwen_contract_omits_provider_visual_evidence_fields() -> None:
                 "evidence": [{"evidence_id": "1.0", "timestamp_s": 1}],
             }
         ],
+        "revision": 99,
+        "analysis_mode": "rolling_batches",
+        "sampling_metadata": {
+            "requested_fps": 30,
+            "sampled_frame_count": 60,
+            "source_duration_s": 2,
+            "batch_count": 1,
+        },
+        "remote_media_handles": [],
     }
     response = SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
@@ -279,9 +288,20 @@ async def test_qwen_contract_omits_provider_visual_evidence_fields() -> None:
 
     assert result.timeline[0].evidence_ids == []
     assert result.claims[0].evidence == []
+    assert result.analysis_mode == AnalysisMode.NATIVE_VIDEO
+    assert result.revision == 1
+    assert result.sampling_metadata is None
+    assert result.remote_media_handles == []
     system_prompt = client.chat.completions.create.await_args.kwargs["messages"][0]["content"]
-    assert '"evidence_ids"' not in system_prompt
-    assert '"evidence"' not in system_prompt
+    for backend_field in (
+        "evidence_ids",
+        "evidence",
+        "revision",
+        "analysis_mode",
+        "sampling_metadata",
+        "remote_media_handles",
+    ):
+        assert f'"{backend_field}"' not in system_prompt
 
 
 @pytest.mark.asyncio
@@ -708,8 +728,6 @@ async def test_qwen_retries_collision_denial_that_conflicts_with_its_observation
 
 def test_qwen_runtime_allows_base64_mode_without_public_artifact_url() -> None:
     settings = Settings(
-        vlm_provider="qwen",
-        vlm_input_mode="native_video",
         dashscope_api_key="test-key",
         qwen_artifact_url_base="",
     )
@@ -756,3 +774,62 @@ def test_qwen_requires_public_url_for_large_local_video(tmp_path) -> None:
         service._public_video_url(str(video))
 
     assert exc_info.value.code == "QWEN_PUBLIC_VIDEO_URL_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_qwen_reanalysis_short_clip_requires_global_source_timestamps() -> None:
+    """A focused clip retains its source-video time coordinates in Qwen's contract."""
+    memory = VideoMemory(
+        global_scene="Đường giao thông.",
+        incident_window=IncidentWindow(t_start=25, t0=26.5, t_end=29),
+        revision=3,
+        analysis_mode=AnalysisMode.NATIVE_VIDEO,
+    )
+    payload = {
+        "claims": [
+            {
+                "claim_id": "claim-1",
+                "text": "Xe bắt đầu rẽ phải.",
+                "timestamp_s": 26.5,
+            }
+        ]
+    }
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
+    )
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=response)))
+    )
+    service = QwenNativeVideoVLMService(model="qwen3-vl-flash", client=client)
+    request = ReanalysisRequest(
+        incident_id="INC-QWEN-SHORT-REANALYSIS",
+        prompt=PromptEnvelope(
+            text="Chỉ phân tích lại claim mục tiêu.",
+            context={
+                "target_claims": [{"claim_id": "claim-1", "text": "Xe bắt đầu rẽ phải.", "timestamp_s": 26.5}],
+                "verification_reasons": {"claim-1": "Telemetry contradicts the turn claim."},
+                "reanalysis_window": [24.5, 28.5],
+            },
+        ),
+        target_claim_ids=["claim-1"],
+        incident_window=memory.incident_window,
+        current_memory=memory,
+        source_duration_s=45,
+        normalized_video_uri="https://cdn.example.test/artifacts/reanalysis/claim-1.mp4",
+        input_video_start_s=24.5,
+        input_video_end_s=28.5,
+    )
+
+    result = await service.reanalyze_claims(request)
+
+    call = client.chat.completions.create.await_args.kwargs
+    structured_prompt = call["messages"][0]["content"]
+    assert call["messages"][1]["content"][0]["video_url"]["url"] == request.normalized_video_uri
+    assert call["messages"][1]["content"][1]["text"] == (
+        '<context>{"reanalysis_window":[24.5,28.5],"target_claims":[{"claim_id":"claim-1","text":"Xe bắt đầu rẽ phải.","timestamp_s":26.5}],"verification_reasons":{"claim-1":"Telemetry contradicts the turn claim."}}</context>'
+    )
+    assert "mốc 0s của clip này tương ứng với 24.5s của video gốc" in structured_prompt
+    assert "Clip phủ vùng 24.5s đến 28.5s của video gốc" in structured_prompt
+    assert "timestamp toàn cục của video gốc" in structured_prompt
+    assert "[24.5, 28.5]" in structured_prompt
+    assert result.claims[0].timestamp_s == 26.5

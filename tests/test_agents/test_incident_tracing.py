@@ -24,3 +24,18 @@ async def test_runner_adds_trace_metadata_without_changing_graph_result() -> Non
     }
     assert config["tags"] == ["workflow:incident-analysis", "phase:start"]
     assert config["run_name"] == "incident-analysis"
+
+
+@pytest.mark.asyncio
+async def test_runner_omits_legacy_top_level_claims_from_public_state() -> None:
+    graph = AsyncMock()
+    graph.ainvoke.return_value = {
+        "incident_id": "INC-TRACE",
+        "status": "awaiting_review",
+        "claims": [{"claim_id": "stale-claim"}],
+    }
+    runner = LangGraphIncidentRunner(graph)
+
+    result = await runner.start({"incident_id": "INC-TRACE"})
+
+    assert "claims" not in result

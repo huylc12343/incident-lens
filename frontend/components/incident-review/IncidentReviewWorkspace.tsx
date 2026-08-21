@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { artifactUrl, getIncident, reviewIncident } from "../../lib/incidentApi";
+import { getEvaluationMismatches } from "../../lib/groundTruthEvaluation";
 import { INCIDENT_KEYS } from "../../lib/incidentSession";
 import type { Claim, IncidentSnapshot, ReviewPayload } from "../../types/incident";
 import { ProcessingPipeline } from "../ProcessingPipeline";
@@ -77,6 +78,8 @@ export function IncidentReviewWorkspace() {
   };
 
   const report = snapshot?.final_report ?? snapshot?.draft_report;
+  const evaluationMismatches = snapshot ? getEvaluationMismatches(snapshot) : [];
+  const hasCriticalEvaluationMismatch = evaluationMismatches.some((mismatch) => mismatch.critical);
   const clip = artifactUrl(snapshot?.artifact_uris.incident_clip);
   const telemetryCharts = snapshot ? Object.entries(snapshot.artifact_uris).filter(([key, uri]) => key.startsWith("chart_") && Boolean(uri)).sort(([left], [right]) => left.localeCompare(right)).map(([id, uri]) => ({ id, uri })) : [];
 
@@ -92,6 +95,7 @@ export function IncidentReviewWorkspace() {
           </section>
         ) : (
           <>
+            {evaluationMismatches.length > 0 && <section className={`ground-truth-alert ${hasCriticalEvaluationMismatch ? "critical" : "warning"}`} role="alert" aria-labelledby="ground-truth-alert-title"><div><span className="ground-truth-alert-icon" aria-hidden="true">!</span><div><strong id="ground-truth-alert-title">Cần rà soát: Kết luận AI chưa khớp Ground Truth</strong><p>{evaluationMismatches[0].description}{evaluationMismatches.length > 1 ? ` Có thêm ${evaluationMismatches.length - 1} sai lệch cần kiểm tra.` : ""}</p><small>{evaluationMismatches.map((mismatch) => mismatch.label).join(" · ")}</small></div></div><a href="#ground-truth-comparison">Xem đối chiếu</a></section>}
             <div className="review-command-bar">
               <div><span className="command-status-dot" /><strong>{snapshot.status === "awaiting_review" ? "Ready for engineer review" : `Workflow: ${snapshot.status}`}</strong><small>{snapshot.claims.length} AI observation(s) · {snapshot.has_log ? "Video + telemetry" : "Video only"}</small></div>
               <div><a className="command-secondary" href="#selected-evidence">Inspect evidence</a><button type="button" className="command-decision" disabled={snapshot.status !== "awaiting_review" || busy} onClick={() => setDecisionOpen(true)}><span aria-hidden="true">☷</span> Make decision</button></div>

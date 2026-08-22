@@ -36,19 +36,22 @@ export function IncidentReviewWorkspace() {
     const id = sessionStorage.getItem(INCIDENT_KEYS.incidentId);
     if (!id) { setError("No active incident. Start an analysis or open one from History."); return; }
     let active = true;
+    let failures = 0;
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
       try {
         const next = await getIncident(id);
         if (!active) return;
+        failures = 0;
         setSnapshot(next);
         sessionStorage.setItem(INCIDENT_KEYS.snapshot, JSON.stringify(next));
         setSelectedClaimId((current) => current || next.claims[0]?.claim_id || "");
         if (["queued", "running"].includes(next.status)) timer = setTimeout(refresh, 1500);
       } catch (cause) {
         if (active) {
+          failures += 1;
           setError(cause instanceof Error ? cause.message : "Could not load incident.");
-          timer = setTimeout(refresh, 3000);
+          if (failures < 5) timer = setTimeout(refresh, 3000);
         }
       }
     };
@@ -120,11 +123,12 @@ export function IncidentReviewWorkspace() {
           <>
             {evaluationMismatches.length > 0 && <section className={`ground-truth-alert ${hasCriticalEvaluationMismatch ? "critical" : "warning"}`} role="alert" aria-labelledby="ground-truth-alert-title"><div><span className="ground-truth-alert-icon" aria-hidden="true">!</span><div><strong id="ground-truth-alert-title">Cần rà soát: Kết luận AI chưa khớp Ground Truth</strong><p>{evaluationMismatches[0].description}{evaluationMismatches.length > 1 ? ` Có thêm ${evaluationMismatches.length - 1} sai lệch cần kiểm tra.` : ""}</p><small>{evaluationMismatches.map((mismatch) => mismatch.label).join(" · ")}</small></div></div><a href="#ground-truth-comparison">Xem đối chiếu</a></section>}
             {aiFoundNoIncident && <section className="ground-truth-alert warning" role="status" aria-live="polite"><div><span className="ground-truth-alert-icon" aria-hidden="true">!</span><div><strong>AI chưa phát hiện sự cố.</strong><p>Vui lòng kiểm tra bằng chứng và xác nhận đóng case nếu đồng ý.</p></div></div><a href="#engineer-review">Mở phần rà soát</a></section>}
-            <div className="review-command-bar">
+              <div className="review-command-bar">
               <div><span className="command-status-dot" /><strong>{snapshot.status === "awaiting_review" ? "Ready for engineer review" : `Workflow: ${snapshot.status}`}</strong><small>{snapshot.claims.length} AI observation(s) · {snapshot.has_log ? "Video + telemetry" : "Video only"}</small></div>
               <div><a className="command-secondary" href="#selected-evidence">Inspect evidence</a><button type="button" className="command-decision" disabled={snapshot.status !== "awaiting_review" || busy} onClick={() => setDecisionOpen(true)}><span aria-hidden="true">☷</span> Make decision</button></div>
-            </div>
-            <div className="incident-review-workspace" id="engineer-review">
+              </div>
+              {snapshot.status === "failed" && <section className="workspace-panel workspace-state error-state" role="alert"><div><strong>Phân tích không hoàn tất</strong><p>{snapshot.error_message || "Workflow đã dừng trước khi tạo kết quả review."}</p><button type="button" className="command-secondary" onClick={() => router.push("/")}>Quay lại tải lên và thử lại</button></div></section>}
+              <div className="incident-review-workspace" id="engineer-review">
               <main className="incident-evidence-column">
                 <IncidentClipPlayer clipUrl={clip || originalVideoUrl} isOriginalVideo={aiFoundNoIncident && !clip} noIncident={aiFoundNoIncident} start={report?.incident_window?.t_start} focus={report?.incident_window?.t0} end={report?.incident_window?.t_end} claims={snapshot.claims} selectedId={selectedClaimId} onSelect={selectClaim} videoRef={videoRef} />
                 <TelemetryPanel summaries={snapshot.claim_log_summaries} selectedClaimId={selectedClaim?.claim_id ?? ""} hasLog={snapshot.has_log} chartUris={telemetryCharts} comparison={<GroundTruthComparison snapshot={snapshot} />} />

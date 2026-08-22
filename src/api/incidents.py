@@ -61,7 +61,7 @@ async def create_incident(
     service: Any = Depends(get_workflow_service),
 ) -> IncidentSnapshot:
     try:
-        snapshot = await service.create(payload)
+        snapshot = await service.enqueue(payload)
     except Exception as exc:
         raise incident_http_error(exc) from exc
     response.status_code = _response_status(snapshot)

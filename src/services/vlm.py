@@ -1,4 +1,4 @@
-"""Production OpenAI-frames and Qwen-native-video VLM adapters."""
+"""Production Qwen native-video VLM adapter."""
 
 from __future__ import annotations
 
@@ -28,7 +28,6 @@ from src.models.incidents import (
     NativeVideoAnalysisRequest,
     ReanalysisRequest,
     RemoteMediaHandle,
-    TimestampedFramesAnalysisRequest,
     VideoAnalysisRequest,
     VideoMemory,
     VideoMemoryPatch,
@@ -56,227 +55,8 @@ class QwenStructuredOutputValidationError(ValueError):
         self.details = details
 
 
-class OpenAIVLMService:
-    def __init__(
-        self,
-        *,
-        model: str,
-        client: Any | None = None,
-        api_key: str | None = None,
-        timeout_s: float = 120.0,
-        temperature: float = 0.0,
-        max_images_per_request: int = 120,
-        observability: ModelActivityRegistry | None = None,
-        tracing: LangSmithTracing | None = None,
-    ) -> None:
-        if not model.strip():
-            raise ValueError("model must not be blank")
-        if timeout_s <= 0 or max_images_per_request <= 0:
-            raise ValueError("timeout and image limit must be positive")
-        provider_client = client if client is not None else AsyncOpenAI(api_key=api_key)
-        self._client = (
-            tracing.wrap_openai_client(
-                provider_client,
-                name="OpenAI VLM",
-                provider="openai",
-                operation="vlm",
-            )
-            if tracing is not None
-            else provider_client
-        )
-        self._model = model
-        self._timeout_s = timeout_s
-        self._temperature = temperature
-        self._observability = observability
-        self._capabilities = VLMCapabilities(
-            provider=VLMProvider.OPENAI,
-            input_mode=VLMInputMode.TIMESTAMPED_FRAMES,
-            max_images_per_request=max_images_per_request,
-        )
-
-    @property
-    def capabilities(self) -> VLMCapabilities:
-        return self._capabilities
-
-    async def analyze_video(self, request: VideoAnalysisRequest) -> VideoMemory:
-        if not isinstance(request, TimestampedFramesAnalysisRequest):
-            raise VLMServiceError("OPENAI_UNSUPPORTED_INPUT_MODE", "OpenAI VLM accepts timestamped frames only")
-        content = await self._build_frame_content(_prompt_context_text(request.prompt.context), request.manifest.frames)
-        return await self._parse_response(
-            request.prompt.text,
-            content,
-            VideoMemory,
-            "OPENAI_VIDEO_ANALYSIS_FAILED",
-            incident_id=request.incident_id,
-            operation="video_analysis",
-            description="Phân tích toàn bộ video và tạo VideoMemory có cấu trúc.",
-            metadata={"image_count": len(request.manifest.frames), "input_mode": "timestamped_frames"},
-        )
-
-    async def reanalyze_claims(self, request: ReanalysisRequest) -> VideoMemoryPatch:
-        if request.frame_manifest is None:
-            raise VLMServiceError(
-                "OPENAI_REANALYSIS_FRAMES_REQUIRED",
-                "OpenAI re-analysis requires a timestamped frame manifest",
-            )
-        content = await self._build_frame_content(
-            _prompt_context_text(request.prompt.context),
-            request.frame_manifest.frames,
-        )
-        patch = await self._parse_response(
-            request.prompt.text,
-            content,
-            VideoMemoryPatch,
-            "OPENAI_REANALYSIS_FAILED",
-            incident_id=request.incident_id,
-            operation="claim_reanalysis",
-            description="Phân tích lại các claim được chọn trong cửa sổ video liên quan.",
-            metadata={
-                "image_count": len(request.frame_manifest.frames),
-                "target_claim_ids": request.target_claim_ids,
-            },
-        )
-        _validate_patch_targets(patch, request.target_claim_ids)
-        return patch
-
-    async def release_remote_resources(self, handles: list[RemoteMediaHandle]) -> None:
-        return None
-
-    async def _build_frame_content(self, prompt: str, frames: list[Any]) -> list[dict[str, Any]]:
-        image_limit = self._capabilities.max_images_per_request or 0
-        if len(frames) > image_limit:
-            raise VLMServiceError(
-                "OPENAI_FRAME_LIMIT_EXCEEDED",
-                f"received {len(frames)} frames; maximum is {image_limit}",
-            )
-        content: list[dict[str, Any]] = [{"type": "input_text", "text": prompt}]
-        for frame in frames:
-            content.append(
-                {
-                    "type": "input_text",
-                    "text": (
-                        f"frame_id={frame.frame_id}; sequence_index={frame.sequence_index}; "
-                        f"timestamp_s={frame.timestamp_s}; delta_from_previous_s={frame.delta_from_previous_s}"
-                    ),
-                }
-            )
-            content.append(
-                {
-                    "type": "input_image",
-                    "image_url": await _image_data_url(frame.image_uri, frame.mime_type),
-                    "detail": "low",
-                }
-            )
-        return content
-
-    async def _parse_response(
-        self,
-        system_prompt: str,
-        content: list[dict[str, Any]],
-        output_model: type[StructuredModel],
-        error_code: str,
-        *,
-        incident_id: str,
-        operation: str,
-        description: str,
-        metadata: dict[str, Any],
-    ) -> StructuredModel:
-        activity_id = None
-        response = None
-        if self._observability is not None:
-            activity_id = self._observability.start(
-                incident_id=incident_id,
-                step="vlm",
-                operation=operation,
-                description=description,
-                provider="openai",
-                model=self._model,
-                metadata=metadata,
-            )
-        try:
-            request_kwargs: dict[str, Any] = {
-                "model": self._model,
-                "input": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": content},
-                ],
-                "text_format": output_model,
-                "timeout": self._timeout_s,
-            }
-            if not self._model.startswith("gpt-5"):
-                request_kwargs["temperature"] = self._temperature
-            response = await self._client.responses.parse(
-                **request_kwargs,
-            )
-            parsed = getattr(response, "output_parsed", None)
-            if parsed is None:
-                output_text = getattr(response, "output_text", "")
-                parsed = json.loads(output_text)
-            result = output_model.model_validate(parsed)
-            if activity_id is not None:
-                self._observability.complete(activity_id, response)
-            return result
-        except VLMServiceError:
-            raise
-        except ModelRequestBudgetError:
-            raise
-        except (ValidationError, ValueError, TypeError, json.JSONDecodeError) as exc:
-            if activity_id is not None:
-                self._observability.fail(activity_id, "VLM_STRUCTURED_OUTPUT_INVALID", response)
-            raise VLMServiceError("VLM_STRUCTURED_OUTPUT_INVALID", str(exc)) from exc
-        except AuthenticationError as exc:
-            if activity_id is not None:
-                self._observability.fail(activity_id, "OPENAI_AUTHENTICATION_FAILED", response)
-            raise VLMServiceError(
-                "OPENAI_AUTHENTICATION_FAILED",
-                "OpenAI authentication failed; check OPENAI_API_KEY",
-            ) from exc
-        except PermissionDeniedError as exc:
-            if activity_id is not None:
-                self._observability.fail(activity_id, "OPENAI_PERMISSION_DENIED", response)
-            raise VLMServiceError(
-                "OPENAI_PERMISSION_DENIED",
-                "OpenAI denied access to the configured video analysis model",
-            ) from exc
-        except RateLimitError as exc:
-            if activity_id is not None:
-                self._observability.fail(activity_id, "OPENAI_RATE_LIMITED", response)
-            raise VLMServiceError(
-                "OPENAI_RATE_LIMITED",
-                "OpenAI rate limit or quota was exceeded",
-                retryable=True,
-            ) from exc
-        except APITimeoutError as exc:
-            if activity_id is not None:
-                self._observability.fail(activity_id, "OPENAI_VIDEO_ANALYSIS_TIMEOUT", response)
-            raise VLMServiceError(
-                "OPENAI_VIDEO_ANALYSIS_TIMEOUT",
-                "OpenAI video analysis timed out",
-                retryable=True,
-            ) from exc
-        except APIConnectionError as exc:
-            if activity_id is not None:
-                self._observability.fail(activity_id, "OPENAI_CONNECTION_FAILED", response)
-            raise VLMServiceError(
-                "OPENAI_CONNECTION_FAILED",
-                "Could not connect to OpenAI",
-                retryable=True,
-            ) from exc
-        except (BadRequestError, NotFoundError) as exc:
-            if activity_id is not None:
-                self._observability.fail(activity_id, "OPENAI_VIDEO_ANALYSIS_REQUEST_INVALID", response)
-            raise VLMServiceError(
-                "OPENAI_VIDEO_ANALYSIS_REQUEST_INVALID",
-                "OpenAI rejected the configured video analysis model or structured request",
-            ) from exc
-        except Exception as exc:
-            if activity_id is not None:
-                self._observability.fail(activity_id, error_code, response)
-            raise VLMServiceError(error_code, str(exc), retryable=True) from exc
-
-
 class QwenNativeVideoVLMService:
-    """DashScope OpenAI-compatible adapter for Qwen3-VL-Flash native video."""
+    """DashScope adapter for Qwen3-VL-Flash native video."""
 
     def __init__(
         self,
@@ -329,7 +109,11 @@ class QwenNativeVideoVLMService:
         self._max_structured_output_retries = max_structured_output_retries
         self._max_network_retries = max_network_retries
         self._observability = observability
-        self._capabilities = VLMCapabilities(provider=VLMProvider.QWEN, input_mode=VLMInputMode.NATIVE_VIDEO)
+        self._capabilities = VLMCapabilities(
+            provider=VLMProvider.QWEN,
+            input_mode=VLMInputMode.NATIVE_VIDEO,
+            native_video_fps=video_fps,
+        )
 
     @property
     def capabilities(self) -> VLMCapabilities:
@@ -354,6 +138,15 @@ class QwenNativeVideoVLMService:
     async def reanalyze_claims(self, request: ReanalysisRequest) -> VideoMemoryPatch:
         if not request.normalized_video_uri:
             raise VLMServiceError("QWEN_REANALYSIS_VIDEO_REQUIRED", "Qwen re-analysis requires normalized_video_uri")
+        timestamp_bounds = (
+            (request.input_video_start_s, request.input_video_end_s)
+            if request.input_video_start_s is not None and request.input_video_end_s is not None
+            else (
+                (0.0, request.source_duration_s)
+                if request.source_duration_s is not None
+                else (request.incident_window.t_start, request.incident_window.t_end)
+            )
+        )
         patch = await self._generate(
             incident_id=request.incident_id,
             operation="claim_reanalysis",
@@ -366,11 +159,8 @@ class QwenNativeVideoVLMService:
                 "target_claim_ids": request.target_claim_ids,
                 "base_revision": request.current_memory.revision,
             },
-            timestamp_bounds=(
-                (0.0, request.source_duration_s)
-                if request.source_duration_s is not None
-                else (request.incident_window.t_start, request.incident_window.t_end)
-            ),
+            timestamp_bounds=timestamp_bounds,
+            input_video_start_s=request.input_video_start_s,
         )
         _validate_patch_targets(patch, request.target_claim_ids)
         return patch
@@ -390,6 +180,7 @@ class QwenNativeVideoVLMService:
         output_model: type[StructuredModel],
         model_defaults: dict[str, Any] | None = None,
         timestamp_bounds: tuple[float, float] | None = None,
+        input_video_start_s: float | None = None,
     ) -> StructuredModel:
         activity_id = None
         response = None
@@ -400,6 +191,18 @@ class QwenNativeVideoVLMService:
                 definitions.get("Claim", {}).get("properties", {}).pop("evidence", None)
                 definitions.get("TimelineEvent", {}).get("properties", {}).pop("evidence_ids", None)
                 definitions.pop("EvidenceReference", None)
+                properties = schema.get("properties", {})
+                for field_name in (
+                    "revision",
+                    "analysis_mode",
+                    "sampling_metadata",
+                    "remote_media_handles",
+                ):
+                    properties.pop(field_name, None)
+                if "required" in schema:
+                    schema["required"] = [field_name for field_name in schema["required"] if field_name in properties]
+                definitions.pop("SamplingMetadata", None)
+                definitions.pop("RemoteMediaHandle", None)
             output_schema = json.dumps(
                 schema,
                 ensure_ascii=False,
@@ -412,15 +215,25 @@ class QwenNativeVideoVLMService:
                 f"<json_schema>{output_schema}</json_schema>"
             )
             if timestamp_bounds is not None:
-                structured_system_prompt += (
-                    "\nQUY TẮC TIMESTAMP BẮT BUỘC:\n"
-                    f"- Video bắt đầu tại {timestamp_bounds[0]:g}s và kết thúc tại "
-                    f"{timestamp_bounds[1]:g}s; không được trả timestamp ngoài khoảng này.\n"
-                    "- Phải có t_start <= t0 <= t_end.\n"
-                    "- representative_timestamp_s, mọi timeline.timestamp_s và claim.timestamp_s "
-                    "phải nằm trong khoảng thời gian video đã nêu.\n"
-                    "- Timestamp là số giây tính từ đầu video, không phải số frame hay chuỗi thời gian."
-                )
+                if input_video_start_s is not None:
+                    structured_system_prompt += (
+                        "\nQUY TẮC TIMESTAMP BẮT BUỘC:\n"
+                        "- Input là một clip con: mốc 0s của clip này tương ứng với "
+                        f"{input_video_start_s:g}s của video gốc.\n"
+                        f"- Clip phủ vùng {timestamp_bounds[0]:g}s đến {timestamp_bounds[1]:g}s của video gốc. "
+                        "Mọi timestamp trả về phải là timestamp toàn cục của video gốc, không phải timestamp cục bộ của clip.\n"
+                        f"- Không được trả timestamp ngoài [{timestamp_bounds[0]:g}, {timestamp_bounds[1]:g}]."
+                    )
+                else:
+                    structured_system_prompt += (
+                        "\nQUY TẮC TIMESTAMP BẮT BUỘC:\n"
+                        f"- Video bắt đầu tại {timestamp_bounds[0]:g}s và kết thúc tại "
+                        f"{timestamp_bounds[1]:g}s; không được trả timestamp ngoài khoảng này.\n"
+                        "- Phải có t_start <= t0 <= t_end.\n"
+                        "- representative_timestamp_s, mọi timeline.timestamp_s và claim.timestamp_s "
+                        "phải nằm trong khoảng thời gian video đã nêu.\n"
+                        "- Timestamp là số giây tính từ đầu video, không phải số frame hay chuỗi thời gian."
+                    )
             validation_feedback = ""
             for attempt in range(self._max_structured_output_retries + 1):
                 attempt_user_prompt = user_prompt
@@ -472,6 +285,11 @@ class QwenNativeVideoVLMService:
                                 "video_fps": self._video_fps,
                                 "structured_output_attempt": attempt + 1,
                                 "network_attempt": network_attempt + 1,
+                                **(
+                                    {"source_timestamp_window": list(timestamp_bounds)}
+                                    if input_video_start_s is not None and timestamp_bounds is not None
+                                    else {}
+                                ),
                             },
                         )
                     try:
@@ -591,16 +409,6 @@ class QwenNativeVideoVLMService:
         return f"data:video/mp4;base64,{encoded}"
 
 
-async def _image_data_url(uri: str, mime_type: str) -> str:
-    if uri.startswith("data:"):
-        return uri
-    path = Path(uri).resolve()
-    if not path.is_file():
-        raise VLMServiceError("OPENAI_FRAME_MISSING", f"frame does not exist: {uri}")
-    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-    return f"data:{mime_type};base64,{encoded}"
-
-
 def _parse_json_content(content: str | None) -> object:
     if not content:
         raise ValueError("Qwen returned empty content")
@@ -639,12 +447,16 @@ def _prepare_qwen_payload(
     model_defaults: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Apply backend-owned values before strict Pydantic validation."""
-    prepared = {**payload, **(model_defaults or {})}
+    prepared = dict(payload)
     if output_model not in {VideoMemory, VideoMemoryPatch}:
+        prepared.update(model_defaults or {})
         return prepared
 
     prepared.pop("evidence_id_counter", None)
-    if output_model is VideoMemory:
+    for field_name in ("revision", "analysis_mode", "sampling_metadata", "remote_media_handles"):
+        prepared.pop(field_name, None)
+    prepared.update(model_defaults or {})
+    if output_model in {VideoMemory, VideoMemoryPatch}:
         timeline = prepared.get("timeline")
         if isinstance(timeline, list):
             prepared["timeline"] = [

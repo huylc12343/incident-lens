@@ -2,38 +2,15 @@ import pytest
 from pydantic import ValidationError
 
 from src.config import Settings
-from src.models.incidents import VLMInputMode, VLMProvider
 
 
-@pytest.mark.parametrize(
-    ("provider", "input_mode"),
-    [
-        ("openai", "timestamped_frames"),
-        ("qwen", "native_video"),
-    ],
-)
-def test_supported_provider_mode_pairs(provider: str, input_mode: str) -> None:
-    settings = Settings(_env_file=None, vlm_provider=provider, vlm_input_mode=input_mode)
+def test_settings_exposes_qwen_as_the_only_vlm_configuration() -> None:
+    settings = Settings(_env_file=None)
 
-    assert settings.vlm_provider == VLMProvider(provider)
-    assert settings.vlm_input_mode == VLMInputMode(input_mode)
-
-
-@pytest.mark.parametrize(
-    ("provider", "input_mode"),
-    [
-        ("openai", "native_video"),
-        ("qwen", "timestamped_frames"),
-    ],
-)
-def test_unsupported_provider_mode_pairs_fail_bootstrap(provider: str, input_mode: str) -> None:
-    with pytest.raises(ValidationError, match="unsupported VLM provider/input mode"):
-        Settings(_env_file=None, vlm_provider=provider, vlm_input_mode=input_mode)
-
-
-def test_rolling_batch_overlap_must_be_smaller_than_batch() -> None:
-    with pytest.raises(ValidationError, match="overlap must be smaller"):
-        Settings(_env_file=None, vlm_frame_batch_size=10, vlm_frame_batch_overlap=10)
+    assert settings.qwen_vlm_model_name == "qwen3-vl-flash"
+    assert not hasattr(settings, "openai_vlm_model_name")
+    assert not hasattr(settings, "vlm_provider")
+    assert not hasattr(settings, "vlm_input_mode")
 
 
 def test_incident_clip_context_defaults() -> None:
@@ -45,12 +22,28 @@ def test_incident_clip_context_defaults() -> None:
     assert settings.log_claim_sample_radius == 3
     assert settings.vlm_structured_output_retries == 0
     assert settings.provider_network_retries == 0
+    assert settings.video_redaction_enabled is True
+    assert settings.redaction_image_size == 512
+    assert not hasattr(settings, "log_strong_deceleration_threshold_mps2")
+    assert not hasattr(settings, "log_brake_rise_threshold")
 
 
 def test_claim_log_sample_radius_is_configurable() -> None:
     settings = Settings(_env_file=None, log_claim_sample_radius=5)
 
     assert settings.log_claim_sample_radius == 5
+
+
+def test_redaction_image_size_is_configurable() -> None:
+    settings = Settings(_env_file=None, redaction_image_size=640)
+
+    assert settings.redaction_image_size == 640
+
+
+def test_video_redaction_can_be_disabled() -> None:
+    settings = Settings(_env_file=None, video_redaction_enabled=False)
+
+    assert settings.video_redaction_enabled is False
 
 
 def test_claim_log_sample_radius_rejects_negative_values() -> None:

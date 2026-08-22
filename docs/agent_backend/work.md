@@ -174,9 +174,9 @@ Phase 2 — Prompt package đã hoàn tất. Các builder chỉ tạo `PromptEnv
 
 ### Re-analysis prompts
 
-Đã tạo `src/prompts/reanalysis.py`:
+Đã tách prompt thành `src/prompts/auto_reanalysis.py` và `src/prompts/reanalysis.py`:
 
-- `build_auto_reanalysis_prompt()` chỉ nhận conflict claim, verification reason, log evidence summary và incident window; nguồn là `agent_generated`.
+- `build_auto_reanalysis_prompt()` chỉ nhận conflict claim, verification reason và reanalysis window; nguồn là `agent_generated`.
 - `build_human_reanalysis_prompt()` chỉ nhận target claim IDs, feedback, current claims/evidence; nguồn là `human_provided`.
 - Validate feedback/reason không rỗng, target ID duy nhất và target claim phải tồn tại.
 - Context được serialize JSON ổn định, đặt trong delimiter và được mô tả là dữ liệu thay vì instruction.

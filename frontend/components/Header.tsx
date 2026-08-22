@@ -1,5 +1,10 @@
+"use client";
+
 import Link from "next/link";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { clearDemoSession } from "../lib/auth";
 import { uiText as text } from "../lib/ui-copy";
 const Icon = ({ children }: { children: React.ReactNode }) => (
   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -8,12 +13,31 @@ const Icon = ({ children }: { children: React.ReactNode }) => (
 );
 
 export function Header({
-  active = "home",
   processing = false,
 }: {
-  active?: "home" | "history" | "settings";
   processing?: boolean;
 }) {
+  const router = useRouter();
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isLightOptionDark, setIsLightOptionDark] = useState(false);
+
+  useEffect(() => {
+    if (!isSettingsOpen) return;
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsSettingsOpen(false);
+    };
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [isSettingsOpen]);
+
+  const handleLogout = () => {
+    clearDemoSession();
+    setIsSettingsOpen(false);
+    router.replace("/login");
+  };
+
   return (
     <header className="topbar">
       <div className="nav-inner">
@@ -25,18 +49,6 @@ export function Header({
           </span>
         </Link>
         <nav aria-label={text("Main navigation", "Điều hướng chính")}>
-          <Link className={active === "home" ? "active" : ""} href="/">
-            {text("Dashboard", "Tổng quan")}
-          </Link>
-          <Link
-            className={active === "history" ? "active" : ""}
-            href="/#recent-reviews"
-          >
-            {text("History", "Lịch sử")}
-          </Link>
-          <a className={active === "settings" ? "active" : ""} href="#settings">
-            {text("Settings", "Cài đặt")}
-          </a>
         </nav>
         <div className="nav-actions">
           {processing && <span className="header-status">{text("Incident Review", "Rà soát sự cố")}</span>}
@@ -52,30 +64,59 @@ export function Header({
             </Icon>
             <span className="notification-dot" />
           </button>
-          <button className="icon-button" aria-label={text("Help", "Trợ giúp")}>
-            <Icon>
-              <circle
-                cx="12"
-                cy="12"
-                r="9"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-              />
-              <path
-                d="M9.7 9a2.5 2.5 0 1 1 4.2 1.8c-1.2 1.05-1.9 1.5-1.9 3.2M12 17h.01"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-              />
-            </Icon>
+          <button
+            className="settings-trigger-button"
+            type="button"
+            onClick={() => setIsSettingsOpen(true)}
+            aria-label={text("Settings", "Cài đặt")}
+          >
+            <Image src="/images/settings.png" alt="" width={22} height={22} />
           </button>
           <span className="avatar" aria-label={text("User account", "Tài khoản người dùng")}>
             PT
           </span>
         </div>
       </div>
+      {isSettingsOpen && (
+        <div
+          className="settings-modal-backdrop"
+          role="presentation"
+          onMouseDown={() => setIsSettingsOpen(false)}
+        >
+          <section
+            className="settings-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-modal-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="settings-modal-header">
+              <h2 id="settings-modal-title">{text("Settings", "Cài đặt")}</h2>
+              <button
+                className="settings-modal-close"
+                type="button"
+                onClick={() => setIsSettingsOpen(false)}
+                aria-label={text("Close settings", "Đóng cài đặt")}
+              >
+                <Image src="/images/cancel.png" alt="" width={27} height={27} />
+              </button>
+            </div>
+            <div className="settings-modal-options">
+              <button className="settings-support-option" type="button">{text("Support", "Hỗ trợ")}</button>
+              <button className="settings-history-option" type="button">{text("History", "Lịch sử")}</button>
+              <button
+                className={`settings-light-option${isLightOptionDark ? " is-black" : ""}`}
+                type="button"
+                aria-pressed={isLightOptionDark}
+                onClick={() => setIsLightOptionDark((current) => !current)}
+              >
+                {text("Light", "Ánh sáng")}
+              </button>
+              <button className="settings-logout-option" type="button" onClick={handleLogout}>{text("Log out", "Đăng xuất")}</button>
+            </div>
+          </section>
+        </div>
+      )}
     </header>
   );
 }

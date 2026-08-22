@@ -11,6 +11,7 @@ from src.models.incidents import DraftReport
 
 async def human_review_interrupt_node(state: IncidentState) -> dict[str, object]:
     report = state.get("draft_report")
+    memory = state.get("video_memory")
     if report is None:
         return {
             "status": "failed",
@@ -22,7 +23,7 @@ async def human_review_interrupt_node(state: IncidentState) -> dict[str, object]
         "incident_id": state.get("incident_id"),
         "report": report.model_dump(mode="json"),
         "artifacts": state.get("artifact_uris", {}),
-        "claims": [claim.model_dump(mode="json") for claim in state.get("claims", [])],
+        "claims": [claim.model_dump(mode="json") for claim in (memory.claims if memory else [])],
         "warnings": state.get("warnings", []),
         "actions": ["approve", "edit", "reanalyze", "not_incident"],
     }

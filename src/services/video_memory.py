@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import TypeVar
 
@@ -14,6 +15,7 @@ from src.models.incidents import (
     NativeVideoAnalysisRequest,
     PromptEnvelope,
     SamplingMetadata,
+    TimelineEvent,
     TimestampedFrame,
     TimestampedFramesAnalysisRequest,
     VerificationStatus,
@@ -69,6 +71,7 @@ class VideoMemoryWorkflowConfig:
     video_codec: str = "libx264"
     video_pixel_format: str = "yuv420p"
     video_max_output_bytes: int = 100_000_000
+    video_redaction_enabled: bool = True
     max_duration_s: float = 60.0
     prompt_version: str = "v1"
     limits: VideoMemoryLimits = VideoMemoryLimits()
@@ -181,6 +184,7 @@ async def analyze_single_request(
     if isinstance(request, TimestampedFramesAnalysisRequest):
         memory = memory.model_copy(
             update={
+                "revision": 1,
                 "analysis_mode": AnalysisMode.SINGLE_REQUEST,
                 "sampling_metadata": SamplingMetadata(
                     requested_fps=_manifest_fps(request.manifest),
@@ -188,13 +192,32 @@ async def analyze_single_request(
                     source_duration_s=request.manifest.duration_s,
                     batch_count=1,
                 ),
+                "remote_media_handles": [],
             }
         )
         frame_ids = {frame.frame_id for frame in request.manifest.frames}
         expected_mode = AnalysisMode.SINGLE_REQUEST
     else:
         memory = _prepare_native_video_memory(memory)
-        memory = memory.model_copy(update={"analysis_mode": AnalysisMode.NATIVE_VIDEO})
+        native_video_fps = vlm.capabilities.native_video_fps
+        sampling_metadata = (
+            SamplingMetadata(
+                requested_fps=native_video_fps,
+                sampled_frame_count=math.ceil(request.metadata.duration_s * native_video_fps),
+                source_duration_s=request.metadata.duration_s,
+                batch_count=1,
+            )
+            if native_video_fps is not None
+            else None
+        )
+        memory = memory.model_copy(
+            update={
+                "revision": 1,
+                "analysis_mode": AnalysisMode.NATIVE_VIDEO,
+                "sampling_metadata": sampling_metadata,
+                "remote_media_handles": [],
+            }
+        )
         frame_ids = None
         expected_mode = AnalysisMode.NATIVE_VIDEO
     return validate_video_memory(
@@ -273,6 +296,7 @@ async def analyze_rolling_batches(
     memory = _reset_claim_verification(memory)
     memory = memory.model_copy(
         update={
+            "revision": 1,
             "analysis_mode": AnalysisMode.ROLLING_BATCHES,
             "sampling_metadata": SamplingMetadata(
                 requested_fps=_manifest_fps(request.manifest),
@@ -280,6 +304,7 @@ async def analyze_rolling_batches(
                 source_duration_s=request.manifest.duration_s,
                 batch_count=len(batches),
             ),
+            "remote_media_handles": [],
         }
     )
     return validate_video_memory(
@@ -355,21 +380,48 @@ def merge_video_memory_patch(
     if patch.base_revision != memory.revision:
         raise VideoMemoryError("VLM_PATCH_REVISION_CONFLICT", "patch base revision does not match current memory")
     current_claims = {claim.claim_id: claim for claim in memory.claims}
+    allow_deferred_native_evidence = (
+        memory.analysis_mode == AnalysisMode.NATIVE_VIDEO
+        and bool(memory.claims)
+        and all(not claim.evidence for claim in memory.claims)
+    )
     missing_targets = set(patch.target_claim_ids) - set(current_claims)
     if missing_targets:
         raise VideoMemoryError("VLM_PATCH_TARGET_MISSING", "patch targets claims not present in current memory")
     patch_claims = {claim.claim_id: claim for claim in patch.claims}
-    for claim_id in patch.target_claim_ids:
-        if claim_id in patch_claims:
-            current_claims[claim_id] = patch_claims[claim_id]
+    if len(patch_claims) != len(patch.claims):
+        raise VideoMemoryError("VLM_PATCH_CLAIM_DUPLICATE", "memory patch contains duplicate claim IDs")
+
+    # An omitted target means Qwen could not improve it from the focused clip.
+    # Keep the original claim visible, including its verification result.
+    merged_claims = []
+    for previous_claim in memory.claims:
+        claim_id = previous_claim.claim_id
+        if claim_id not in patch.target_claim_ids:
+            merged_claims.append(previous_claim)
+            continue
+        next_claim = patch_claims.get(claim_id)
+        if next_claim is None:
+            merged_claims.append(previous_claim)
+            continue
+        content_changed = _claim_semantics_changed(previous_claim, next_claim)
+        merged_claims.append(
+            next_claim.model_copy(
+                update={
+                    "verification_status": (
+                        VerificationStatus.UNVERIFIED if content_changed else previous_claim.verification_status
+                    )
+                }
+            )
+        )
 
     handles = _merge_by_id(memory.remote_media_handles, patch.remote_media_handles, "name")
+    timeline = _merge_patch_timeline(memory.timeline, patch.timeline)
     merged = memory.model_copy(
         update={
-            "claims": [
-                claim.model_copy(update={"verification_status": VerificationStatus.UNVERIFIED})
-                for claim in current_claims.values()
-            ],
+            "claims": merged_claims,
+            "video_summary": patch.video_summary if patch.video_summary is not None else memory.video_summary,
+            "timeline": timeline,
             "remote_media_handles": handles,
             "revision": memory.revision + 1,
         }
@@ -379,9 +431,31 @@ def merge_video_memory_patch(
             [evidence.evidence_id for evidence in claim.evidence],
             f"evidence IDs in claim {claim.claim_id}",
         )
-    if any(not claim.evidence for claim in merged.claims):
+    # Direct callers can still merge native output before the canonical-evidence
+    # node runs; the graph maps that evidence before verification/reporting.
+    # All other partial-evidence states remain invalid.
+    if not allow_deferred_native_evidence and any(not claim.evidence for claim in merged.claims):
         raise VideoMemoryError("VLM_CLAIM_EVIDENCE_MISSING", "every claim must contain frame evidence")
     return merged
+
+
+def _merge_patch_timeline(
+    current_timeline: list[TimelineEvent],
+    patch_timeline: list[TimelineEvent] | None,
+) -> list[TimelineEvent]:
+    if patch_timeline is None:
+        return current_timeline
+    if len(patch_timeline) != len(current_timeline):
+        raise VideoMemoryError("VLM_PATCH_TIMELINE_INVALID", "memory patch must preserve the full timeline")
+    if any(
+        not math.isclose(next_event.timestamp_s, previous_event.timestamp_s, abs_tol=1e-6)
+        for previous_event, next_event in zip(current_timeline, patch_timeline, strict=True)
+    ):
+        raise VideoMemoryError("VLM_PATCH_TIMELINE_INVALID", "memory patch cannot change timeline timestamps")
+    return [
+        next_event.model_copy(update={"evidence_ids": previous_event.evidence_ids})
+        for previous_event, next_event in zip(current_timeline, patch_timeline, strict=True)
+    ]
 
 
 def merge_memory_only_patch(
@@ -443,6 +517,8 @@ def merge_memory_only_patch(
     return memory.model_copy(
         update={
             "claims": [current_claims[claim.claim_id] for claim in memory.claims],
+            "video_summary": patch.video_summary if patch.video_summary is not None else memory.video_summary,
+            "timeline": _merge_patch_timeline(memory.timeline, patch.timeline),
             "revision": memory.revision + 1,
         }
     )
@@ -684,6 +760,13 @@ def _manifest_fps(manifest: VideoSequenceManifest) -> float:
 def _require_unique(values: list[str], label: str) -> None:
     if len(values) != len(set(values)):
         raise VideoMemoryError("VLM_DUPLICATE_ID", f"VideoMemory contains duplicate {label}")
+
+
+def _claim_semantics_changed(previous: BaseModel, current: BaseModel) -> bool:
+    """Frame canonicalization alone must not invalidate a telemetry verdict."""
+    return previous.model_dump(exclude={"verification_status", "evidence"}) != current.model_dump(
+        exclude={"verification_status", "evidence"}
+    )
 
 
 def _merge_by_id(

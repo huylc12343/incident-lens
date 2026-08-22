@@ -1,4 +1,4 @@
-"""Deterministic chart artifacts for an incident log slice."""
+"""Deterministic chart artifacts for the full telemetry log."""
 
 from __future__ import annotations
 
@@ -28,14 +28,14 @@ from src.services.log_analysis import (  # noqa: E402
 class ChartService:
     def create_charts(
         self,
-        log_slice_uri: str,
+        log_uri: str,
         output_dir: str,
         *,
         window: IncidentWindow,
         events: list[LogEvent],
         claims: list[Claim],
     ) -> list[str]:
-        _, records = load_log_records(log_slice_uri)
+        _, records = load_log_records(log_uri)
         destination = Path(output_dir).resolve()
         destination.mkdir(parents=True, exist_ok=True)
         timestamps = [record.timestamp_s for record in records]
@@ -127,6 +127,10 @@ class ChartService:
             "error": "#b71c1c",
             "brake_rise": "#c62828",
             "steering_change": "#6a1b9a",
+            "strong_steering_change": "#4a148c",
+            "strong_deceleration": "#d84315",
+            "strong_acceleration": "#1565c0",
+            "extreme_acceleration": "#b71c1c",
         }
         for event in events:
             axis.scatter(

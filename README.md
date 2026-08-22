@@ -2,6 +2,15 @@
 
 Backend FastAPI + LangGraph phân tích video giao thông dưới 60 giây, kết hợp log xe tùy chọn, tạo báo cáo 10 mục và dừng tại bước kỹ thuật viên review. Dự án có Streamlit client độc lập trong `main_test.py` để chạy toàn bộ lifecycle qua HTTP API.
 
+## MVP capabilities
+
+- Phân tích video dưới 60 giây để tạo incident window, timeline, claim và evidence có timestamp.
+- Đối chiếu claim với telemetry CSV theo các trạng thái `supported`, `contradicted`, `unverified`; có focused re-analysis giới hạn khi có mâu thuẫn.
+- Cắt clip/artifact, report 10 phần và LangGraph interrupt để kỹ sư approve, edit, reanalyze hoặc đánh dấu không phải sự cố.
+- Frontend Next.js để upload và review evidence; video native có thể blur khuôn mặt/biển số trước khi gửi VLM.
+
+Xem [kiến trúc](ARCHITECTURE.md), [phương pháp đánh giá](docs/EVALUATION.md) và [privacy/redaction](docs/PRIVACY.md). Đây là MVP hỗ trợ review, không thay thế quyết định của kỹ sư.
+
 ## Luồng xử lý
 
 ```text
@@ -29,12 +38,11 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Cấu hình tối thiểu cho OpenAI timestamped frames:
+Cấu hình tối thiểu:
 
 ```dotenv
 OPENAI_API_KEY=...
-VLM_PROVIDER=openai
-VLM_INPUT_MODE=timestamped_frames
+DASHSCOPE_API_KEY=...
 INCIDENT_INPUT_ROOTS=./data_mock
 INCIDENT_UPLOAD_DIR=./data/uploads
 ARTIFACT_DIR=./data/artifacts
@@ -50,7 +58,7 @@ Khi đối chiếu claim với log, backend trước tiên chỉ giữ các dòn
 
 Gia tốc suy ra từ tốc độ có trị tuyệt đối lớn hơn `15 m/s²` được xem là outlier, không đưa vào metric verification. Backend ghi `LOG_ACCELERATION_OUTLIER_FILTERED` trong warnings để việc lọc không diễn ra âm thầm. Rule này chỉ lọc metric gia tốc bất thường, không tự kết luận có hoặc không có va chạm.
 
-Qwen native video dùng `VLM_PROVIDER=qwen`, `VLM_INPUT_MODE=native_video` và `DASHSCOPE_API_KEY`. Video được resize/pad theo `VLM_VIDEO_TARGET_WIDTH`, `VLM_VIDEO_TARGET_HEIGHT` và chuẩn hóa FPS trước khi gửi. Video local nhỏ hơn `QWEN_BASE64_MAX_VIDEO_BYTES` (mặc định 7 MB) được gửi bằng Base64 Data URL. Video lớn hơn ngưỡng cần `QWEN_ARTIFACT_URL_BASE` công khai `ARTIFACT_DIR`. Qwen gọi `qwen3-vl-flash` qua DashScope chat completions.
+VLM chỉ dùng Qwen native video qua DashScope (`DASHSCOPE_API_KEY`). Video được resize/pad theo `VLM_VIDEO_TARGET_WIDTH`, `VLM_VIDEO_TARGET_HEIGHT` và chuẩn hóa FPS trước khi gửi. Video local nhỏ hơn `QWEN_BASE64_MAX_VIDEO_BYTES` (mặc định 7 MB) được gửi bằng Base64 Data URL. Video lớn hơn ngưỡng cần `QWEN_ARTIFACT_URL_BASE` công khai `ARTIFACT_DIR`. Qwen gọi `qwen3-vl-flash` qua DashScope chat completions. `OPENAI_API_KEY` vẫn chỉ dùng cho LLM, verification và report.
 
 Streamlit upload file vào `INCIDENT_UPLOAD_DIR`; ngưỡng mặc định 200 MB của Streamlit được nâng lên 10 GB và backend không giới hạn dung lượng video. Backend vẫn kiểm tra phần mở rộng, path root, file tồn tại và video không quá 60 giây. File log vẫn chịu giới hạn `INCIDENT_MAX_LOG_BYTES`. URL từ xa và external object storage không thuộc baseline.
 

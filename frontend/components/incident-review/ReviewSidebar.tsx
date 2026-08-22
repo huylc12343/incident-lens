@@ -33,6 +33,11 @@ export function ReviewSidebar({ snapshot, selectedClaim, busy, error, onSelectCl
   const canReview = snapshot.status === "awaiting_review" && !busy;
   const warnings = [...new Set([...snapshot.warnings, ...(report?.evidence_and_warnings?.warnings ?? [])])];
   const classification = classifyIncidentForDisplay(snapshot);
+  const groundTruth = snapshot.ground_truth;
+  const rawAccuracy = snapshot.ai_evaluation?.overall_accuracy;
+  const accuracy = typeof rawAccuracy === "number" && Number.isFinite(rawAccuracy) ? Math.round(rawAccuracy <= 1 ? rawAccuracy * 100 : rawAccuracy) : null;
+  const scoreTone = accuracy === null ? "pending" : accuracy >= 85 ? "high" : accuracy >= 70 ? "good" : accuracy >= 50 ? "medium" : "low";
+  const evaluation = snapshot.ai_evaluation;
 
   return (
     <aside className="incident-review-sidebar expanded-ai-review report-style-review">
@@ -53,6 +58,18 @@ export function ReviewSidebar({ snapshot, selectedClaim, busy, error, onSelectCl
           <div><dt>{text("AI observations", "Quan sát AI")}</dt><dd>{snapshot.claims.length} {text("grounded claim(s)", "nhận định có bằng chứng")}</dd></div>
           <div><dt>{text("Review status", "Trạng thái rà soát")}</dt><dd>{snapshot.status.replaceAll("_", " ")}</dd></div>
         </dl>
+      </section>
+
+      <section className="ai-report-section ai-evaluation-section">
+        <h3>Đánh giá AI</h3>
+        {!groundTruth ? <div className="ground-truth-empty"><strong>Chưa có Ground Truth</strong><p>Incident này chưa thể đo độ chính xác AI.</p><span>Chưa đánh giá</span></div> : <>
+          <div className="evaluation-data-columns"><div><strong>Dự đoán AI</strong><dl><div><dt>Loại sự cố</dt><dd>{evaluation?.prediction?.incident_type ?? "Không có dữ liệu"}</dd></div><div><dt>Mức độ</dt><dd>{evaluation?.prediction?.severity ?? "Không có dữ liệu"}</dd></div><div><dt>t0</dt><dd>{typeof evaluation?.prediction?.timeline?.t0 === "number" ? `${evaluation.prediction.timeline.t0.toFixed(2)}s` : "Không có dữ liệu"}</dd></div></dl></div><div><strong>Ground Truth</strong><dl><div><dt>Loại sự cố</dt><dd>{groundTruth.incident_type ?? "Không có dữ liệu"}</dd></div><div><dt>Mức độ</dt><dd>{groundTruth.severity ?? "Không có dữ liệu"}</dd></div><div><dt>t0</dt><dd>{typeof groundTruth.timeline?.t0 === "number" ? `${groundTruth.timeline.t0.toFixed(2)}s` : "Không có dữ liệu"}</dd></div><div><dt>Nguồn</dt><dd>{groundTruth.source}</dd></div></dl></div></div>
+          {accuracy === null ? <div className="ground-truth-empty evaluation-pending"><strong>Chưa đủ dữ liệu đánh giá</strong><p>Ground Truth đã có, nhưng chưa có dự đoán AI hợp lệ để tính độ chính xác.</p><span>Chưa đánh giá</span></div> : <>
+          <div className={`accuracy-card ${scoreTone}`}><div><span>Độ chính xác tổng thể</span><strong>{accuracy}%</strong></div><span className="ground-truth-badge">{groundTruth.source}</span><div className="accuracy-progress" role="progressbar" aria-label="Độ chính xác tổng thể" aria-valuemin={0} aria-valuemax={100} aria-valuenow={accuracy}><i style={{ width: `${accuracy}%` }} /></div></div>
+          <div className="accuracy-metrics"><div><span>Loại sự cố</span><strong>{evaluation?.incident_type_match === true ? "Khớp" : evaluation?.incident_type_match === false ? "Không khớp" : "Không có dữ liệu"}</strong></div><div><span>Mức độ</span><strong>{evaluation?.severity_match === true ? "Khớp" : evaluation?.severity_match === false ? "Không khớp" : "Không có dữ liệu"}</strong></div><div><span>Sai lệch t0</span><strong>{typeof evaluation?.t0_delta_s === "number" ? `${evaluation.t0_delta_s.toFixed(2)} giây` : "Không có dữ liệu"}</strong></div><div><span>Timeline IoU</span><strong>{typeof evaluation?.timeline_iou === "number" ? `${Math.round(evaluation.timeline_iou * 100)}%` : "Không có dữ liệu"}</strong></div></div>
+          <a className="comparison-link" href="#ground-truth-comparison">Xem đối chiếu chi tiết</a>
+          </>}
+        </>}
       </section>
 
       <section className="ai-report-section all-ai-observations">

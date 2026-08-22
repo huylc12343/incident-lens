@@ -40,7 +40,13 @@ def build_verification_prompt(
             "log_facts": {
                 "raw_telemetry": compact.raw_telemetry.model_dump(mode="json"),
                 "derived": compact.derived.model_dump(mode="json"),
-                "change_points": [item.model_dump(mode="json") for item in compact.change_points],
+                "derived_dynamics": {
+                    name: {
+                        "value": metric.value,
+                        "text": metric.text,
+                    }
+                    for name, metric in compact.derived_dynamics
+                },
             },
             "allowed_evidence_ids": compact.allowed_evidence_ids,
         }
@@ -61,12 +67,21 @@ def build_verification_prompt(
         "video. Log chỉ có thẩm quyền với telemetry như speed, brake, throttle, steering và các signal trực tiếp "
         "khác có trong available_signals. Không dùng telemetry gián tiếp để phủ định hiện tượng hình ảnh.",
 
-        "Quy ước: speed_kmh>=0; brake và throttle thuộc [0,1]; steering<0 là trái, steering=0 là thẳng, "
-        "steering>0 là phải. Chỉ sử dụng signal có trong available_signals.",
+        "Quy ước: speed_kmh>=0; brake và throttle thuộc [0,1]; steering<=-0.1 là trái, "
+        "-0.1<steering<0.1 là thẳng, steering>=0.1 là phải. Chỉ sử dụng signal có trong available_signals.",
 
         "log_facts mô tả một cửa sổ quanh claim gồm raw_telemetry.window_start, at_claim, window_end; "
-        "change_points ghi các thay đổi đáng chú ý; derived là kết quả deterministic do backend tính sẵn. "
-        "Không bịa thêm mẫu log, sensor hoặc phép đo.",
+        "derived và derived_dynamics là kết quả deterministic do backend tính sẵn. Không bịa thêm mẫu log, "
+        "sensor hoặc phép đo.",
+
+        "derived_dynamics chỉ gồm value và text: max_deceleration_mps2 là giảm tốc dương lớn nhất trong "
+        "cửa sổ (m/s²; 0 nghĩa là không giảm tốc, càng lớn càng giảm tốc mạnh); steering_activity là trung "
+        "bình |steer_i-steer_{i-1}| (0 nghĩa là tay lái gần như không đổi, càng lớn càng biến động mạnh); "
+        "decel_brake_mismatch = max_deceleration_mps2 × (1 - max_brake) (càng lớn càng cho thấy giảm tốc "
+        "mạnh nhưng brake không giải thích tương xứng). Các ngưỡng backend: max_deceleration_mps2 và "
+        "decel_brake_mismatch: <3 normal, 3→<7 mild_abnormal, >=7 strong_abnormal; steering_activity: "
+        "<0.03 normal, 0.03→<0.10 mild_abnormal, >=0.10 strong_abnormal. Không tự tính lại hoặc suy ra "
+        "metric ngoài dữ liệu đã cung cấp.",
 
         "Trước khi quyết định, xác định nội bộ claim thuộc loại nào:",
 
@@ -76,7 +91,7 @@ def build_verification_prompt(
 
         "- EVENT/TRANSITION: mô tả một diễn biến trong thời gian, ví dụ 'xe bắt đầu rẽ phải', 'giảm tốc mạnh', "
         "'dừng lại', 'đổi hướng'. Với EVENT, phải đánh giá TOÀN BỘ window_start → at_claim → window_end cùng "
-        "change_points và derived; không được quyết định chỉ từ at_claim.",
+        "derived và derived_dynamics; không được quyết định chỉ từ at_claim.",
 
         "Đặc biệt với hướng lái: nếu cửa sổ cho thấy một pha steering phù hợp với claim rồi sau đó đổi dấu, "
         "sự đổi dấu sau đó không tự động phủ định pha trước. Ví dụ claim mô tả 'bắt đầu rẽ phải' và log cho thấy "

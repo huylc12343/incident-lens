@@ -8,7 +8,7 @@ import { INCIDENT_KEYS } from "../lib/incidentSession";
 import { createIncident, uploadIncident } from "../lib/incidentApi";
 import { uiText as text } from "../lib/ui-copy";
 
-export function AnalysisForm() {
+export function AnalysisForm({ highlighted = false }: { highlighted?: boolean }) {
   const router = useRouter();
   const [video, setVideo] = useState<File | null>(null);
   const [telemetry, setTelemetry] = useState<File[]>([]);
@@ -65,16 +65,12 @@ export function AnalysisForm() {
     }
   }
   return (
-    <section className="workspace-card" aria-labelledby="analysis-title">
+    <section id="upload-evidence" className={`workspace-card${highlighted ? " guide-highlight" : ""}`} aria-labelledby="analysis-title">
       <div className="section-title analysis-section-title">
         <div>
           <p className="eyebrow">{text("New analysis", "Phân tích mới")}</p>
           <h2 id="analysis-title">{text("Upload incident evidence", "Tải lên bằng chứng sự cố")}</h2>
           <p className="section-description">{text("Add the original recording and matching vehicle telemetry to begin a grounded review.", "Thêm video gốc và telemetry tương ứng để bắt đầu rà soát dựa trên bằng chứng.")}</p>
-        </div>
-        <div className="automatic-timestamp" role="note">
-          <strong>{text("Automatic event detection", "Tự động phát hiện sự kiện")}</strong>
-          <span>{text("The event timestamp will be detected from the uploaded recording.", "Mốc thời gian sự kiện sẽ được phát hiện từ video đã tải lên.")}</span>
         </div>
       </div>
       <form onSubmit={submit}>

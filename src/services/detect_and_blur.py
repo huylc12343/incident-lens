@@ -1,12 +1,15 @@
 import argparse
 import re
-import sys
+from functools import lru_cache
 from pathlib import Path
 
 import cv2
 import numpy as np
 import torch
 from ultralytics import YOLO
+
+from src.models.incidents import NativeVideoMetadata
+from src.services.media import NormalizedVideoArtifact
 
 # --- Fix for PyTorch >=2.6 "weights_only" default change ---
 # torch.load() now defaults to weights_only=True, which blocks unpickling the
@@ -183,6 +186,178 @@ def advance_tracks(
     return updated
 
 
+@lru_cache(maxsize=2)
+def _load_yolo(weights_path: str) -> YOLO:
+    """Load each local weight file once for the lifetime of this process."""
+    return YOLO(weights_path)
+
+
+def redact_video(
+    source_uri: str,
+    output_uri: str,
+    *,
+    plate_weights: str | Path | None = None,
+    face_weights: str | Path | None = None,
+    plate_conf: float = 0.05,
+    face_conf: float = 0.05,
+    imgsz: int = 512,
+    augment: bool = False,
+    pad_ratio: float = 0.20,
+    persist_seconds: float = 0.15,
+    track_match_distance: float = 80.0,
+    plate_kernel_ratio: float = 0.75,
+    plate_min_kernel: int = 15,
+    plate_max_kernel: int = 151,
+    face_kernel_ratio: float = 0.60,
+    face_min_kernel: int = 31,
+    face_max_kernel: int = 301,
+) -> NormalizedVideoArtifact:
+    """Blur detected license plates and faces from ``source_uri`` into ``output_uri``.
+
+    This is a synchronous, CPU/GPU-bound operation. Call it through
+    ``asyncio.to_thread`` from an async workflow. The returned artifact can be
+    assigned directly to a native VLM request's ``normalized_video_uri``.
+    """
+    source = Path(source_uri).resolve()
+    output = Path(output_uri).resolve()
+    src_dir = Path(__file__).resolve().parent.parent
+    plate_weights_path = Path(plate_weights or src_dir / "models" / "best_plate.pt").resolve()
+    face_weights_path = Path(face_weights or src_dir / "models" / "best3_face.pt").resolve()
+
+    if not source.is_file():
+        raise FileNotFoundError(f"video source file not found: {source}")
+    if source == output:
+        raise ValueError("output_uri must differ from source_uri")
+    if not plate_weights_path.is_file():
+        raise FileNotFoundError(f"plate weights file not found: {plate_weights_path}")
+    if not face_weights_path.is_file():
+        raise FileNotFoundError(f"face weights file not found: {face_weights_path}")
+    if min(plate_conf, face_conf) < 0 or max(plate_conf, face_conf) > 1:
+        raise ValueError("detection confidence thresholds must be between 0 and 1")
+    if imgsz <= 0 or min(pad_ratio, persist_seconds, track_match_distance) < 0:
+        raise ValueError("redaction dimensions and tracking parameters must be valid")
+
+    use_cuda = torch.cuda.is_available()
+    device = 0 if use_cuda else "cpu"
+    plate_model = _load_yolo(str(plate_weights_path))
+    face_model = _load_yolo(str(face_weights_path))
+
+    cap = cv2.VideoCapture(str(source))
+    if not cap.isOpened():
+        raise RuntimeError(f"could not open video source: {source}")
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    if width <= 0 or height <= 0:
+        cap.release()
+        raise RuntimeError("video source has invalid dimensions")
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    out_video = cv2.VideoWriter(
+        str(output),
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        fps,
+        (width, height),
+    )
+    if not out_video.isOpened():
+        cap.release()
+        raise RuntimeError(f"could not open video output: {output}")
+
+    persist_frames = max(1, int(round(persist_seconds * fps)))
+    plate_tracks, face_tracks = [], []
+    frame_idx = 0
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            frame_idx += 1
+
+            plate_res = plate_model.predict(
+                source=frame,
+                conf=plate_conf,
+                imgsz=imgsz,
+                device=device,
+                quantize=16 if use_cuda else None,
+                augment=augment,
+                verbose=False,
+            )[0]
+            face_res = face_model.predict(
+                source=frame,
+                conf=face_conf,
+                imgsz=imgsz,
+                device=device,
+                quantize=16 if use_cuda else None,
+                augment=augment,
+                verbose=False,
+            )[0]
+            plate_boxes = [box.xyxy[0].cpu().numpy() for box in plate_res.boxes] if len(plate_res.boxes) else []
+            face_boxes = [box for box in face_res.boxes.xyxy.cpu().numpy()] if len(face_res.boxes) else []
+
+            plate_tracks = advance_tracks(
+                plate_tracks,
+                plate_boxes,
+                frame_idx,
+                max_missed=persist_frames,
+                match_distance=track_match_distance,
+                width=width,
+                height=height,
+            )
+            face_tracks = advance_tracks(
+                face_tracks,
+                face_boxes,
+                frame_idx,
+                max_missed=persist_frames,
+                match_distance=track_match_distance,
+                width=width,
+                height=height,
+            )
+            for track in plate_tracks:
+                x1, y1, x2, y2 = pad_box(*track["box"], pad_ratio, width, height)
+                blur_region(
+                    frame,
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    kernel_ratio=plate_kernel_ratio,
+                    min_kernel=plate_min_kernel,
+                    max_kernel=plate_max_kernel,
+                )
+            for track in face_tracks:
+                x1, y1, x2, y2 = pad_box(*track["box"], pad_ratio, width, height)
+                blur_region(
+                    frame,
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    kernel_ratio=face_kernel_ratio,
+                    min_kernel=face_min_kernel,
+                    max_kernel=face_max_kernel,
+                )
+            out_video.write(frame)
+    finally:
+        cap.release()
+        out_video.release()
+
+    if frame_idx == 0:
+        raise RuntimeError("video source contains no readable frames")
+    if not output.is_file() or output.stat().st_size == 0:
+        raise RuntimeError("redaction did not create an output video")
+    return NormalizedVideoArtifact(
+        uri=str(output),
+        metadata=NativeVideoMetadata(
+            duration_s=frame_idx / fps,
+            width=width,
+            height=height,
+            fps=fps,
+            size_bytes=output.stat().st_size,
+        ),
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run YOLOv8 license-plate detection and YOLOv8-face detection on the same "
@@ -191,6 +366,8 @@ def main():
     )
     parser.add_argument("--source", type=str, required=True,
                          help="Path to video file or integer for webcam index")
+    parser.add_argument("--output", type=str, default=None,
+                        help="Path for the redacted MP4 output (default: next runs/detect/run_N/run.mp4)")
 
     # Resolve model paths relative to this file:
     # src/services/detect_and_blur.py -> src/models/*.pt
@@ -238,129 +415,34 @@ def main():
                          help="Maximum face blur kernel (default: 301)")
     args = parser.parse_args()
 
-    # --- Resolve and validate source ---
+    # The service accepts local files only; webcam input remains a CLI-only
+    # concern and is intentionally rejected rather than producing an artifact
+    # with an undefined destination duration.
     source_str = args.source.strip()
     if source_str.isdigit():
-        source = int(source_str)
-    else:
-        source = source_str
-        if not Path(source).exists():
-            print(f"Error: Video source file not found at: '{source}'")
-            print("Gợi ý: dùng ngoặc kép \"\" để bọc đường dẫn có khoảng trắng.")
-            sys.exit(1)
-
-    plate_weights_str = args.plate_weights.strip()
-    face_weights_str = args.face_weights.strip()
-    if not Path(plate_weights_str).exists():
-        print(f"Error: Plate weights file not found at: '{plate_weights_str}'")
-        sys.exit(1)
-    if not Path(face_weights_str).exists():
-        print(f"Error: Face weights file not found at: '{face_weights_str}'")
-        sys.exit(1)
-
-    # --- Auto device + inference precision detection ---
-    use_cuda = torch.cuda.is_available()
-    device = 0 if use_cuda else "cpu"
-    quantize = 16 if use_cuda else None  # FP16 on CUDA, FP32 on CPU
-    print(f"Device: {'GPU (cuda:0)' if use_cuda else 'CPU'}"
-          f"{' + FP16' if quantize == 16 else ''}")
-    if not use_cuda:
-        print("⚠ Không phát hiện GPU khả dụng (torch.cuda.is_available() = False).")
-        print("  Nếu máy có GPU NVIDIA, kiểm tra lại driver/CUDA và bản torch đã cài "
-              "(torch+cu1xx) - đây thường là điểm tối ưu tốc độ lớn nhất.")
-
-    print(f"Loading plate model from: {plate_weights_str}")
-    plate_model = YOLO(plate_weights_str)
-    print(f"Loading face model from: {face_weights_str}")
-    face_model = YOLO(face_weights_str)
-
-    cap = cv2.VideoCapture(source)
-    if not cap.isOpened():
-        print(f"Error: Could not open video source {source}")
-        sys.exit(1)
-
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-    # With per-frame detection this is solely the bounded prediction window;
-    # there is no frame-skip gap to hide with a stale box.
-    persist_frames = max(1, int(round(args.persist_seconds * fps)))
-
-    print(f"Video: {width}x{height} @ {fps:.2f}fps, {total_frames} frames")
-    print(f"Config: imgsz={args.imgsz}, per_frame_detection=True, "
-          f"pad_ratio={args.pad_ratio}, persist_frames={persist_frames}, "
-          f"match_distance={args.track_match_distance}, "
-          f"plate_kernel={args.plate_min_kernel}-{args.plate_max_kernel}@{args.plate_kernel_ratio}, "
-          f"face_kernel={args.face_min_kernel}-{args.face_max_kernel}@{args.face_kernel_ratio}")
-
-    run_dir = get_next_run_dir(base_dir="D:\\Tailieu-2026\\vin\\Demo_day\\Vid\\output")
-    run_dir.mkdir(parents=True, exist_ok=True)
-    output_path = run_dir / "run.mp4"
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    out_video = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
-
-    plate_tracks, face_tracks = [], []
-    frame_idx = 0
-    print(f"Starting inference on source: {source}")
-
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
-        frame_idx += 1
-
-        # Full per-frame inference removes the confirmed stale-box failure
-        # mode. The track only bridges a short miss with measured motion.
-        plate_res = plate_model.predict(source=frame, conf=args.plate_conf, imgsz=args.imgsz,
-                                         device=device, quantize=quantize,
-                                         augment=args.augment, verbose=False)[0]
-        face_res = face_model.predict(source=frame, conf=args.face_conf, imgsz=args.imgsz,
-                                       device=device, quantize=quantize,
-                                       augment=args.augment, verbose=False)[0]
-
-        plate_boxes = [b.xyxy[0].cpu().numpy() for b in plate_res.boxes] if len(plate_res.boxes) else []
-        face_boxes = [b for b in face_res.boxes.xyxy.cpu().numpy()] if len(face_res.boxes) else []
-
-        plate_tracks = advance_tracks(
-            plate_tracks, plate_boxes, frame_idx,
-            max_missed=persist_frames, match_distance=args.track_match_distance,
-            width=width, height=height,
-        )
-        face_tracks = advance_tracks(
-            face_tracks, face_boxes, frame_idx,
-            max_missed=persist_frames, match_distance=args.track_match_distance,
-            width=width, height=height,
-        )
-
-        for track in plate_tracks:
-            x1, y1, x2, y2 = pad_box(*track['box'], args.pad_ratio, width, height)
-            blur_region(
-                frame, x1, y1, x2, y2,
-                kernel_ratio=args.plate_kernel_ratio,
-                min_kernel=args.plate_min_kernel,
-                max_kernel=args.plate_max_kernel,
-            )
-
-        for track in face_tracks:
-            x1, y1, x2, y2 = pad_box(*track['box'], args.pad_ratio, width, height)
-            blur_region(
-                frame, x1, y1, x2, y2,
-                kernel_ratio=args.face_kernel_ratio,
-                min_kernel=args.face_min_kernel,
-                max_kernel=args.face_max_kernel,
-            )
-
-        out_video.write(frame)
-        if total_frames:
-            print(f"  Processed {frame_idx}/{total_frames} frames", end="\r")
-
-    cap.release()
-    out_video.release()
-
-    print("\nInference complete!")
-    print(f"Output (plates + faces blurred) saved to: {output_path.resolve()}")
+        parser.error("webcam input is not supported when producing a video artifact")
+    run_dir = get_next_run_dir() if args.output is None else None
+    output_path = Path(args.output) if args.output else run_dir / "run.mp4"
+    artifact = redact_video(
+        source_str,
+        str(output_path),
+        plate_weights=args.plate_weights,
+        face_weights=args.face_weights,
+        plate_conf=args.plate_conf,
+        face_conf=args.face_conf,
+        imgsz=args.imgsz,
+        augment=args.augment,
+        pad_ratio=args.pad_ratio,
+        persist_seconds=args.persist_seconds,
+        track_match_distance=args.track_match_distance,
+        plate_kernel_ratio=args.plate_kernel_ratio,
+        plate_min_kernel=args.plate_min_kernel,
+        plate_max_kernel=args.plate_max_kernel,
+        face_kernel_ratio=args.face_kernel_ratio,
+        face_min_kernel=args.face_min_kernel,
+        face_max_kernel=args.face_max_kernel,
+    )
+    print(f"Output (plates + faces blurred) saved to: {artifact.uri}")
 
 
 if __name__ == "__main__":

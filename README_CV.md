@@ -112,4 +112,3 @@ python src/services/detect_and_blur.py --source "D:\Tailieu-2026\vin\Demo_day\Vi
 ```
 
 Chương trình sẽ dùng hai model trong `src/models/` và in đường dẫn tuyệt đối của file kết quả khi hoàn tất.
-

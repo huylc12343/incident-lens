@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class VLMProvider(StrEnum):
-    OPENAI = "openai"
     QWEN = "qwen"
 
 
@@ -168,6 +167,8 @@ class VideoMemory(ContractModel):
 class VideoMemoryPatch(ContractModel):
     target_claim_ids: list[str] = Field(min_length=1)
     claims: list[Claim] = Field(default_factory=list)
+    video_summary: str | None = Field(default=None, min_length=1)
+    timeline: list[TimelineEvent] | None = None
     remote_media_handles: list[RemoteMediaHandle] = Field(default_factory=list)
     base_revision: int = Field(ge=1)
 
@@ -183,6 +184,8 @@ class VideoMemoryPatch(ContractModel):
 
 
 class TimestampedFramesAnalysisRequest(ContractModel):
+    """Legacy provider-neutral request contract retained for stored workflow data."""
+
     input_mode: Literal[VLMInputMode.TIMESTAMPED_FRAMES] = VLMInputMode.TIMESTAMPED_FRAMES
     incident_id: str = Field(min_length=1)
     prompt: PromptEnvelope
@@ -213,7 +216,23 @@ class ReanalysisRequest(ContractModel):
     source_duration_s: float | None = Field(default=None, gt=0, le=60)
     frame_manifest: VideoSequenceManifest | None = None
     normalized_video_uri: str | None = None
+    # A native re-analysis can receive a short physical clip while all returned
+    # timestamps remain coordinates of the original source video.
+    input_video_start_s: float | None = Field(default=None, ge=0)
+    input_video_end_s: float | None = Field(default=None, gt=0)
     remote_media_handles: list[RemoteMediaHandle] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_input_video_window(self) -> ReanalysisRequest:
+        has_start = self.input_video_start_s is not None
+        has_end = self.input_video_end_s is not None
+        if has_start != has_end:
+            raise ValueError("input_video_start_s and input_video_end_s must be provided together")
+        if has_start and self.input_video_start_s >= self.input_video_end_s:
+            raise ValueError("input video window must satisfy input_video_start_s < input_video_end_s")
+        if self.source_duration_s is not None and has_end and self.input_video_end_s > self.source_duration_s:
+            raise ValueError("input video window cannot exceed source_duration_s")
+        return self
 
 
 class LogEvidenceSummary(ContractModel):
@@ -227,7 +246,17 @@ class LogEvidenceSummary(ContractModel):
 
 class LogEvent(ContractModel):
     event_id: str = Field(min_length=1)
-    event_type: Literal["brake_rise", "steering_change", "disengagement", "warning", "error"]
+    event_type: Literal[
+        "brake_rise",
+        "steering_change",
+        "strong_steering_change",
+        "strong_deceleration",
+        "strong_acceleration",
+        "extreme_acceleration",
+        "disengagement",
+        "warning",
+        "error",
+    ]
     timestamp_s: float = Field(ge=0)
     signal: str = Field(min_length=1)
     value: float | int | str | bool | None = None
@@ -237,7 +266,7 @@ class LogEvent(ContractModel):
 
 
 class LogAnalysisResult(ContractModel):
-    log_slice_uri: str = Field(min_length=1)
+    log_artifact_uri: str = Field(min_length=1)
     summary: LogEvidenceSummary
     events: list[LogEvent] = Field(default_factory=list)
     row_count: int = Field(gt=0)
@@ -284,19 +313,26 @@ class ClaimRawTelemetry(ContractModel):
     window_end: ClaimTelemetrySnapshot
 
 
-class ClaimTelemetryChangePoint(ContractModel):
-    signal: TelemetrySignalName
-    timestamp_s: float = Field(ge=0)
-    from_value: float
-    to_value: float
-    delta: float
-    evidence_ids: list[str] = Field(min_length=1)
-
-
 class ClaimTelemetryDerived(ContractModel):
     movement_state_at_claim: Literal["stopped", "near_stopped", "moving"] | None = None
     steer_direction_at_claim: Literal["left", "straight", "right"] | None = None
     speed_trend: Literal["strong_decrease", "decrease", "stable", "increase"] | None = None
+
+
+class ClaimDerivedDynamicsMetric(ContractModel):
+    value: float | None = None
+    level: Literal["normal", "mild_abnormal", "strong_abnormal"] | None = None
+    text: str = ""
+
+
+class ClaimDerivedDynamics(ContractModel):
+    max_deceleration_mps2: ClaimDerivedDynamicsMetric = Field(
+        default_factory=ClaimDerivedDynamicsMetric
+    )
+    steering_activity: ClaimDerivedDynamicsMetric = Field(default_factory=ClaimDerivedDynamicsMetric)
+    decel_brake_mismatch: ClaimDerivedDynamicsMetric = Field(
+        default_factory=ClaimDerivedDynamicsMetric
+    )
 
 
 class ClaimVerificationContext(ContractModel):
@@ -304,7 +340,7 @@ class ClaimVerificationContext(ContractModel):
     available_signals: list[TelemetrySignalName] = Field(default_factory=list)
     raw_telemetry: ClaimRawTelemetry
     derived: ClaimTelemetryDerived
-    change_points: list[ClaimTelemetryChangePoint] = Field(default_factory=list)
+    derived_dynamics: ClaimDerivedDynamics = Field(default_factory=ClaimDerivedDynamics)
     allowed_evidence_ids: list[str] = Field(default_factory=list, max_length=5)
 
 
@@ -350,9 +386,11 @@ class ReportNarrative(ContractModel):
 
 
 class ReportModelOutput(ContractModel):
-    """Accident assessment fields generated by the report provider; backend owns the rest."""
+    """Accident assessment fields generated by the report provider."""
 
     type_of_accident: AccidentType
+    incident_window: IncidentWindow
+    representative_timestamp_s: float = Field(ge=0)
     timeline: str = Field(min_length=1)
     video_observations: str = Field(min_length=1)
     hypothesized_causes: str = Field(min_length=1)
@@ -402,6 +440,7 @@ class DraftReport(ContractModel):
     general_information: ReportGeneralInformation
     type_of_accident: AccidentType = AccidentType.OTHER_UNKNOWN
     incident_window: IncidentWindow
+    representative_timestamp_s: float | None = Field(default=None, ge=0)
     summary: str = Field(min_length=1)
     timeline: ReportTimelineSection
     video_observations: ReportVideoObservationsSection
@@ -417,6 +456,7 @@ class VLMCapabilities(ContractModel):
     input_mode: VLMInputMode
     supports_reanalysis: bool = True
     max_images_per_request: int | None = Field(default=None, gt=0)
+    native_video_fps: float | None = Field(default=None, gt=0, le=10)
 
 
 @runtime_checkable

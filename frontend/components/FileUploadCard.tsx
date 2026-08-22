@@ -1,11 +1,11 @@
 "use client";
 
 import Image from "next/image";
-import { ChangeEvent, DragEvent, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 import { uiText as text } from "../lib/ui-copy";
 
 type Props = {
-  kind: "video" | "telemetry";
+  kind: "video" | "telemetry" | "groundTruth";
   files: File[];
   onChange: (files: File[]) => void;
 };
@@ -15,6 +15,7 @@ const formatBytes = (bytes: number) =>
     ? `${(bytes / 1024).toFixed(1)} KB`
     : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 const telemetryExtensions = [".csv", ".txt", ".json", ".xls", ".xlsx"];
+const groundTruthExtensions = [".json"];
 const videoIconSrc = "/images/play.png";
 const telemetryIconSrc = "/images/waveform.png";
 
@@ -22,30 +23,48 @@ export function FileUploadCard({ kind, files, onChange }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
   const isVideo = kind === "video";
+  const isGroundTruth = kind === "groundTruth";
+  const isSingleFile = isVideo || isGroundTruth;
+  const selectedFile = files[0];
   const label = isVideo
     ? text("Driving Video", "Video hành trình")
-    : text("Vehicle Telemetry (optional)", "Telemetry phương tiện (tùy chọn)");
+    : isGroundTruth
+      ? text("Ground Truth (optional)", "Ground truth (tùy chọn)")
+      : text("Vehicle Telemetry (optional)", "Telemetry phương tiện (tùy chọn)");
   const accept = isVideo
     ? ".mp4,video/mp4"
-    : ".csv,.txt,.json,.xls,.xlsx,text/csv,text/plain,application/json,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    : isGroundTruth
+      ? ".json,application/json"
+      : ".csv,.txt,.json,.xls,.xlsx,text/csv,text/plain,application/json,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+  useEffect(() => {
+    if (!isVideo || !selectedFile) {
+      setVideoPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(selectedFile);
+    setVideoPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [isVideo, selectedFile]);
   const validate = (candidates: File[]) => {
     if (!candidates.length) return;
     const validFiles = candidates.filter((candidate) => {
       const fileName = candidate.name.toLowerCase();
-      return isVideo
-        ? fileName.endsWith(".mp4")
-        : telemetryExtensions.some((extension) => fileName.endsWith(extension));
+      if (isVideo) return fileName.endsWith(".mp4");
+      if (isGroundTruth) return groundTruthExtensions.some((extension) => fileName.endsWith(extension));
+      return telemetryExtensions.some((extension) => fileName.endsWith(extension));
     });
     if (validFiles.length !== candidates.length) {
       setError(
-        text(`${label} accepts ${isVideo ? "MP4" : "CSV, TXT, JSON, XLS, and XLSX"} files only.`, `${label} chỉ chấp nhận tệp ${isVideo ? "MP4" : "CSV, TXT, JSON, XLS và XLSX"}.`),
+        text(`${label} accepts ${isVideo ? "MP4" : isGroundTruth ? "JSON" : "CSV, TXT, JSON, XLS, and XLSX"} files only.`, `${label} chỉ chấp nhận tệp ${isVideo ? "MP4" : isGroundTruth ? "JSON" : "CSV, TXT, JSON, XLS và XLSX"}.`),
       );
     } else {
       setError("");
     }
     if (!validFiles.length) return;
-    if (isVideo) {
+    if (isSingleFile) {
       onChange([validFiles[0]]);
       return;
     }
@@ -84,15 +103,20 @@ export function FileUploadCard({ kind, files, onChange }: Props) {
           <p>
             {isVideo
               ? text("Upload the recorded driving video associated with the disengagement.", "Tải lên video hành trình liên quan đến sự kiện disengagement.")
-              : text("Upload timestamped vehicle telemetry from the same driving session.", "Tải lên telemetry có mốc thời gian từ cùng phiên hành trình.")}
+              : isGroundTruth
+                ? text("Upload a verified JSON label to compare AI output against reference data.", "Tải lên nhãn JSON đã xác nhận để đối chiếu với kết quả AI.")
+                : text("Upload timestamped vehicle telemetry from the same driving session.", "Tải lên telemetry có mốc thời gian từ cùng phiên hành trình.")}
           </p>
         </div>
         <span className="format-badge">
-          {isVideo ? "MP4 only" : "CSV · TXT · JSON · Excel"}
+          {isVideo ? "MP4" : isGroundTruth ? "JSON" : "CSV · TXT · JSON · Excel"}
         </span>
       </div>
       {files.length ? (
         <div className="selected-files">
+          {isVideo && videoPreviewUrl && (
+            <video className="video-upload-preview" src={videoPreviewUrl} muted preload="metadata" aria-label="Xem trước video đã chọn" />
+          )}
           {files.map((file) => (
             <div className="selected-file" key={`${file.name}-${file.size}-${file.lastModified}`}>
               <span className="file-check">✓</span>
@@ -112,7 +136,7 @@ export function FileUploadCard({ kind, files, onChange }: Props) {
             </div>
           ))}
           <button className="add-more-files" type="button" onClick={() => input.current?.click()}>
-            {isVideo ? text("Change video", "Đổi video") : text("+ Add more files", "+ Thêm tệp")}
+            {isSingleFile ? text("Change file", "Đổi tệp") : text("+ Add more files", "+ Thêm tệp")}
           </button>
           <input ref={input} type="file" hidden multiple accept={accept} onChange={selectFile} aria-label={`Add more ${label} files`} />
         </div>
@@ -142,7 +166,7 @@ export function FileUploadCard({ kind, files, onChange }: Props) {
           <input
             ref={input}
             type="file"
-            multiple={!isVideo}
+            multiple={!isSingleFile}
             accept={accept}
             onChange={selectFile}
             aria-label={`Choose ${label}`}

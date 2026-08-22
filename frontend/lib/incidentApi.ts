@@ -16,11 +16,12 @@ async function responseJson<T>(response: Response): Promise<T> {
   return data as T;
 }
 
-export async function uploadIncident(video: File, log?: File) {
+export async function uploadIncident(video: File, log?: File, groundTruth?: File) {
   const body = new FormData();
   body.append("video", video);
   if (log) body.append("log", log);
-  return responseJson<{ video_uri: string; log_uri: string | null }>(
+  if (groundTruth) body.append("ground_truth", groundTruth);
+  return responseJson<{ video_uri: string; log_uri: string | null; ground_truth_uri: string | null }>(
     await fetch(`${API_URL}/api/v1/incidents/uploads`, { method: "POST", body }),
   );
 }

@@ -12,6 +12,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 WORKDIR /app
 
+# OpenCV needs these runtime shared libraries in the slim image. Without
+# them, cv2 cannot import and redaction fails before VLM analysis begins.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libxcb1 \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN useradd --create-home --uid 10001 appuser
 COPY --from=backend-builder /install /usr/local
 COPY --chown=appuser:appuser src ./src

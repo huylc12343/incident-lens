@@ -153,6 +153,7 @@ class SamplingMetadata(ContractModel):
 
 class VideoMemory(ContractModel):
     global_scene: str = Field(min_length=1)
+    vlm_has_accident: bool | None = None
     video_summary: str | None = Field(default=None, min_length=1)
     incident_window: IncidentWindow
     representative_timestamp_s: float | None = Field(default=None, ge=0)

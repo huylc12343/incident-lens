@@ -110,6 +110,7 @@ def test_video_memory_contract_is_provider_neutral() -> None:
 
     assert memory.remote_media_handles == []
     assert memory.revision == 1
+    assert memory.vlm_has_accident is None
 
 
 def test_video_memory_contract_has_no_tracked_entities() -> None:

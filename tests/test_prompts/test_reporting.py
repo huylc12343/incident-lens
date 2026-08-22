@@ -21,6 +21,7 @@ from src.prompts.reporting import build_report_prompt
 def _video_memory_with_private_provider_data() -> VideoMemory:
     return VideoMemory(
         global_scene="A road scene",
+        vlm_has_accident=True,
         incident_window=IncidentWindow(t_start=11.2, t0=12.5, t_end=15.1),
         claims=[
             Claim(
@@ -69,6 +70,7 @@ def test_report_prompt_excludes_provider_handles_and_artifact_locations() -> Non
     assert "remote_media_handles" not in prompt.context
     assert "sampling_metadata" not in prompt.context
     assert "tracked_entities" not in prompt.context
+    assert "vlm_has_accident" not in prompt.context
     assert "private://" not in serialized
     assert "files/private-name" not in serialized
     assert prompt.context["claims"][0]["video_evidence"][0]["evidence_id"] == "frame-1"

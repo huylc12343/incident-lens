@@ -187,6 +187,18 @@ pip check
 
 E2E tests chạy graph, API, SQLite restart, FFmpeg, log và chart thật với asset trong `data_mock/`; provider SDK chỉ được mock tại SDK boundary nên không phát sinh chi phí model.
 
+## Evaluation
+
+Evaluator chạy trực tiếp production graph trong `src`, không gọi FastAPI port 8000. API key, model và các cấu hình provider được đọc từ `.env` hiện có; checkpoint, report database và artifact phát sinh trong lúc eval dùng thư mục tạm nên không ảnh hưởng dữ liệu ứng dụng.
+
+Chạy toàn bộ `golden_set/` bằng một lệnh:
+
+```bash
+.venv/bin/python -m eval.run --analysis-prompt "Phân tích sự cố giao thông trong toàn bộ video. Xác định t_start, t0, t_end, timeline và claims chỉ từ bằng chứng quan sát được."
+```
+
+Kết quả được ghi vào `eval/results/latest.json`. Lệnh chạy nguyên auto re-analysis của graph; report bao gồm snapshot VLM đầu tiên, verifier cuối và report model cuối. Event Timestamp MAE dùng semantic judge từ `src.services.llm.get_llm`; Evidence ID Validity dùng raw verifier output trước khi backend lọc ID không hợp lệ.
+
 ## Giới hạn hiện tại
 
 - Chưa có authentication/authorization, external object storage, queue phân tán hoặc production observability.

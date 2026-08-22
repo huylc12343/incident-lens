@@ -32,6 +32,7 @@ def test_video_analysis_prompt_selects_mode_instruction(
     assert "trước–tại–sau" in prompt.text
     assert "representative_timestamp_s" in prompt.text
     assert "VideoMemory" in prompt.text
+    assert "vlm_has_accident" in prompt.text
     assert "tracked_entities" not in prompt.text
     assert "timeline = []; claims = []" not in prompt.text
     assert "khẳng định quan trọng về diễn biến của video" in prompt.text

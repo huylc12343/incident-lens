@@ -117,7 +117,8 @@ def build_video_analysis_prompt(
             # =========================================================
             # 6. VIDEOMEMORY CONTENT
             # =========================================================
-            "Trả đúng VideoMemory theo schema hiện tại.",
+            "Trả đúng VideoMemory theo schema hiện tại. vlm_has_accident bắt buộc là true hoặc false theo đánh giá "
+            "về việc ego có tai nạn trong video hay không.",
 
             "global_scene: mô tả ngắn bối cảnh giao thông cần thiết để hiểu diễn biến; bỏ các chi tiết trang trí "
             "không liên quan hoặc không nhìn thấy rõ.",

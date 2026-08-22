@@ -61,6 +61,8 @@ def _settings(tmp_path: Path) -> Settings:
         incident_checkpoint_path=str(tmp_path / "checkpoints.sqlite3"),
         vlm_reanalysis_frame_fps=1,
         vlm_reanalysis_max_frames=10,
+        # Human-review orchestration is covered here; CV redaction has separate coverage.
+        video_redaction_enabled=False,
     )
 
 

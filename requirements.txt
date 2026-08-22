@@ -17,6 +17,8 @@ imageio-ffmpeg>=0.6.0
 matplotlib>=3.10.0,<4.0.0
 streamlit>=1.40.0,<2.0.0
 ultralytics>=8.3.0
+# Video redaction imports cv2 at runtime; use the headless build for server and Docker environments.
+opencv-python-headless>=4.10.0
 
 # Database (uncomment as needed)
 # sqlalchemy>=2.0.0

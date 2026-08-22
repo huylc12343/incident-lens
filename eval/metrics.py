@@ -42,6 +42,40 @@ def binary_incident_metrics(
     }
 
 
+def multiclass_metrics(predictions: Sequence[str], labels: Sequence[str], *, prefix: str) -> dict[str, float | int | None]:
+    """Calculate macro precision, recall, and F1 for exact class labels."""
+    if len(predictions) != len(labels):
+        raise ValueError("predictions and labels must have the same length")
+    if not labels:
+        return {
+            f"{prefix}_precision": None,
+            f"{prefix}_recall": None,
+            f"{prefix}_f1": None,
+            "num_samples_used": 0,
+        }
+
+    classes = sorted(set(predictions) | set(labels))
+    precision_values: list[float] = []
+    recall_values: list[float] = []
+    f1_values: list[float] = []
+    for item in classes:
+        tp = sum(prediction == item and label == item for prediction, label in zip(predictions, labels, strict=True))
+        fp = sum(prediction == item and label != item for prediction, label in zip(predictions, labels, strict=True))
+        fn = sum(prediction != item and label == item for prediction, label in zip(predictions, labels, strict=True))
+        precision = tp / (tp + fp) if tp + fp else 0.0
+        recall = tp / (tp + fn) if tp + fn else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+        precision_values.append(precision)
+        recall_values.append(recall)
+        f1_values.append(f1)
+    return {
+        f"{prefix}_precision": statistics.fmean(precision_values),
+        f"{prefix}_recall": statistics.fmean(recall_values),
+        f"{prefix}_f1": statistics.fmean(f1_values),
+        "num_samples_used": len(labels),
+    }
+
+
 def evidence_id_validity(
     results: Iterable[Mapping[str, Any]],
     allowed_ids_by_claim: Mapping[str, Sequence[str]],
@@ -128,7 +162,7 @@ def aggregate_temporal_errors(rows: Iterable[Mapping[str, Any]], *, prefix: str)
 
 def aggregate_event_mae(rows: Iterable[Mapping[str, Any]]) -> dict[str, float | int | None]:
     """Aggregate only semantically matched events; no match is never scored as zero."""
-    matches = [match for row in rows for match in row.get("matches", [])]
+    matches = [match for row in rows for match in row.get("event_matches", [])]
     errors = [abs(match["pred_timestamp"] - match["gold_timestamp"]) for match in matches]
     return {
         "event_timestamp_mae_s": statistics.fmean(errors) if errors else None,

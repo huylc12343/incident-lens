@@ -26,6 +26,7 @@ from eval.metrics import (
     aggregate_temporal_errors,
     binary_incident_metrics,
     evidence_id_validity,
+    multiclass_metrics,
     report_decision_consistency,
     status_distribution,
     temporal_iou,
@@ -222,7 +223,11 @@ async def evaluate_dataset(golden_root: Path, *, analysis_prompt: str) -> dict[s
         "generated_at": datetime.now(UTC).isoformat(),
         "golden_set": str(golden_root),
         "samples": rows,
-        "aggregate": _aggregate(rows, [_required_bool(sample.label, "is_incident") for sample in samples]),
+        "aggregate": _aggregate(
+            rows,
+            [_required_bool(sample.label, "is_incident") for sample in samples],
+            [_required_incident_type(sample.label) for sample in samples],
+        ),
     }
 
 
@@ -315,17 +320,20 @@ def _failed_sample(sample: GoldenSample, public_status: str, state: dict[str, An
     }
 
 
-def _aggregate(rows: list[dict[str, Any]], labels: list[bool]) -> dict[str, Any]:
+def _aggregate(rows: list[dict[str, Any]], labels: list[bool], incident_types: list[str]) -> dict[str, Any]:
     vlm_predictions = [row["metrics"]["vlm"]["has_accident"] for row in rows]
     verifier_predictions = [row["metrics"]["verifier"]["has_accident"] for row in rows]
-    return _aggregate_without_labels(rows, labels, vlm_predictions, verifier_predictions)
+    report_predictions = [row["metrics"]["report"]["type_of_accident"] for row in rows]
+    return _aggregate_without_labels(rows, labels, incident_types, vlm_predictions, verifier_predictions, report_predictions)
 
 
 def _aggregate_without_labels(
     rows: list[dict[str, Any]],
     labels: list[bool],
+    incident_types: list[str],
     vlm_predictions: list[Any],
     verifier_predictions: list[Any],
+    report_predictions: list[Any],
 ) -> dict[str, Any]:
     # Kept separate only to make every metric input explicit and testable.
     valid_vlm = [(prediction, label) for prediction, label in zip(vlm_predictions, labels, strict=True) if isinstance(prediction, bool)]
@@ -333,6 +341,11 @@ def _aggregate_without_labels(
         (prediction, label)
         for prediction, label in zip(verifier_predictions, labels, strict=True)
         if isinstance(prediction, bool)
+    ]
+    valid_report_types = [
+        (prediction, label)
+        for prediction, label in zip(report_predictions, incident_types, strict=True)
+        if isinstance(prediction, str)
     ]
     vlm_rows = [row["metrics"]["vlm"] for row in rows]
     report_rows = [row["metrics"]["report"] for row in rows]
@@ -374,9 +387,10 @@ def _aggregate_without_labels(
         "report": {
             **report_decision_consistency(report_rows),
             **aggregate_temporal_errors(report_rows, prefix="report"),
-            "type_of_accident_f1": None,
-            "type_of_accident_note": (
-                "Not calculated: plan's golden incident_type taxonomy is not mapped to AccidentType."
+            **multiclass_metrics(
+                [prediction for prediction, _ in valid_report_types],
+                [label for _, label in valid_report_types],
+                prefix="type_of_accident",
             ),
         },
     }
@@ -521,6 +535,13 @@ def _required_bool(value: dict[str, Any], name: str) -> bool:
     if not isinstance(result, bool):
         raise ValueError(f"{name} must be a boolean")
     return result
+
+
+def _required_incident_type(label: dict[str, Any]) -> str:
+    incident_type = label.get("incident_type")
+    if not isinstance(incident_type, str) or not incident_type:
+        raise ValueError("label.incident_type must be a non-empty string")
+    return incident_type
 
 
 def _optional_model(value: Any, model: type[BaseModel]) -> Any | None:

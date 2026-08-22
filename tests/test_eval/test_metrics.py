@@ -1,7 +1,10 @@
+import pytest
+
 from eval.metrics import (
     aggregate_event_mae,
     binary_incident_metrics,
     evidence_id_validity,
+    multiclass_metrics,
     report_decision_consistency,
     temporal_iou,
 )
@@ -25,6 +28,17 @@ def test_binary_incident_metrics_include_confusion_matrix() -> None:
     }
 
 
+def test_multiclass_metrics_scores_exact_type_match() -> None:
+    assert multiclass_metrics(
+        ["crossing_collision"], ["crossing_collision"], prefix="type_of_accident"
+    ) == {
+        "type_of_accident_precision": 1.0,
+        "type_of_accident_recall": 1.0,
+        "type_of_accident_f1": 1.0,
+        "num_samples_used": 1,
+    }
+
+
 def test_evidence_validity_excludes_empty_lists_from_id_denominator() -> None:
     result = evidence_id_validity(
         [
@@ -41,10 +55,18 @@ def test_evidence_validity_excludes_empty_lists_from_id_denominator() -> None:
 
 
 def test_event_mae_is_null_without_semantic_matches() -> None:
-    assert aggregate_event_mae([{"matches": []}]) == {
+    assert aggregate_event_mae([{"event_matches": []}]) == {
         "event_timestamp_mae_s": None,
         "num_matched_events": 0,
     }
+
+
+def test_event_mae_uses_per_sample_event_matches() -> None:
+    result = aggregate_event_mae(
+        [{"event_matches": [{"gold_timestamp": 10.0, "pred_timestamp": 10.2}]}]
+    )
+    assert result["event_timestamp_mae_s"] == pytest.approx(0.2)
+    assert result["num_matched_events"] == 1
 
 
 def test_report_consistency_skips_missing_verification() -> None:

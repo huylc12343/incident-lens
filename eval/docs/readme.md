@@ -10,4 +10,4 @@ Chạy toàn bộ golden set:
 .venv/bin/python -m eval.run --analysis-prompt "Phân tích sự cố giao thông trong toàn bộ video."
 ```
 
-Kết quả gồm metric VLM, verifier và report. `type_of_accident_f1` hiện để `null` vì golden label `cut_in_collision` chưa có mapping sang enum report.
+Kết quả gồm metric VLM, verifier và report. `type_of_accident_precision`, `type_of_accident_recall` và `type_of_accident_f1` dùng exact golden label, macro-average trên các lớp xuất hiện trong tập eval.

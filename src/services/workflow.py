@@ -69,7 +69,60 @@ class WorkflowService:
         self._audit: dict[str, list[ReviewAuditEntry]] = {}
         self._stored_at: dict[str, datetime] = {}
         self._pending_terminal: dict[str, tuple[IncidentState, ReviewDecision]] = {}
+        self._background_tasks: dict[str, asyncio.Task[None]] = {}
         self._registry_lock = asyncio.Lock()
+
+    async def enqueue(self, request: IncidentCreateRequest) -> IncidentSnapshot:
+        """Register an incident and return immediately while analysis runs in the background."""
+        if self._input_validator is not None:
+            await self._input_validator.validate(request)
+        incident_id = request.incident_id.strip()
+        initial: IncidentState = {
+            "incident_id": incident_id,
+            "video_uri": request.video_uri,
+            "log_uri": request.log_uri,
+            "analysis_prompt": request.analysis_prompt,
+            "metadata": request.metadata,
+            "status": "queued",
+            "auto_reanalysis_count": 0,
+            "manual_reanalysis_count": 0,
+            "artifact_uris": {},
+            "warnings": [],
+            "review_audit": [],
+            "model_activities": [],
+        }
+        async with self._registry_lock:
+            checkpoint_state = await self._checkpoint_state(incident_id)
+            if (
+                incident_id in self._states
+                or checkpoint_state is not None
+                or await _repository_call(self._repository, "aget", "get", incident_id) is not None
+            ):
+                raise WorkflowError("INCIDENT_ALREADY_EXISTS", "incident ID already exists")
+            self._states[incident_id] = initial
+            self._review_locks[incident_id] = asyncio.Lock()
+            self._audit[incident_id] = []
+            task = asyncio.create_task(self._run_enqueued(initial), name=f"incident:{incident_id}")
+            self._background_tasks[incident_id] = task
+            task.add_done_callback(lambda _: self._background_tasks.pop(incident_id, None))
+        return self._snapshot(initial)
+
+    async def _run_enqueued(self, initial: IncidentState) -> None:
+        incident_id = initial["incident_id"]
+        running = {**initial, "status": "running"}
+        self._states[incident_id] = running
+        try:
+            result = await self._runner.start(running)
+            state = _without_legacy_claim_projection({**running, **result})
+            self._snapshot(state)
+        except Exception as exc:
+            state = {
+                **running,
+                "status": "failed",
+                "error_code": getattr(exc, "code", "WORKFLOW_EXECUTION_FAILED"),
+                "error_message": str(exc) or "incident workflow failed",
+            }
+        self._states[incident_id] = state
 
     async def create(self, request: IncidentCreateRequest) -> IncidentSnapshot:
         if self._input_validator is not None:

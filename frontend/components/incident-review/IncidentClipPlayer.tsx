@@ -7,6 +7,8 @@ import { uiText as text } from "../../lib/ui-copy";
 
 type Props = {
   clipUrl: string;
+  isOriginalVideo?: boolean;
+  noIncident?: boolean;
   start?: number;
   focus?: number;
   end?: number;
@@ -23,7 +25,7 @@ const playerTime = (seconds: number) => {
   return `${String(minutes).padStart(2, "0")}:${remainder}`;
 };
 
-export function IncidentClipPlayer({ clipUrl, start, focus, end, claims, selectedId, onSelect, videoRef }: Props) {
+export function IncidentClipPlayer({ clipUrl, isOriginalVideo = false, noIncident = false, start, focus, end, claims, selectedId, onSelect, videoRef }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -69,7 +71,7 @@ export function IncidentClipPlayer({ clipUrl, start, focus, end, claims, selecte
   return (
     <section className="incident-clip-card refined-clip-card" aria-labelledby="incident-clip-title">
       <header className="refined-clip-header">
-        <div><p className="eyebrow">{text("Extracted evidence", "Bằng chứng đã trích xuất")}</p><h2 id="incident-clip-title">{text("Incident evidence clip", "Video bằng chứng sự cố")}</h2></div>
+        <div><p className="eyebrow">{isOriginalVideo ? text("Original video", "Video gốc") : text("Extracted evidence", "Bằng chứng đã trích xuất")}</p><h2 id="incident-clip-title">{isOriginalVideo ? text("Original video for engineer review", "Video gốc để kỹ sư rà soát") : text("Incident evidence clip", "Video bằng chứng sự cố")}</h2></div>
         <button type="button" className="clip-fullscreen-button" onClick={fullscreen} aria-label={text("View incident clip fullscreen", "Xem video sự cố toàn màn hình")} title={text("Fullscreen", "Toàn màn hình")}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" /></svg>
         </button>
@@ -83,7 +85,7 @@ export function IncidentClipPlayer({ clipUrl, start, focus, end, claims, selecte
               playsInline
               preload="metadata"
               src={clipUrl}
-              aria-label={text("Incident evidence clip", "Video bằng chứng sự cố")}
+              aria-label={isOriginalVideo ? text("Original video for engineer review", "Video gốc để kỹ sư rà soát") : text("Incident evidence clip", "Video bằng chứng sự cố")}
               onClick={togglePlayback}
               onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
               onDurationChange={(event) => setDuration(event.currentTarget.duration)}
@@ -92,7 +94,7 @@ export function IncidentClipPlayer({ clipUrl, start, focus, end, claims, selecte
               onPause={() => setPlaying(false)}
               onEnded={() => setPlaying(false)}
             />
-          ) : <div className="clip-empty-state"><span className="state-spinner" /><p>{text("Generating evidence clip...", "Đang tạo video bằng chứng...")}</p></div>}
+          ) : <div className="clip-empty-state">{!noIncident && <span className="state-spinner" />}<p>{noIncident ? text("AI did not identify an incident. Loading the original video for review…", "AI chưa phát hiện sự cố. Đang tải video gốc để rà soát…") : text("Generating evidence clip...", "Đang tạo video bằng chứng...")}</p></div>}
         </div>
 
         <div className="refined-clip-controls">

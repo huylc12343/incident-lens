@@ -15,6 +15,8 @@ bash scripts/_pyrun.sh scripts/submit_log.py || true
 exit 0
 '@
 
+# Git for Windows executes the hook through its shebang. Normalize LF and write
+# UTF-8 without BOM so Git can find the interpreter.
 $UnixHookBody = $HookBody.Replace("`r`n", "`n")
 [System.IO.File]::WriteAllText(
   (Join-Path (Get-Location) $HookFile),

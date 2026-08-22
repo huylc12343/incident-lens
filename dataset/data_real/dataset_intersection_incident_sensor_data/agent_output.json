@@ -1,0 +1,64 @@
+{
+  "agent_run_id": "run_intersection_conflict_002_001",
+  "input_files": [
+    "front_camera.mp4",
+    "vehicle_state.csv",
+    "video_events.csv",
+    "metadata.json"
+  ],
+  "detected_incident": true,
+  "incident_type": "intersection_near_conflict",
+  "severity": "high",
+  "time_window_s": {
+    "start": 33.5,
+    "end": 37.2
+  },
+  "summary": "Xe ego chạy trên đường đô thị và dừng tại giao lộ; một xe Jeep màu đỏ cắt ngang phía trước ở khoảng cách gần.",
+  "reasoning_summary": "Xe cắt ngang quỹ đạo tại giao lộ trong khi ego đang dừng hoặc gần dừng; không quan sát thấy va chạm thực tế.",
+  "key_events": [
+    {
+      "timestamp_s": 29.5,
+      "event": "deceleration",
+      "severity": "medium"
+    },
+    {
+      "timestamp_s": 31.5,
+      "event": "vehicle_crossing",
+      "severity": "medium"
+    },
+    {
+      "timestamp_s": 34.0,
+      "event": "red_jeep_enters_path",
+      "severity": "high"
+    },
+    {
+      "timestamp_s": 35.0,
+      "event": "near_conflict",
+      "severity": "high"
+    }
+  ],
+  "claims": [
+    {
+      "claim": "Có sự kiện nguy hiểm trong video.",
+      "evidence_timestamps_s": [
+        33.5,
+        37.2
+      ],
+      "confidence": 0.95
+    },
+    {
+      "claim": "Xe cắt ngang quỹ đạo tại giao lộ trong khi ego đang dừng hoặc gần dừng; không quan sát thấy va chạm thực tế.",
+      "evidence_timestamps_s": [
+        34.0,
+        35.0
+      ],
+      "confidence": 0.72
+    }
+  ],
+  "comparison_target": [
+    "incident.json",
+    "human_annotation.json"
+  ],
+  "overall_confidence": 0.8,
+  "notes": "Kết quả phân tích được sinh bởi Incident Lens Agent từ video, vehicle telemetry và event log đồng bộ."
+}

@@ -1,0 +1,33 @@
+{
+  "annotation_id": "ann_incident_bridge_001",
+  "annotator": "AI-assisted preliminary annotation",
+  "review_status": "needs_human_validation",
+  "labels": {
+    "primary_incident": "road_departure_and_fall",
+    "severity": "critical",
+    "collision_confirmed": true,
+    "road_departure": true,
+    "near_miss": false
+  },
+  "temporal_segments": [
+    {
+      "start_s": 0.0,
+      "end_s": 6.0,
+      "label": "pre_incident"
+    },
+    {
+      "start_s": 6.0,
+      "end_s": 14.5,
+      "label": "incident"
+    },
+    {
+      "start_s": 14.5,
+      "end_s": 17.0,
+      "label": "post_incident"
+    }
+  ],
+  "description": "Xe tải lưu thông trên cầu, va chạm/né phương tiện ngược chiều rồi lao qua lan can và rơi xuống nước.",
+  "uncertainties": [
+    "Mất kiểm soát hướng lái sau tình huống tiếp cận rất gần với xe ngược chiều; video không đủ để xác nhận chắc chắn có va chạm trực tiếp."
+  ]
+}

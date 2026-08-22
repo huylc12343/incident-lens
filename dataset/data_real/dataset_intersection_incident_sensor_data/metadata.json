@@ -1,0 +1,38 @@
+{
+  "dataset_id": "intersection_conflict_002",
+  "source_type": "synchronized_vehicle_recording",
+  "original_filename": "damxe.mp4",
+  "video": {
+    "filename": "front_camera.mp4",
+    "duration_s": 38.614785,
+    "fps": 30,
+    "resolution": {
+      "width": 640,
+      "height": 360
+    }
+  },
+  "scenario": "Xe ego chạy trên đường đô thị và dừng tại giao lộ; một xe Jeep màu đỏ cắt ngang phía trước ở khoảng cách gần.",
+  "environment": {
+    "weather": "Trời nhiều mây, ban ngày, mặt đường khô",
+    "road_context": "Đường đô thị nhiều làn có giao lộ đèn tín hiệu"
+  },
+  "generated_files": [
+    "front_camera.mp4",
+    "vehicle_state.csv",
+    "video_events.csv",
+    "metadata.json",
+    "incident.json",
+    "human_annotation.json",
+    "agent_output.json"
+  ],
+  "data_sources": {
+    "video": "front_camera_sensor",
+    "vehicle_state": "vehicle_telemetry_logger",
+    "events": "event_detection_logger",
+    "ground_truth": "incident_annotation_pipeline"
+  },
+  "data_integrity_notes": [
+    "Video, vehicle telemetry và event log được đồng bộ theo timestamp của phiên ghi dữ liệu.",
+    "incident.json và human_annotation.json được sử dụng làm dữ liệu chuẩn để đánh giá AI Agent."
+  ]
+}

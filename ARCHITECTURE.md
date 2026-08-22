@@ -1,110 +1,57 @@
-# Architecture Document
+# Kiến trúc P-207 / Incident Analysis Agent
 
-## System Overview
+P-207 là MVP hỗ trợ kỹ sư rà soát sự cố giao thông từ video camera trước và log telemetry CSV tùy chọn. AI tạo timeline và claim có bằng chứng; quyết định cuối cùng thuộc về người review.
 
-[Tóm tắt 2-3 câu về kiến trúc hệ thống]
+## Thành phần
 
-## Architecture Diagram
+| Lớp | Thành phần thực tế | Trách nhiệm |
+| --- | --- | --- |
+| Web UI | Next.js 15, React 19, TypeScript (`frontend/`) | Upload, theo dõi xử lý, xem clip/timeline/evidence/telemetry, gửi quyết định review. |
+| API | FastAPI (`src/main.py`, `src/api/`) | Upload video/log, tạo/lấy incident, nhận review; có `/live` và `/ready`. |
+| Điều phối | LangGraph (`src/agents/incident_graph.py`) | Lưu state/checkpoint, điều phối các node phân tích, re-analysis và human review. |
+| AI & media | `src/services/` | Chuẩn hóa/cắt video, trích frame, gọi VLM, phân tích log, verification, tạo report và artifacts. |
+| Lưu trữ | SQLite | LangGraph checkpointer cho incident đang review và report repository cho incident terminal. |
 
-```mermaid
-graph TB
-    subgraph Frontend
-        UI[React/Next.js UI]
-    end
+## Luồng xử lý
 
-    subgraph Backend[FastAPI Backend]
-        API[API Routes]
-        Agent[LangGraph Agent]
-        LLM[LLM Service]
-        Tools[Agent Tools]
-    end
-
-    subgraph Data[Data Layer]
-        DB[(Database)]
-        Vector[Vector Store]
-    end
-
-    UI -->|HTTP/REST| API
-    API --> Agent
-    Agent --> LLM
-    Agent --> Tools
-    Agent --> Vector
-    Tools --> DB
-    API --> DB
+```text
+video + CSV telemetry (tùy chọn)
+  → validate/upload qua FastAPI
+  → normalize video; có thể blur mặt và biển số
+  → VLM: Qwen native video hoặc contract timestamped frames
+  → VideoMemory: incident window, timeline, claims và evidence theo claim
+  → canonicalize evidence và cắt incident clip
+  → nếu có CSV: phân tích telemetry, events/metrics/charts
+  → verification claim với log: supported | contradicted | unverified
+  → một focused re-analysis tự động khi có contradicted (nếu bật)
+  → DraftReport 10 phần
+  → LangGraph interrupt chờ human review
+  → approve | edit | reanalyze | not_incident
+  → checkpoint hoặc report terminal SQLite
 ```
 
-## Components
+VLM Qwen/DashScope nhận video native đã chuẩn hóa. Contract timestamped frames vẫn được giữ trong model/workflow cho luồng frame và dữ liệu đã lưu. OpenAI được dùng cho verification có structured output và cho narrative report; các provider/model phụ thuộc cấu hình môi trường.
 
-### 1. Frontend (React/Next.js)
-- **Purpose:** [mô tả]
-- **Key Features:** [danh sách]
-- **State Management:** [approach]
+## Evidence và verification
 
-### 2. Backend (FastAPI)
-- **Purpose:** [mô tả]
-- **API Design:** RESTful
-- **Authentication:** [JWT/None]
+`VideoMemory` lưu claim với `timestamp_s`, danh sách `evidence` và `verification_status`. Backend canonicalize evidence về frame nguồn hợp lệ; VLM không được tự đưa claim vào trạng thái đã xác minh.
 
-### 3. AI Agent (LangGraph)
-- **Agent Type:** [ReAct / Plan-and-Execute / Custom]
-- **State:** [mô tả state schema]
-- **Nodes:** [danh sách nodes]
-- **Tools:** [danh sách tools]
-- **Flow:**
+Với incident có log, verification chỉ dùng mẫu telemetry trong incident window và dung sai timestamp cấu hình. Mỗi kết quả có một trong ba trạng thái:
 
-```mermaid
-graph LR
-    START --> A[Node A]
-    A --> B{Decision}
-    B -->|Yes| C[Node C]
-    B -->|No| D[Node D]
-    C --> E[END]
-    D --> E
-```
+- `supported`: log có bằng chứng trực tiếp hỗ trợ claim.
+- `contradicted`: log có bằng chứng trực tiếp mâu thuẫn claim.
+- `unverified`: thiếu tín hiệu, ngoài dung sai thời gian, hoặc không có evidence log hợp lệ; đây không phải kết luận phủ định claim.
 
-### 4. Database
-- **Type:** [PostgreSQL / SQLite]
-- **Tables:** [danh sách]
-- **Migrations:** Alembic
+Claim `contradicted` có thể kích hoạt một lần re-analysis tập trung rồi verification lại. Nếu không có log, claim giữ `unverified` thay vì được gắn là verified.
 
-### 5. Vector Store
-- **Type:** [ChromaDB / FAISS / Pinecone]
-- **Embeddings:** [model]
-- **Purpose:** [RAG / similarity search]
+## Human in the loop
 
-## Data Flow
+Node `review` gọi LangGraph `interrupt` với report, artifacts, claims, cảnh báo và bốn action được allowlist. `approve` và `not_incident` là terminal. `edit` chỉ cập nhật các narrative field được cho phép và quay lại review; `reanalyze` yêu cầu feedback cùng target claim IDs rồi chạy lại phần liên quan. Vì vậy UI/API không tự đưa ra quyết định thay kỹ sư.
 
-1. User gửi request từ Frontend
-2. API route nhận và validate input
-3. Agent xử lý qua LangGraph pipeline
-4. LLM generate response
-5. Tools thực thi actions (nếu cần)
-6. Response trả về Frontend
+## Quyền riêng tư và CV
 
-## Deployment Architecture
+Trước native-video analysis, cấu hình `VIDEO_REDACTION_ENABLED` có thể bật pipeline trong `src/services/detect_and_blur.py`: YOLO phát hiện biển số và khuôn mặt trên từng frame, tracker chỉ bắc cầu cho miss ngắn, sau đó Gaussian blur ROI đã được padding. Đây là biện pháp giảm lộ dữ liệu, không phải bảo đảm ẩn danh tuyệt đối. Xem [Privacy](docs/PRIVACY.md) để biết giới hạn và tình trạng benchmark.
 
-```mermaid
-graph LR
-    subgraph Docker
-        FE[Frontend Container]
-        BE[Backend Container]
-        DB_C[Database Container]
-    end
-    FE --> BE --> DB_C
-```
+## Ranh giới MVP
 
-## Security
-
-- API keys stored in `.env` (never commit)
-- Input validation via Pydantic
-- Rate limiting on API endpoints
-- CORS configured for frontend domain
-
-## Design Decisions
-
-| Decision | Choice | Reason |
-|----------|--------|--------|
-| Framework | FastAPI | Async, auto-docs, type-safe |
-| Agent | LangGraph | Flexible state management |
-| Database | [choice] | [reason] |
-| Frontend | Next.js | [reason] |
+MVP có API, workflow, review, artifacts và persistence đơn tiến trình. Repository hiện không chứng minh authentication/authorization production, object storage bên ngoài, queue phân tán hay multi-worker SQLite. Việc gọi model thật phụ thuộc API key/cost và không được suy ra chỉ từ unit test mock provider.

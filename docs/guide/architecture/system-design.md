@@ -13,7 +13,7 @@ graph TB
     User([User]) --> UI[Frontend<br/>React/Next.js]
     UI -->|REST API| API[FastAPI Backend]
     API --> Agent[LangGraph Agent]
-    Agent --> LLM[LLM Service<br/>GPT-4o / Gemini]
+    Agent --> LLM[LLM Service<br/>OpenAI / Qwen]
     Agent --> Tools[Agent Tools]
     Tools --> DB[(Database)]
     Agent --> VS[Vector Store<br/>ChromaDB]

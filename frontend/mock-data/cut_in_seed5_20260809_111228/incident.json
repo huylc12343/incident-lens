@@ -1,0 +1,83 @@
+{
+  "schema_version": "1.0",
+  "incident_id": "INC_CUT_IN_SEED5_20260809_111228",
+  "scenario": "cut_in",
+  "incident_type": "cut_in_collision",
+  "seed": 5,
+  "severity": "high",
+  "timeline": {
+    "recording_start": 0.0,
+    "t_start": 12.0,
+    "t0": 11.25,
+    "t_end": 45.0,
+    "recording_end": 45.0
+  },
+  "actors": {
+    "ego": {
+      "actor_id": 389
+    },
+    "cutter": {
+      "actor_id": 390
+    }
+  },
+  "spawn_selection": {
+    "seed": 5,
+    "selection_strategy": "farthest_point_adjacent_lane_distribution",
+    "candidate_index": 4,
+    "candidate_count": 8,
+    "min_distance_to_earlier_seeds_m": 90.626,
+    "road_id": 5,
+    "ego_lane_id": -2,
+    "cut_vehicle_lane_id": -1,
+    "ego_spawn": {
+      "x": -70.4899,
+      "y": 128.9029,
+      "z": 0.0,
+      "pitch": 0.0,
+      "yaw": -167.1271,
+      "roll": 0.0
+    },
+    "cut_vehicle_spawn": {
+      "x": -78.0972,
+      "y": 130.0986,
+      "z": 0.0,
+      "pitch": 0.0,
+      "yaw": -156.905,
+      "roll": 0.0
+    }
+  },
+  "ground_truth": {
+    "scenario_success": true,
+    "collision_confirmed": true,
+    "near_miss_confirmed": false,
+    "minimum_vehicle_distance_m": 2.873,
+    "cause": "adjacent vehicle abruptly cut into Ego lane with insufficient gap",
+    "ego_emergency_braking": true
+  },
+  "event_sequence": [
+    {
+      "time_sec": 0.0,
+      "event": "scenario_start",
+      "actor": "system",
+      "details": "adjacent vehicle slightly ahead of Ego"
+    },
+    {
+      "time_sec": 11.25,
+      "event": "cut_in_collision",
+      "actor": "ego+cutter",
+      "details": "intensity=1158.832"
+    },
+    {
+      "time_sec": 15.0,
+      "event": "cut_in_start",
+      "actor": "cutter",
+      "details": "lead=2.28m; adjacent vehicle abruptly cuts toward Ego lane"
+    },
+    {
+      "time_sec": 15.8,
+      "event": "ego_emergency_brake",
+      "actor": "ego",
+      "details": "Ego reacts after cut-in"
+    }
+  ]
+}

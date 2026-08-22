@@ -1,0 +1,5 @@
+time_sec,event,actor,details
+0.0,scenario_start,system,adjacent vehicle slightly ahead of Ego
+11.25,cut_in_collision,ego+cutter,intensity=1158.832
+15.0,cut_in_start,cutter,lead=2.28m; adjacent vehicle abruptly cuts toward Ego lane
+15.8,ego_emergency_brake,ego,Ego reacts after cut-in

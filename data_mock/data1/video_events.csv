@@ -1,0 +1,9 @@
+﻿timestamp_s,event_type,severity,details,source
+0.00,scene_start,info,"Xe ego di chuyển trên cầu, phía trước có xe tải cùng chiều.",manual_video_review
+4.50,oncoming_vehicle_close,medium,Một ô tô đi ngược chiều tiến gần vùng trung tâm làn đường.,manual_video_review
+6.00,critical_proximity,high,Khoảng cách ngang với xe ngược chiều giảm mạnh.,manual_video_review
+6.80,collision_or_evasive_maneuver,critical,Camera rung và hướng xe lệch mạnh sang phải; nghi có va chạm hoặc thao tác né gấp.,manual_video_review
+7.50,barrier_departure,critical,Xe vượt khỏi giới hạn mặt cầu/lan can.,manual_video_review
+9.00,fall_from_bridge,critical,Góc nhìn chuyển xuống mặt nước; xe đang rơi khỏi cầu.,manual_video_review
+13.50,water_impact,critical,Xuất hiện va đập mạnh và nước bắn quanh camera.,manual_video_review
+17.00,scene_end,info,Video kết thúc sau khi xe rơi xuống nước.,manual_video_review

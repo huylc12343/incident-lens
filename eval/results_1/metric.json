@@ -1,0 +1,56 @@
+{
+  "generated_at": "2026-08-22T11:22:30.245781+00:00",
+  "golden_set": "golden_set",
+  "num_samples_total": 12,
+  "num_samples_completed": 12,
+  "failed_samples": [],
+  "aggregate": {
+    "vlm": {
+      "vlm_incident_precision": 1.0,
+      "vlm_incident_recall": 0.6,
+      "vlm_incident_f1": 0.7499999999999999,
+      "tp": 6,
+      "fp": 0,
+      "fn": 4,
+      "tn": 2,
+      "vlm_median_t0_error_s": 0.15000000000000036,
+      "vlm_temporal_iou_mean": 0.36718387970141125,
+      "vlm_temporal_iou_median": 0.3956043956043956,
+      "num_samples_used": 6,
+      "event_timestamp_mae_s": 3.1357142857142857,
+      "num_matched_events": 28,
+      "num_incident_samples_used": 12
+    },
+    "verifier": {
+      "verifier_incident_precision": 1.0,
+      "verifier_incident_recall": 0.8,
+      "verifier_incident_f1": 0.888888888888889,
+      "tp": 8,
+      "fp": 0,
+      "fn": 2,
+      "tn": 2,
+      "evidence_id_precision": 1.0,
+      "claim_evidence_validity_rate": 1.0,
+      "invalid_evidence_ids": [],
+      "status_distribution": {
+        "supported": 0.7317073170731707,
+        "contradicted": 0.12195121951219512,
+        "unverified": 0.14634146341463414
+      },
+      "num_verifier_samples_used": 12,
+      "num_verification_results": 41
+    },
+    "report": {
+      "report_decision_consistency": 1.0,
+      "passed": 7,
+      "eligible": 7,
+      "report_median_t0_error_s": 0.09999999999999964,
+      "report_temporal_iou_mean": 0.3560840521485683,
+      "report_temporal_iou_median": 0.3822222222222222,
+      "num_samples_used": 7,
+      "type_of_accident_precision": 0.7,
+      "type_of_accident_recall": 0.6666666666666667,
+      "type_of_accident_f1": 0.6333333333333333
+    }
+  }
+}

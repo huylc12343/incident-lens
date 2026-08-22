@@ -191,7 +191,8 @@ def test_unified_report_formats_timeline_as_readable_rows() -> None:
 
 
 def test_accident_type_uses_readable_vietnamese_label() -> None:
-    assert main_test._accident_type_label("roadside_collision") == "Va chạm môi trường ven đường / rời đường"
+    assert main_test._accident_type_label("vehicle_collision") == "Va chạm với phương tiện khác"
+    assert main_test._accident_type_label("environment_collision") == "Va chạm môi trường / rời khỏi phần đường"
     assert main_test._accident_type_label("no_incident") == "Không có tai nạn của ego"
 
 

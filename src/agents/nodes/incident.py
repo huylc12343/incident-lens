@@ -1269,20 +1269,19 @@ def _fallback_accident_type(memory: VideoMemory) -> AccidentType:
     collision_terms = ("tai nạn", "va chạm", "đâm", "collision", "crash", "impact")
     if not any(term in text for term in collision_terms):
         return AccidentType.NO_INCIDENT
-    if any(term in text for term in ("đâm đuôi", "rear-end", "rear end")):
-        return AccidentType.REAR_END_COLLISION
     if any(term in text for term in ("cắt ngang", "crossing collision")):
         return AccidentType.CROSSING_COLLISION
-    if any(term in text for term in ("bên hông", "side collision", "đổi làn", "nhập làn")):
-        return AccidentType.SIDE_COLLISION
-    if any(term in text for term in ("đối đầu", "head-on", "head on")):
-        return AccidentType.HEAD_ON_COLLISION
     if any(term in text for term in ("người đi bộ", "pedestrian")):
         return AccidentType.PEDESTRIAN_COLLISION
-    if any(term in text for term in ("lan can", "hàng rào", "tường", "cây", "cột", "rời đường", "roadside")):
-        return AccidentType.ROADSIDE_COLLISION
-    if any(term in text for term in ("xe đỗ", "barrier", "vật cản", "static object")):
-        return AccidentType.STATIC_OBJECT_COLLISION
+    if any(
+        term in text
+        for term in ("lan can", "guardrail", "hàng rào", "tường", "cây", "cột", "rời đường", "roadside")
+    ):
+        return AccidentType.ENVIRONMENT_COLLISION
+    if any(term in text for term in ("barrier", "vật cản", "static object")):
+        return AccidentType.ENVIRONMENT_COLLISION
+    if any(term in text for term in ("xe", "phương tiện", "vehicle", "car", "truck", "motorcycle")):
+        return AccidentType.VEHICLE_COLLISION
     return AccidentType.OTHER_UNKNOWN
 
 

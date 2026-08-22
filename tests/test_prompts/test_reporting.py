@@ -49,12 +49,12 @@ def test_report_prompt_requests_accident_assessment_and_taxonomy() -> None:
     prompt = build_report_prompt(incident_id="INC-001", video_memory=_video_memory_with_private_provider_data())
 
     assert "type_of_accident, incident_window, representative_timestamp_s, timeline" in prompt.text
-    assert "Thẩm quyền nguồn:" in prompt.text
-    assert "VideoMemory là nguồn chính" in prompt.text
-    assert "telemetry/log chỉ xuất hiện qua claims[].verification" in prompt.text
-    assert "verification xác định cụ thể" in prompt.text
-    assert "rear_end_collision" in prompt.text
-    assert "roadside_collision" in prompt.text
+    assert "THẨM QUYỀN NGUỒN:" in prompt.text
+    assert "has_accident: quyết định có hay không có tai nạn" in prompt.text
+    assert "claims[].verification" in prompt.text
+    assert "claims + video_evidence + timeline" in prompt.text
+    assert "vehicle_collision" in prompt.text
+    assert "environment_collision" in prompt.text
     assert "no_incident" in prompt.text
     assert "other_unknown" in prompt.text
     assert "Nếu type_of_accident=no_incident" in prompt.text

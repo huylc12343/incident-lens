@@ -553,13 +553,10 @@ def _verification_status_label(value: Any) -> str:
 
 def _accident_type_label(value: Any) -> str:
     return {
-        "rear_end_collision": "Đâm xe phía trước",
+        "vehicle_collision": "Va chạm với phương tiện khác",
         "crossing_collision": "Va chạm xe cắt ngang",
-        "side_collision": "Va chạm bên hông / chuyển làn",
-        "head_on_collision": "Va chạm đối đầu",
         "pedestrian_collision": "Va chạm người đi bộ",
-        "static_object_collision": "Va chạm vật thể tĩnh",
-        "roadside_collision": "Va chạm môi trường ven đường / rời đường",
+        "environment_collision": "Va chạm môi trường / rời khỏi phần đường",
         "no_incident": "Không có tai nạn của ego",
         "other_unknown": "Có tai nạn nhưng chưa xác định được loại",
     }.get(value, "Chưa phân loại")

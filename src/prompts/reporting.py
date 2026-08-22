@@ -102,26 +102,17 @@ def build_report_prompt(
             "has_accident quyết định tai nạn có xảy ra hay không; type_of_accident chỉ xác định cơ chế chính của tai nạn. "
             "Khi has_accident=true, không yêu cầu phải quan sát rõ điểm tiếp xúc hoặc có claim trực tiếp nói 'va chạm'. "
             "Hãy phân loại dựa trên quỹ đạo, quan hệ giữa các tác nhân và diễn biến ngay trước hoặc tại t0.",
-            "- rear_end_collision: phương tiện phía trước cùng hướng là đối tượng chính và ego tiến vào phía sau nó.",
-            "- crossing_collision: phương tiện khác đi từ bên trái, bên phải hoặc từ hướng khác cắt ngang quỹ đạo di chuyển "
-            "của ego, và hành vi cắt ngang này là tình huống chính dẫn tới tai nạn.",
-            "- side_collision: hai xe chủ yếu đi cùng hoặc gần cùng hướng và xảy ra xung đột bên hông do nhập làn, đổi làn "
-            "hoặc di chuyển song song.",
-            "- head_on_collision: phương tiện ngược chiều là đối tượng chính và hai quỹ đạo đối đầu.",
-            "- pedestrian_collision: người đi bộ cắt vào hoặc nằm trên quỹ đạo ego và là tác nhân chính của tai nạn.",
-            "- static_object_collision: vật thể tĩnh trong khu vực lưu thông là đối tượng chính của tai nạn.",
-            "- roadside_collision: ego rời phần đường hoặc sự cố chính liên quan đến môi trường ven đường.",
+            "- vehicle_collision: Ego va chạm với một phương tiện khác. Bao gồm xe cùng hướng, ngược hướng, đâm phía sau, nhập làn, đổi làn hoặc va chạm bên hông.",
+            " Dùng khi phương tiện khác là đối tượng chính của tai nạn và không thuộc crossing_collision.",
+            "- crossing_collision: Phương tiện khác đi từ bên trái, bên phải hoặc từ một hướng khác và cắt ngang qua quỹ đạo của ego."
+            " Dùng khi hai quỹ đạo giao nhau rõ ràng, ví dụ xe từ đường nhánh hoặc ngã tư lao ngang qua đường ego.",
+            "- pedestrian_collision: người đi bộ là đối tượng chính nằm trên hoặc đi vào quỹ đạo của ego và liên quan trực tiếp đến tai nạn.",
+            "- environment_collision: ego va chạm với vật thể không phải phương tiện/người đi bộ hoặc rời khỏi phần đường và va vào môi trường xung quanh. Bao gồm guardrail, tường, cây, cột, hàng rào, vật cản tĩnh, lề đường hoặc địa hình ven đường",
             "- no_incident: chỉ dùng khi has_accident=false.",
             "- other_unknown: chỉ dùng khi has_accident=true nhưng ngay cả cơ chế hoặc quỹ đạo chính quanh t0 cũng không thể "
             "xác định từ context.",
             "Ưu tiên một loại tai nạn cụ thể hơn other_unknown. Không chọn other_unknown chỉ vì không nhìn thấy rõ điểm tiếp xúc, "
             "video_summary mơ hồ hoặc claim không chứa từ 'va chạm'.",
-            "Nếu has_accident=true và phương tiện khác từ trái, phải hoặc từ hướng khác cắt ngang quỹ đạo ego ngay trước hoặc tại "
-            "t0, đồng thời đây là diễn biến chính dẫn tới sự cố, phải chọn crossing_collision trừ khi context có bằng chứng mạnh "
-            "hơn cho một loại khác.",
-
-            "Nếu phương tiện chủ yếu nhập làn hoặc đổi làn trong cùng hướng với ego và cơ chế chính là xung đột bên hông, "
-            "chọn side_collision.",
 
             "Không dùng speed, brake, throttle hoặc steering đơn lẻ để xác định loại tai nạn."
 

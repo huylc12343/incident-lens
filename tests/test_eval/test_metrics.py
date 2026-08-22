@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from eval.metrics import (
@@ -8,7 +10,15 @@ from eval.metrics import (
     report_decision_consistency,
     temporal_iou,
 )
-from eval.run import discover_samples
+from eval.run import (
+    _node_was_scheduled,
+    _read_completed_sample,
+    _sample_failure,
+    _sample_result_path,
+    _workflow_error,
+    _write_json,
+    discover_samples,
+)
 
 
 def test_temporal_iou_matches_plan_formula() -> None:
@@ -96,3 +106,38 @@ def test_discover_samples_uses_fixed_golden_layout(tmp_path) -> None:
     assert [(sample.sample_id, sample.video_uri.name, sample.log_uri.name) for sample in samples] == [
         ("sample-1", "video.mp4", "telemetry.csv")
     ]
+
+
+def test_completed_sample_is_reused_only_for_the_same_prompt(tmp_path) -> None:
+    path = _sample_result_path(tmp_path, "sample-1")
+    _write_json(path, {"sample_id": "sample-1", "analysis_prompt": "fixed prompt"})
+
+    assert _read_completed_sample(path, "sample-1", "fixed prompt") is not None
+    assert _read_completed_sample(path, "sample-1", "another prompt") is None
+
+
+def test_failed_workflow_is_not_reused_and_is_reported_as_failed(tmp_path) -> None:
+    path = _sample_result_path(tmp_path, "sample-1")
+    _write_json(
+        path,
+        {
+            "sample_id": "sample-1",
+            "analysis_prompt": "fixed prompt",
+            "workflow_status": "failed",
+        },
+    )
+
+    assert _read_completed_sample(path, "sample-1", "fixed prompt") is None
+    assert _sample_failure(json.loads(path.read_text(encoding="utf-8"))) == (
+        "WORKFLOW_FAILED: graph ended with status=failed without an error detail"
+    )
+
+
+def test_reanalysis_attempt_and_workflow_error_are_preserved() -> None:
+    states = [{"next": ("verify",)}, {"next": ("auto_reanalyze",)}, {"next": ()}]
+
+    assert _node_was_scheduled(states, "auto_reanalyze") is True
+    assert _node_was_scheduled(states, "manual_reanalyze") is False
+    assert _workflow_error("failed", {"error_code": "AUTO_REANALYSIS_FAILED", "error_message": "provider error"}) == (
+        "AUTO_REANALYSIS_FAILED: provider error"
+    )

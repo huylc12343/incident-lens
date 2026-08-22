@@ -197,7 +197,7 @@ Chạy toàn bộ `golden_set/` bằng một lệnh:
 .venv/bin/python -m eval.run --analysis-prompt "Phân tích sự cố giao thông trong toàn bộ video. Xác định t_start, t0, t_end, timeline và claims chỉ từ bằng chứng quan sát được."
 ```
 
-Kết quả được ghi vào `eval/results/latest.json`. Lệnh chạy nguyên auto re-analysis của graph; report bao gồm snapshot VLM đầu tiên, verifier cuối và report model cuối. Event Timestamp MAE dùng semantic judge từ `src.services.llm.get_llm`; Evidence ID Validity dùng raw verifier output trước khi backend lọc ID không hợp lệ.
+Mỗi sample được ghi ngay vào `eval/results/<sample_id>.json`; metric trung bình của các sample được ghi vào `eval/results/metric.json`. Sample JSON có `has_reanalyze` để chỉ việc graph đã chạy auto/manual re-analysis. Khi mạng/API lỗi, sửa `.env` rồi chạy lại cùng lệnh: sample thành công được giữ nguyên, sample lỗi hoặc chưa có file sẽ chạy lại. Dùng `--force` nếu muốn chạy lại mọi sample.
 
 ## Giới hạn hiện tại
 

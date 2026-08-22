@@ -185,9 +185,20 @@ async def evaluate_sample(
 
     stage_states = _select_stage_states(states)
     final_state = stage_states["final"]
+    auto_reanalysis_attempted = _node_was_scheduled(states, "auto_reanalyze")
+    manual_reanalysis_attempted = _node_was_scheduled(states, "manual_reanalyze")
+    workflow_error = _workflow_error(snapshot.status, final_state)
     initial_memory = _optional_model(stage_states["vlm_initial"].get("video_memory"), VideoMemory)
     if initial_memory is None:
-        return _failed_sample(sample, snapshot.status, final_state)
+        return _failed_sample(
+            sample,
+            snapshot.status,
+            final_state,
+            analysis_prompt,
+            auto_reanalysis_attempted=auto_reanalysis_attempted,
+            manual_reanalysis_attempted=manual_reanalysis_attempted,
+            workflow_error=workflow_error,
+        )
     final_verification = _optional_model(final_state.get("verification"), VerificationResult)
     raw_verification = _last_raw_output(verification_client.parsed_outputs)
     raw_report = _last_model_output(report_client.parsed_outputs)
@@ -202,33 +213,69 @@ async def evaluate_sample(
         matches=matches,
         allowed_ids_by_claim=_allowed_evidence_ids(final_state),
         auto_reanalysis_count=final_state.get("auto_reanalysis_count", 0),
+        manual_reanalysis_count=final_state.get("manual_reanalysis_count", 0),
+        auto_reanalysis_attempted=auto_reanalysis_attempted,
+        manual_reanalysis_attempted=manual_reanalysis_attempted,
+        workflow_error=workflow_error,
         warnings=final_state.get("warnings", []),
+        analysis_prompt=analysis_prompt,
     )
 
 
-async def evaluate_dataset(golden_root: Path, *, analysis_prompt: str) -> dict[str, Any]:
+async def evaluate_dataset(
+    golden_root: Path,
+    *,
+    analysis_prompt: str,
+    results_dir: Path,
+    force: bool = False,
+) -> dict[str, Any]:
     samples = discover_samples(golden_root)
+    results_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="incident-eval-") as temp_dir:
         runtime_root = Path(temp_dir)
-        rows = [
-            await evaluate_sample(
-                sample,
-                analysis_prompt=analysis_prompt,
-                golden_root=golden_root,
-                runtime_root=runtime_root / sample.sample_id,
-            )
-            for sample in samples
-        ]
-    return {
+        rows: list[dict[str, Any]] = []
+        for sample in samples:
+            result_path = _sample_result_path(results_dir, sample.sample_id)
+            previous = _read_completed_sample(result_path, sample.sample_id, analysis_prompt)
+            if previous is not None and not force:
+                print(f"Skipping completed sample: {sample.sample_id}")
+                rows.append(previous)
+                continue
+            try:
+                row = await evaluate_sample(
+                    sample,
+                    analysis_prompt=analysis_prompt,
+                    golden_root=golden_root,
+                    runtime_root=runtime_root / sample.sample_id,
+                )
+            except Exception as exc:
+                row = _evaluation_exception_sample(sample, analysis_prompt, exc)
+            _write_json(result_path, row)
+            rows.append(row)
+            print(f"Saved sample result: {result_path}")
+
+    failed_rows = [row for row in rows if _sample_failure(row) is not None]
+    metric = {
         "generated_at": datetime.now(UTC).isoformat(),
         "golden_set": str(golden_root),
-        "samples": rows,
+        "num_samples_total": len(rows),
+        "num_samples_completed": len(rows) - len(failed_rows),
+        "failed_samples": [
+            {
+                "sample_id": row["sample_id"],
+                "workflow_status": row.get("workflow_status"),
+                "error": _sample_failure(row),
+            }
+            for row in failed_rows
+        ],
         "aggregate": _aggregate(
             rows,
             [_required_bool(sample.label, "is_incident") for sample in samples],
             [_required_incident_type(sample.label) for sample in samples],
         ),
     }
+    _write_json(results_dir / "metric.json", metric)
+    return metric
 
 
 def _evaluate_snapshot(
@@ -242,7 +289,12 @@ def _evaluate_snapshot(
     matches: list[dict[str, Any]],
     allowed_ids_by_claim: dict[str, list[str]],
     auto_reanalysis_count: Any,
+    manual_reanalysis_count: Any,
+    auto_reanalysis_attempted: bool,
+    manual_reanalysis_attempted: bool,
+    workflow_error: str | None,
     warnings: Any,
+    analysis_prompt: str,
 ) -> dict[str, Any]:
     gold_incident = _required_bool(sample.label, "is_incident")
     gold_window = _required_window(sample.label["timeline"], "label.timeline")
@@ -257,8 +309,14 @@ def _evaluate_snapshot(
     raw_results = raw_verification.get("results", []) if raw_verification is not None else []
     return {
         "sample_id": sample.sample_id,
+        "analysis_prompt": analysis_prompt,
         "workflow_status": public_status,
         "auto_reanalysis_count": auto_reanalysis_count if isinstance(auto_reanalysis_count, int) else 0,
+        "manual_reanalysis_count": manual_reanalysis_count if isinstance(manual_reanalysis_count, int) else 0,
+        "auto_reanalysis_attempted": auto_reanalysis_attempted,
+        "manual_reanalysis_attempted": manual_reanalysis_attempted,
+        "has_reanalyze": auto_reanalysis_attempted or manual_reanalysis_attempted,
+        "workflow_error": workflow_error,
         "warnings": warnings if isinstance(warnings, list) else [],
         "model_outputs": {
             "vlm_initial": initial_memory.model_dump(mode="json"),
@@ -283,7 +341,16 @@ def _evaluate_snapshot(
     }
 
 
-def _failed_sample(sample: GoldenSample, public_status: str, state: dict[str, Any]) -> dict[str, Any]:
+def _failed_sample(
+    sample: GoldenSample,
+    public_status: str,
+    state: dict[str, Any],
+    analysis_prompt: str,
+    *,
+    auto_reanalysis_attempted: bool,
+    manual_reanalysis_attempted: bool,
+    workflow_error: str | None,
+) -> dict[str, Any]:
     """Preserve a production workflow failure without inventing a score."""
     error_code = state.get("error_code")
     error_message = state.get("error_message")
@@ -292,10 +359,54 @@ def _failed_sample(sample: GoldenSample, public_status: str, state: dict[str, An
     ) or "workflow ended before VideoMemory was available"
     return {
         "sample_id": sample.sample_id,
+        "analysis_prompt": analysis_prompt,
         "workflow_status": public_status,
         "auto_reanalysis_count": 0,
+        "manual_reanalysis_count": 0,
+        "auto_reanalysis_attempted": auto_reanalysis_attempted,
+        "manual_reanalysis_attempted": manual_reanalysis_attempted,
+        "has_reanalyze": auto_reanalysis_attempted or manual_reanalysis_attempted,
+        "workflow_error": workflow_error,
         "warnings": state.get("warnings", []) if isinstance(state.get("warnings"), list) else [],
         "evaluation_error": detail,
+        "model_outputs": {
+            "vlm_initial": None,
+            "verification_final": None,
+            "verification_raw_final": None,
+            "verification_allowed_evidence_ids": {},
+            "report_final": None,
+        },
+        "metrics": {
+            "vlm": {"has_accident": None, "t0_error_s": None, "temporal_iou": None, "event_matches": []},
+            "verifier": {
+                "has_accident": None,
+                "evidence_id_validity": evidence_id_validity([], {}),
+                "status_distribution": status_distribution([]),
+            },
+            "report": {
+                "type_of_accident": None,
+                "has_accident": None,
+                "t0_error_s": None,
+                "temporal_iou": None,
+            },
+        },
+    }
+
+
+def _evaluation_exception_sample(sample: GoldenSample, analysis_prompt: str, exc: Exception) -> dict[str, Any]:
+    """Persist evaluator failures, such as a network error from the event judge."""
+    return {
+        "sample_id": sample.sample_id,
+        "analysis_prompt": analysis_prompt,
+        "workflow_status": "failed",
+        "auto_reanalysis_count": 0,
+        "manual_reanalysis_count": 0,
+        "auto_reanalysis_attempted": False,
+        "manual_reanalysis_attempted": False,
+        "has_reanalyze": False,
+        "workflow_error": None,
+        "warnings": [],
+        "evaluation_error": f"EVALUATION_FAILED: {exc}",
         "model_outputs": {
             "vlm_initial": None,
             "verification_final": None,
@@ -462,6 +573,21 @@ def _select_stage_states(states: list[dict[str, Any]]) -> dict[str, dict[str, An
     }
 
 
+def _node_was_scheduled(states: list[dict[str, Any]], node_name: str) -> bool:
+    """Return whether a graph node was reached, including attempts that failed."""
+    return any(node_name in state.get("next", ()) for state in states)
+
+
+def _workflow_error(public_status: str, state: dict[str, Any]) -> str | None:
+    """Preserve a graph failure even when earlier stages produced usable outputs."""
+    if public_status != "failed":
+        return None
+    code = state.get("error_code")
+    message = state.get("error_message")
+    detail = ": ".join(item for item in (code, message) if isinstance(item, str) and item)
+    return detail or "WORKFLOW_FAILED: graph ended with status=failed without an error detail"
+
+
 def _timing_row(
     prediction: dict[str, Any], gold: dict[str, float], gold_incident: bool, prediction_incident: bool | None
 ) -> dict[str, float | None]:
@@ -544,6 +670,45 @@ def _required_incident_type(label: dict[str, Any]) -> str:
     return incident_type
 
 
+def _sample_result_path(results_dir: Path, sample_id: str) -> Path:
+    if Path(sample_id).name != sample_id or sample_id in {"", ".", ".."}:
+        raise ValueError(f"sample_id is not a safe file name: {sample_id!r}")
+    return results_dir / f"{sample_id}.json"
+
+
+def _read_completed_sample(path: Path, sample_id: str, analysis_prompt: str) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    try:
+        row = _read_json(path)
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
+    if (
+        row.get("sample_id") == sample_id
+        and row.get("analysis_prompt") == analysis_prompt
+        and _sample_failure(row) is None
+    ):
+        return row
+    return None
+
+
+def _sample_failure(row: dict[str, Any]) -> str | None:
+    """Return an evaluator or production-workflow failure stored in one sample row."""
+    for field in ("evaluation_error", "workflow_error"):
+        value = row.get(field)
+        if isinstance(value, str) and value:
+            return value
+    if row.get("workflow_status") == "failed":
+        return "WORKFLOW_FAILED: graph ended with status=failed without an error detail"
+    return None
+
+
+def _write_json(path: Path, value: dict[str, Any]) -> None:
+    temporary_path = path.with_suffix(f"{path.suffix}.tmp")
+    temporary_path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary_path.replace(path)
+
+
 def _optional_model(value: Any, model: type[BaseModel]) -> Any | None:
     return value if isinstance(value, model) else None
 
@@ -568,19 +733,24 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate the production incident graph against golden_set.")
     parser.add_argument("--golden-set", type=Path, default=Path("golden_set"))
     parser.add_argument("--analysis-prompt", required=True, help="The fixed user prompt to use for every sample.")
-    parser.add_argument("--output", type=Path, default=Path("eval/results/latest.json"))
+    parser.add_argument("--results-dir", type=Path, default=Path("eval/results"))
+    parser.add_argument("--force", action="store_true", help="Run successful samples again instead of reusing their JSON.")
     return parser.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
-    result = asyncio.run(evaluate_dataset(args.golden_set, analysis_prompt=args.analysis_prompt))
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    for sample in result["samples"]:
-        if error := sample.get("evaluation_error"):
-            print(f"Evaluation failed for {sample['sample_id']}: {error}")
-    print(f"Evaluation complete: {args.output}")
+    metric = asyncio.run(
+        evaluate_dataset(
+            args.golden_set,
+            analysis_prompt=args.analysis_prompt,
+            results_dir=args.results_dir,
+            force=args.force,
+        )
+    )
+    for sample in metric["failed_samples"]:
+        print(f"Evaluation failed for {sample['sample_id']}: {sample['error']}")
+    print(f"Evaluation complete: {args.results_dir / 'metric.json'}")
 
 
 if __name__ == "__main__":

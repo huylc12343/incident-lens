@@ -61,13 +61,10 @@ def build_video_analysis_prompt(
             # 3. INCIDENT TYPES
             # =========================================================
             "Chủ động tìm sự cố liên quan trực tiếp đến ego. Các loại gồm: "
-            "rear_end_collision (ego đâm đuôi xe trước), "
+            "vehicle_collision (ego va chạm với phương tiện khác, gồm cùng hướng, ngược hướng, đâm phía sau, nhập/đổi làn hoặc bên hông), "
             "crossing_collision (va chạm xe cắt ngang), "
-            "side_collision (va chạm bên hông khi nhập/đổi làn hoặc đi cạnh nhau), "
-            "head_on_collision (đối đầu), "
             "pedestrian_collision (người đi bộ), "
-            "static_object_collision (vật thể tĩnh trong khu vực lưu thông), "
-            "roadside_collision (rời phần đường hoặc va chạm môi trường ven đường), "
+            "environment_collision (va chạm vật thể không phải phương tiện/người đi bộ hoặc rời đường), "
             "no_incident (không có tai nạn).",
 
             # =========================================================

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { artifactUrl, getIncident, reviewIncident } from "../../lib/incidentApi";
 import { getEvaluationMismatches } from "../../lib/groundTruthEvaluation";
 import { INCIDENT_KEYS } from "../../lib/incidentSession";
+import { loadUploadedVideo } from "../../lib/uploadStorage";
 import type { Claim, IncidentSnapshot, ReviewPayload } from "../../types/incident";
 import { ProcessingPipeline } from "../ProcessingPipeline";
 import { DecisionModal } from "./DecisionModal";
@@ -23,6 +24,7 @@ export function IncidentReviewWorkspace() {
   const [selectedClaimId, setSelectedClaimId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [originalVideoUrl, setOriginalVideoUrl] = useState("");
   const [decisionOpen, setDecisionOpen] = useState(false);
 
   useEffect(() => {
@@ -78,10 +80,31 @@ export function IncidentReviewWorkspace() {
   };
 
   const report = snapshot?.final_report ?? snapshot?.draft_report;
+  const aiFoundNoIncident = snapshot?.status === "awaiting_review" && report?.type_of_accident === "no_incident";
   const evaluationMismatches = snapshot ? getEvaluationMismatches(snapshot) : [];
   const hasCriticalEvaluationMismatch = evaluationMismatches.some((mismatch) => mismatch.critical);
   const clip = artifactUrl(snapshot?.artifact_uris.incident_clip);
   const telemetryCharts = snapshot ? Object.entries(snapshot.artifact_uris).filter(([key, uri]) => key.startsWith("chart_") && Boolean(uri)).sort(([left], [right]) => left.localeCompare(right)).map(([id, uri]) => ({ id, uri })) : [];
+
+  useEffect(() => {
+    if (!aiFoundNoIncident || clip) {
+      setOriginalVideoUrl("");
+      return;
+    }
+    let active = true;
+    let blobUrl = "";
+    const sessionVideoUrl = sessionStorage.getItem("vlens:video-url");
+    if (sessionVideoUrl) setOriginalVideoUrl(sessionVideoUrl);
+    void loadUploadedVideo().then((video) => {
+      if (!active || !video) return;
+      blobUrl = URL.createObjectURL(video);
+      setOriginalVideoUrl(blobUrl);
+    }).catch(() => { /* Session playback remains the fallback when IndexedDB is unavailable. */ });
+    return () => {
+      active = false;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  }, [aiFoundNoIncident, clip]);
 
   return (
     <div className="incident-review-frame">
@@ -96,13 +119,14 @@ export function IncidentReviewWorkspace() {
         ) : (
           <>
             {evaluationMismatches.length > 0 && <section className={`ground-truth-alert ${hasCriticalEvaluationMismatch ? "critical" : "warning"}`} role="alert" aria-labelledby="ground-truth-alert-title"><div><span className="ground-truth-alert-icon" aria-hidden="true">!</span><div><strong id="ground-truth-alert-title">Cần rà soát: Kết luận AI chưa khớp Ground Truth</strong><p>{evaluationMismatches[0].description}{evaluationMismatches.length > 1 ? ` Có thêm ${evaluationMismatches.length - 1} sai lệch cần kiểm tra.` : ""}</p><small>{evaluationMismatches.map((mismatch) => mismatch.label).join(" · ")}</small></div></div><a href="#ground-truth-comparison">Xem đối chiếu</a></section>}
+            {aiFoundNoIncident && <section className="ground-truth-alert warning" role="status" aria-live="polite"><div><span className="ground-truth-alert-icon" aria-hidden="true">!</span><div><strong>AI chưa phát hiện sự cố.</strong><p>Vui lòng kiểm tra bằng chứng và xác nhận đóng case nếu đồng ý.</p></div></div><a href="#engineer-review">Mở phần rà soát</a></section>}
             <div className="review-command-bar">
               <div><span className="command-status-dot" /><strong>{snapshot.status === "awaiting_review" ? "Ready for engineer review" : `Workflow: ${snapshot.status}`}</strong><small>{snapshot.claims.length} AI observation(s) · {snapshot.has_log ? "Video + telemetry" : "Video only"}</small></div>
               <div><a className="command-secondary" href="#selected-evidence">Inspect evidence</a><button type="button" className="command-decision" disabled={snapshot.status !== "awaiting_review" || busy} onClick={() => setDecisionOpen(true)}><span aria-hidden="true">☷</span> Make decision</button></div>
             </div>
             <div className="incident-review-workspace" id="engineer-review">
               <main className="incident-evidence-column">
-                <IncidentClipPlayer clipUrl={clip} start={report?.incident_window?.t_start} focus={report?.incident_window?.t0} end={report?.incident_window?.t_end} claims={snapshot.claims} selectedId={selectedClaim?.claim_id ?? ""} onSelect={selectClaim} videoRef={videoRef} />
+                <IncidentClipPlayer clipUrl={clip || originalVideoUrl} isOriginalVideo={aiFoundNoIncident && !clip} noIncident={aiFoundNoIncident} start={report?.incident_window?.t_start} focus={report?.incident_window?.t0} end={report?.incident_window?.t_end} claims={snapshot.claims} selectedId={selectedClaimId} onSelect={selectClaim} videoRef={videoRef} />
                 <TelemetryPanel summaries={snapshot.claim_log_summaries} selectedClaimId={selectedClaim?.claim_id ?? ""} hasLog={snapshot.has_log} chartUris={telemetryCharts} comparison={<GroundTruthComparison snapshot={snapshot} />} />
                 <div className="evidence-presentation-stack" id="selected-evidence"><EvidenceInspector snapshot={snapshot} claim={selectedClaim} /></div>
               </main>

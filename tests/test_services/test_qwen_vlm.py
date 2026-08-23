@@ -25,6 +25,7 @@ from src.services.vlm import QwenNativeVideoVLMService, VLMServiceError
 async def test_qwen_sends_native_video_to_dashscope_chat_completions() -> None:
     memory = VideoMemory(
         global_scene="Đường giao thông.",
+        vlm_has_accident=True,
         incident_window=IncidentWindow(t_start=0, t0=1, t_end=2),
         analysis_mode=AnalysisMode.NATIVE_VIDEO,
     )
@@ -55,6 +56,7 @@ async def test_qwen_sends_native_video_to_dashscope_chat_completions() -> None:
     result = await service.analyze_video(request)
 
     assert result.analysis_mode == AnalysisMode.NATIVE_VIDEO
+    assert result.vlm_has_accident is True
     call = client.chat.completions.create.await_args.kwargs
     assert call["model"] == "qwen3-vl-flash"
     assert call["temperature"] == 0.0
@@ -69,6 +71,7 @@ async def test_qwen_sends_native_video_to_dashscope_chat_completions() -> None:
     structured_prompt = call["messages"][0]["content"]
     assert "<json_schema>" in structured_prompt
     assert '"analysis_mode"' not in structured_prompt
+    assert '"vlm_has_accident"' in structured_prompt
     assert "Quy tắc phân tích hệ thống." in structured_prompt
     assert "Tập trung vào va chạm chính." not in structured_prompt
     assert "Video bắt đầu tại 0s và kết thúc tại 2s" in structured_prompt

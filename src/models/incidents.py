@@ -30,15 +30,24 @@ class VerificationStatus(StrEnum):
 
 
 class AccidentType(StrEnum):
-    REAR_END_COLLISION = "rear_end_collision"
+    VEHICLE_COLLISION = "vehicle_collision"
     CROSSING_COLLISION = "crossing_collision"
-    SIDE_COLLISION = "side_collision"
-    HEAD_ON_COLLISION = "head_on_collision"
     PEDESTRIAN_COLLISION = "pedestrian_collision"
-    STATIC_OBJECT_COLLISION = "static_object_collision"
-    ROADSIDE_COLLISION = "roadside_collision"
+    ENVIRONMENT_COLLISION = "environment_collision"
     NO_INCIDENT = "no_incident"
     OTHER_UNKNOWN = "other_unknown"
+
+    @classmethod
+    def _missing_(cls, value: object) -> AccidentType | None:
+        """Map stored reports created with the previous, more granular taxonomy."""
+        legacy_values = {
+            "rear_end_collision": cls.VEHICLE_COLLISION,
+            "side_collision": cls.VEHICLE_COLLISION,
+            "head_on_collision": cls.VEHICLE_COLLISION,
+            "static_object_collision": cls.ENVIRONMENT_COLLISION,
+            "roadside_collision": cls.ENVIRONMENT_COLLISION,
+        }
+        return legacy_values.get(value) if isinstance(value, str) else None
 
 
 class PromptSource(StrEnum):
@@ -153,6 +162,7 @@ class SamplingMetadata(ContractModel):
 
 class VideoMemory(ContractModel):
     global_scene: str = Field(min_length=1)
+    vlm_has_accident: bool | None = None
     video_summary: str | None = Field(default=None, min_length=1)
     incident_window: IncidentWindow
     representative_timestamp_s: float | None = Field(default=None, ge=0)
@@ -364,6 +374,7 @@ class ClaimVerification(ContractModel):
 
 
 class VerificationResult(ContractModel):
+    has_accident: bool | None = None
     results: list[ClaimVerification]
 
 

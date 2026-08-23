@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -13,6 +14,16 @@ from pathlib import Path
 from imageio_ffmpeg import get_ffmpeg_exe
 
 from src.models.incidents import IncidentWindow, NativeVideoMetadata, TimestampedFrame, VideoSequenceManifest
+
+
+def _bundled_tool(name: str) -> str | None:
+    """Find a locally unpacked FFmpeg binary when it is not on PATH."""
+    executable = f"{name}.exe" if os.name == "nt" else name
+    tools_root = Path(__file__).resolve().parents[2] / ".tools" / "ffmpeg"
+    if not tools_root.is_dir():
+        return None
+    match = next(tools_root.glob(f"**/bin/{executable}"), None)
+    return str(match) if match is not None and match.is_file() else None
 
 
 class MediaServiceError(RuntimeError):
@@ -297,15 +308,11 @@ class MediaService:
 
     async def _run_command(self, *command: str) -> tuple[str, str]:
         try:
-            # Windows' ProactorEventLoop creates overlapped named pipes for
-            # asyncio subprocesses. Some managed/sandboxed Windows runtimes
-            # deny those pipes with WinError 5 even though the executable is
-            # allowed to run. A regular subprocess in a worker thread avoids
-            # that platform-specific failure without blocking the event loop.
-            result = await asyncio.to_thread(
+            completed = await asyncio.to_thread(
                 subprocess.run,
                 command,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 timeout=self._command_timeout_s,
                 check=False,
             )
@@ -313,19 +320,10 @@ class MediaService:
             raise MediaServiceError("MEDIA_COMMAND_TIMEOUT", "media command timed out") from exc
         except OSError as exc:
             raise MediaServiceError("MEDIA_COMMAND_FAILED", str(exc)) from exc
-        if result.returncode != 0:
-            detail = result.stderr.decode("utf-8", errors="replace").strip()
+        if completed.returncode != 0:
+            detail = completed.stderr.decode("utf-8", errors="replace").strip()
             raise MediaServiceError("MEDIA_COMMAND_FAILED", detail or "media command failed")
-        return result.stdout.decode("utf-8"), result.stderr.decode("utf-8", errors="replace")
-
-
-def _bundled_tool(name: str) -> str | None:
-    """Find the repo-local FFmpeg tools used by Windows development setups."""
-    executable = f"{name}.exe" if name in {"ffmpeg", "ffprobe"} else name
-    tools_root = Path(__file__).resolve().parents[2] / ".tools" / "ffmpeg"
-    if not tools_root.is_dir():
-        return None
-    return next((str(path) for path in tools_root.glob(f"**/bin/{executable}") if path.is_file()), None)
+        return completed.stdout.decode("utf-8"), completed.stderr.decode("utf-8", errors="replace")
 
 
 def _existing_file(uri: str) -> Path:

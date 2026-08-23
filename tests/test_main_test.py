@@ -80,6 +80,32 @@ def test_streamlit_reports_non_json_backend_response() -> None:
             raise AssertionError("non-JSON responses must be explained")
 
 
+def test_streamlit_reports_validation_fields() -> None:
+    response = Mock(is_error=True, status_code=422)
+    response.json.return_value = {
+        "detail": [{"loc": ["body", "analysis_prompt"], "msg": "Field required"}]
+    }
+    with patch("main_test.httpx.request", return_value=response):
+        with pytest.raises(RuntimeError, match="analysis_prompt: Field required"):
+            main_test.api_request("POST", "http://localhost:8000", "/api/v1/incidents")
+
+
+def test_async_upload_does_not_mark_incident_created_before_api_succeeds() -> None:
+    video = SimpleNamespace(name="camera.mp4", type="video/mp4", getvalue=lambda: b"video")
+    streamlit = SimpleNamespace(session_state=SimpleNamespace(), info=Mock(), error=Mock())
+    executor = SimpleNamespace(submit=Mock(return_value=Mock()))
+    with (
+        patch("main_test.st", streamlit),
+        patch("main_test._REQUEST_EXECUTOR", executor),
+        patch("main_test.api_request", return_value={"video_uri": "/uploads/camera.mp4"}),
+    ):
+        main_test._upload_and_start_async("http://localhost:8000", "INC-UPLOAD", "Analyze", video, None)
+
+    assert streamlit.session_state.pending_incident_id == "INC-UPLOAD"
+    assert not hasattr(streamlit.session_state, "incident_id")
+    streamlit.info.assert_called_once()
+
+
 def test_report_renderer_does_not_parse_plain_text_as_json() -> None:
     streamlit = SimpleNamespace(json=Mock(), write=Mock(), caption=Mock())
     with patch("main_test.st", streamlit):
@@ -191,7 +217,8 @@ def test_unified_report_formats_timeline_as_readable_rows() -> None:
 
 
 def test_accident_type_uses_readable_vietnamese_label() -> None:
-    assert main_test._accident_type_label("roadside_collision") == "Va chạm môi trường ven đường / rời đường"
+    assert main_test._accident_type_label("vehicle_collision") == "Va chạm với phương tiện khác"
+    assert main_test._accident_type_label("environment_collision") == "Va chạm môi trường / rời khỏi phần đường"
     assert main_test._accident_type_label("no_incident") == "Không có tai nạn của ego"
 
 

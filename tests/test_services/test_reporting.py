@@ -40,7 +40,7 @@ def _request() -> ReportRequest:
 
 def _narrative() -> ReportModelOutput:
     return ReportModelOutput(
-        type_of_accident=AccidentType.REAR_END_COLLISION,
+        type_of_accident=AccidentType.VEHICLE_COLLISION,
         incident_window=IncidentWindow(t_start=1, t0=2, t_end=3),
         representative_timestamp_s=2,
         timeline="The event occurred near 2 seconds.",
@@ -129,17 +129,16 @@ async def test_report_rejects_backend_owned_fields() -> None:
 
 
 @pytest.mark.asyncio
-async def test_report_rejects_accident_type_outside_taxonomy() -> None:
+async def test_report_accepts_new_accident_type_taxonomy() -> None:
     payload = _narrative().model_dump(mode="json")
     payload["type_of_accident"] = "vehicle_collision"
     client = SimpleNamespace(
         responses=SimpleNamespace(parse=AsyncMock(return_value=SimpleNamespace(output_parsed=payload)))
     )
 
-    with pytest.raises(ReportServiceError) as exc_info:
-        await OpenAIReportService(model="gpt-test", client=client).build_narrative(_request())
+    result = await OpenAIReportService(model="gpt-test", client=client).build_narrative(_request())
 
-    assert exc_info.value.code == "REPORT_STRUCTURED_OUTPUT_INVALID"
+    assert result.type_of_accident == AccidentType.VEHICLE_COLLISION
 
 
 @pytest.mark.asyncio

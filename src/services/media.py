@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -13,6 +14,16 @@ from pathlib import Path
 from imageio_ffmpeg import get_ffmpeg_exe
 
 from src.models.incidents import IncidentWindow, NativeVideoMetadata, TimestampedFrame, VideoSequenceManifest
+
+
+def _bundled_tool(name: str) -> str | None:
+    """Find a locally unpacked FFmpeg binary when it is not on PATH."""
+    executable = f"{name}.exe" if os.name == "nt" else name
+    tools_root = Path(__file__).resolve().parents[2] / ".tools" / "ffmpeg"
+    if not tools_root.is_dir():
+        return None
+    match = next(tools_root.glob(f"**/bin/{executable}"), None)
+    return str(match) if match is not None and match.is_file() else None
 
 
 class MediaServiceError(RuntimeError):

@@ -221,8 +221,8 @@ def redact_video(
     source = Path(source_uri).resolve()
     output = Path(output_uri).resolve()
     src_dir = Path(__file__).resolve().parent.parent
-    plate_weights_path = Path(plate_weights or src_dir / "models" / "best_cv.pt").resolve()
-    face_weights_path = Path(face_weights or src_dir / "models" / "face_yolov8n.pt").resolve()
+    plate_weights_path = Path(plate_weights or src_dir / "models" / "best_plate.pt").resolve()
+    face_weights_path = Path(face_weights or src_dir / "models" / "best3_face.pt").resolve()
 
     if not source.is_file():
         raise FileNotFoundError(f"video source file not found: {source}")
@@ -372,8 +372,8 @@ def main():
     # Resolve model paths relative to this file:
     # src/services/detect_and_blur.py -> src/models/*.pt
     src_dir = Path(__file__).resolve().parent.parent
-    default_plate_weights = src_dir / "models" / "best_cv.pt"
-    default_face_weights = src_dir / "models" / "face_yolov8n.pt"
+    default_plate_weights = src_dir / "models" / "best_plate.pt"
+    default_face_weights = src_dir / "models" / "best3_face.pt"
 
     parser.add_argument("--plate-weights", type=str, default=str(default_plate_weights))
     parser.add_argument("--face-weights", type=str, default=str(default_face_weights))
@@ -383,9 +383,10 @@ def main():
     parser.add_argument("--face-conf", type=float, default=0.05,
                          help="Face confidence threshold (default: 0.05; lower improves "
                               "recall but increases false positives).")
-    parser.add_argument("--imgsz", type=int, default=512,
+    parser.add_argument("--imgsz", type=int, default=1280,
                          help="Inference resolution for both models. Lower = faster, "
-                         "slightly less accurate on small/far objects (default: 512)")
+                         "slightly less accurate on small/far objects (default: 1280, "
+                         "try 960 for a speed/accuracy tradeoff)")
     parser.add_argument("--augment", action="store_true",
                          help="Enable Ultralytics test-time augmentation (measured slower; "
                               "off by default).")

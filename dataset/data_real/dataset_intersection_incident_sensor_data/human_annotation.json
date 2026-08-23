@@ -1,0 +1,33 @@
+{
+  "annotation_id": "ann_intersection_conflict_002",
+  "annotator": "AI-assisted preliminary annotation",
+  "review_status": "needs_human_validation",
+  "labels": {
+    "primary_incident": "intersection_near_conflict",
+    "severity": "high",
+    "collision_confirmed": false,
+    "road_departure": false,
+    "near_miss": true
+  },
+  "temporal_segments": [
+    {
+      "start_s": 0.0,
+      "end_s": 33.5,
+      "label": "pre_incident"
+    },
+    {
+      "start_s": 33.5,
+      "end_s": 37.2,
+      "label": "incident"
+    },
+    {
+      "start_s": 37.2,
+      "end_s": 38.614785,
+      "label": "post_incident"
+    }
+  ],
+  "description": "Xe ego chạy trên đường đô thị và dừng tại giao lộ; một xe Jeep màu đỏ cắt ngang phía trước ở khoảng cách gần.",
+  "uncertainties": [
+    "Xe cắt ngang quỹ đạo tại giao lộ trong khi ego đang dừng hoặc gần dừng; không quan sát thấy va chạm thực tế."
+  ]
+}

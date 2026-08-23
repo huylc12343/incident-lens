@@ -30,7 +30,7 @@ def test_analyze_real_log_slices_window_and_derives_metrics(tmp_path: Path) -> N
     assert result.summary.metrics["max_deceleration"] == pytest.approx(-3.611111, rel=1e-5)
     assert result.summary.metrics["brake_rise_time"] == 6.5
     assert "Tốc độ đầu 40 km/h" in result.summary.summary
-    assert "Brake tăng mạnh lần đầu tại 6.5 giây" in result.summary.summary
+    assert "Mức tăng brake mạnh đầu tiên xảy ra tại 6.5 giây" in result.summary.summary
     assert "log-metric:speed_start" in result.summary.evidence_ids
     assert "log-metric:max_deceleration" in result.summary.evidence_ids
     assert any(event.event_type == "brake_rise" for event in result.events)
@@ -50,7 +50,7 @@ def test_conflict_log_has_no_strong_brake_rise_near_incident(tmp_path: Path) -> 
     assert "brake_rise_time" not in conflict.summary.metrics
     assert conflict.summary.metrics["speed_end"] == 2.5
     assert not any(event.event_type == "brake_rise" for event in conflict.events)
-    assert "Không phát hiện brake tăng mạnh" in conflict.summary.summary
+    assert "Không phát hiện mức tăng brake mạnh" in conflict.summary.summary
 
 
 def test_detects_disengagement_warning_and_error(tmp_path: Path) -> None:

@@ -1,0 +1,79 @@
+{
+  "schema_version": "1.0",
+  "incident_id": "INC_CUT_IN_SEED5_20260809_111228",
+  "dataset": {
+    "source": "CARLA",
+    "purpose": "Incident Lens evaluation dataset",
+    "split": "test"
+  },
+  "simulation": {
+    "map": "Town10HD_Opt",
+    "seed": 5,
+    "duration_sec": 45.0,
+    "fps": 20
+  },
+  "scenario": {
+    "name": "cut_in_collision_or_near_miss",
+    "parameters": {
+      "host": "127.0.0.1",
+      "port": 2000,
+      "timeout": 60.0,
+      "map": "Town10HD_Opt",
+      "duration": 45.0,
+      "seed": 5,
+      "fps": 20,
+      "width": 1280,
+      "height": 720,
+      "fov": 90.0,
+      "ego_speed": 62.0,
+      "cut_vehicle_speed": 67.0,
+      "cut_in_lead": 7.5,
+      "desired_pre_cut_lead": 6.5,
+      "event_time": 15.0,
+      "reaction_delay": 0.8,
+      "ego_brake": 1.0,
+      "cut_target_forward": 4.8,
+      "max_cut_steer": 0.28,
+      "near_miss_threshold": 3.4,
+      "prelude_seconds": 5.0,
+      "prelude_speed_factor": 0.5,
+      "route_length": 300.0,
+      "seed_spacing": 80.0,
+      "output": "./output/cut_in_v3",
+      "no_map_fallback": true
+    }
+  },
+  "spawn_selection": {
+    "seed": 5,
+    "selection_strategy": "farthest_point_adjacent_lane_distribution",
+    "candidate_index": 4,
+    "candidate_count": 8,
+    "min_distance_to_earlier_seeds_m": 90.626,
+    "road_id": 5,
+    "ego_lane_id": -2,
+    "cut_vehicle_lane_id": -1,
+    "ego_spawn": {
+      "x": -70.4899,
+      "y": 128.9029,
+      "z": 0.0,
+      "pitch": 0.0,
+      "yaw": -167.1271,
+      "roll": 0.0
+    },
+    "cut_vehicle_spawn": {
+      "x": -78.0972,
+      "y": 130.0986,
+      "z": 0.0,
+      "pitch": 0.0,
+      "yaw": -156.905,
+      "roll": 0.0
+    }
+  },
+  "result": {
+    "scenario_success": true,
+    "collision_confirmed": true,
+    "near_miss_confirmed": false,
+    "minimum_vehicle_distance_m": 2.873
+  },
+  "generated_at": "2026-08-09T04:12:43.480515+00:00"
+}

@@ -45,10 +45,11 @@ async def get_upload_service(request: Request) -> Any:
 async def upload_incident_files(
     video: UploadFile = File(...),
     log: UploadFile | None = File(default=None),
+    ground_truth: UploadFile | None = File(default=None),
     service: Any = Depends(get_upload_service),
 ) -> IncidentUploadResponse:
     try:
-        return await service.save(video, log)
+        return await service.save(video, log, ground_truth)
     except Exception as exc:
         raise incident_http_error(exc) from exc
 
@@ -60,7 +61,7 @@ async def create_incident(
     service: Any = Depends(get_workflow_service),
 ) -> IncidentSnapshot:
     try:
-        snapshot = await service.create(payload)
+        snapshot = await service.enqueue(payload)
     except Exception as exc:
         raise incident_http_error(exc) from exc
     response.status_code = _response_status(snapshot)

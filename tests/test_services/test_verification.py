@@ -120,7 +120,7 @@ async def test_verification_marks_missing_claim_result_unverified() -> None:
     assert [item.claim_id for item in result.results] == ["claim-1"]
     assert result.results[0].status == VerificationStatus.UNVERIFIED
     assert result.results[0].evidence_ids == []
-    assert "không trả về duy nhất một kết quả" in result.results[0].reason
+    assert "không trả về đúng một kết quả hợp lệ" in result.results[0].reason
 
 
 @pytest.mark.asyncio

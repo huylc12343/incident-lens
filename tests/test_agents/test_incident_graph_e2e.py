@@ -40,9 +40,9 @@ def _qwen_client(*outputs: object) -> SimpleNamespace:
     return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(side_effect=responses))))
 
 
-def _narrative(label: str = "Initial") -> ReportModelOutput:
+def _narrative(label: str = "Initial", accident_type: AccidentType = AccidentType.OTHER_UNKNOWN) -> ReportModelOutput:
     return ReportModelOutput(
-        type_of_accident=AccidentType.OTHER_UNKNOWN,
+        type_of_accident=accident_type,
         incident_window=IncidentWindow(t_start=6, t0=7, t_end=9),
         representative_timestamp_s=7,
         timeline=f"{label} timeline",
@@ -61,6 +61,8 @@ def _settings(tmp_path: Path) -> Settings:
         incident_checkpoint_path=str(tmp_path / "checkpoints.sqlite3"),
         vlm_reanalysis_frame_fps=1,
         vlm_reanalysis_max_frames=10,
+        # Human-review orchestration is covered here; CV redaction has separate coverage.
+        video_redaction_enabled=False,
     )
 
 
@@ -202,7 +204,7 @@ async def test_fastapi_lifespan_bootstraps_configured_workflow(monkeypatch, tmp_
     clients = ProviderClients(
         qwen=_qwen_client(_video_memory(with_claim=False)),
         openai_verification=_client(),
-        openai_report=_client(SimpleNamespace(output_parsed=_narrative())),
+        openai_report=_client(SimpleNamespace(output_parsed=_narrative(accident_type=AccidentType.NO_INCIDENT))),
     )
 
     @asynccontextmanager
@@ -238,6 +240,7 @@ async def test_fastapi_lifespan_bootstraps_configured_workflow(monkeypatch, tmp_
     assert health.status_code == 200
     assert created.status_code == 202
     assert created.json()["status"] == "awaiting_review"
+    assert created.json()["draft_report"]["type_of_accident"] == "no_incident"
     activities = created.json()["model_activities"]
     assert [(item["step"], item["status"]) for item in activities] == [
         ("vlm", "completed"),

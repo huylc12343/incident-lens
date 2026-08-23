@@ -180,14 +180,9 @@ def main():
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    # Codex Stop hooks require a supported JSON response shape. Unknown fields
-    # can make the hook appear to fail even though the log was already written.
-    if tool == "codex":
-        print(json.dumps({"continue": True}))
-    else:
-        # Output valid JSON (required by some tools like Gemini).
+    # Output valid JSON (required by some tools like Gemini)
+    if tool != "codex":
         print(json.dumps({"status": "logged"}))
-
 
 if __name__ == "__main__":
     main()

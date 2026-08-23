@@ -62,6 +62,7 @@ class IncidentCreateRequest(APIModel):
 class IncidentUploadResponse(APIModel):
     video_uri: str
     log_uri: str | None = None
+    ground_truth_uri: str | None = None
 
 
 class ReviewDecision(APIModel):

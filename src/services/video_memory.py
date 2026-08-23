@@ -718,7 +718,7 @@ def _batch_prompt(
     )
     return base.model_copy(
         update={
-            "text": f"{base.text}\nPhân tích batch tuần tự {index + 1}/{total}. Context: {suffix}",
+            "text": f"{base.text}\nAnalyze sequential batch {index + 1}/{total}. Context: {suffix}",
             "context": {**base.context, "rolling_batch_index": index, "rolling_batch_count": total},
         }
     )
@@ -730,9 +730,9 @@ def _synthesis_prompt(base: PromptEnvelope, memories: list[VideoMemory]) -> Prom
     return base.model_copy(
         update={
             "text": (
-                f"{base.text}\nTổng hợp một VideoMemory cuối cùng cho toàn bộ video từ các batch memory theo "
-                f"thứ tự thời gian này. Hợp nhất sự kiện trùng ở vùng overlap mà không bịa thêm sự thật. Toàn bộ "
-                f"nội dung mô tả phải bằng tiếng Việt: {suffix}"
+                f"{base.text}\nSynthesize one final VideoMemory for the complete video from these batch memories "
+                f"in chronological order. Merge duplicate overlap events without inventing facts. All "
+                f"nội dung mô tả phải được viết bằng tiếng Việt rõ ràng, chuyên nghiệp; có thể giữ thuật ngữ kỹ thuật bằng English: {suffix}"
             ),
             "context": {**base.context, "synthesis_batch_count": len(memories)},
         }

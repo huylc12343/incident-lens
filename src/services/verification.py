@@ -81,7 +81,7 @@ class OpenAIVerificationService:
                 incident_id=request.incident_id,
                 step="verification",
                 operation="claim_verification",
-                description="Đối chiếu các claim từ video với bằng chứng log.",
+                description="Compare video claims with log evidence.",
                 provider="openai",
                 model=self._model,
                 metadata={"claim_count": len(request.claims)},
@@ -196,7 +196,7 @@ def _validate_verification_result(request: VerificationRequest, result: Verifica
                 ClaimVerification(
                     claim_id=claim_id,
                     status=VerificationStatus.UNVERIFIED,
-                    reason="Verifier không trả về duy nhất một kết quả hợp lệ cho claim này.",
+                    reason="Bộ xác minh không trả về đúng một kết quả hợp lệ cho claim này.",
                     evidence_ids=[],
                 )
             )
@@ -209,7 +209,7 @@ def _validate_verification_result(request: VerificationRequest, result: Verifica
                 item.model_copy(
                     update={
                         "status": VerificationStatus.UNVERIFIED,
-                        "reason": "Không có evidence log đủ gần timestamp của claim.",
+                        "reason": "Không có bằng chứng log nào đủ gần timestamp của claim.",
                         "evidence_ids": [],
                     }
                 )
@@ -229,7 +229,7 @@ def _validate_verification_result(request: VerificationRequest, result: Verifica
                         "reason": (
                             item.reason
                             if item.status == VerificationStatus.UNVERIFIED
-                            else "Không có evidence log trực tiếp hợp lệ để xác nhận hoặc bác bỏ claim."
+                            else "Không có bằng chứng log trực tiếp hợp lệ để ủng hộ hoặc phản bác claim."
                         ),
                         "evidence_ids": [],
                     }

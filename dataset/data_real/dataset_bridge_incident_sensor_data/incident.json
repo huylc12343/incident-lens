@@ -1,0 +1,20 @@
+{
+  "incident_id": "incident_bridge_001",
+  "ground_truth_status": "provisional_manual_ground_truth",
+  "incident_type": "road_departure_and_fall",
+  "severity": "critical",
+  "start_time_s": 6.0,
+  "end_time_s": 14.5,
+  "summary": "Xe tải lưu thông trên cầu, va chạm/né phương tiện ngược chiều rồi lao qua lan can và rơi xuống nước.",
+  "likely_cause": "Mất kiểm soát hướng lái sau tình huống tiếp cận rất gần với xe ngược chiều; video không đủ để xác nhận chắc chắn có va chạm trực tiếp.",
+  "outcome": "Xe rời mặt cầu và rơi xuống nước.",
+  "evidence_timestamps_s": [
+    6.0,
+    6.8,
+    7.5,
+    9.0,
+    13.5
+  ],
+  "confidence": 0.88,
+  "verification_required": true
+}

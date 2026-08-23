@@ -1,0 +1,69 @@
+{
+  "schema_version": "1.0",
+  "sample_id": "CARLA_INC_CUT_IN_000001_CC42DD4D_4D0D1FB0",
+  "label_provenance": "carla_simulator",
+  "is_incident": true,
+  "incident_type": "cut_in_collision",
+  "severity": "high",
+  "timeline": {
+    "t_start": 10.0,
+    "t0": 10.7,
+    "t_end": 11.65
+  },
+  "evaluation_events": [
+    {
+      "event_type": "target_overtaking",
+      "timestamp": 5.0,
+      "frame": 108082
+    },
+    {
+      "event_type": "cut_in_started",
+      "timestamp": 10.0,
+      "frame": 108182
+    },
+    {
+      "event_type": "closing_distance",
+      "timestamp": 10.05,
+      "frame": 108183
+    },
+    {
+      "event_type": "lane_change",
+      "timestamp": 10.65,
+      "frame": 108195
+    },
+    {
+      "event_type": "collision",
+      "timestamp": 10.7,
+      "frame": 108196
+    },
+    {
+      "event_type": "ego_lane_invasion",
+      "timestamp": 11.3,
+      "frame": 108208
+    },
+    {
+      "event_type": "vehicle_stopped",
+      "timestamp": 11.65,
+      "frame": 108215
+    },
+    {
+      "event_type": "ego_lane_invasion",
+      "timestamp": 12.4,
+      "frame": 108230
+    },
+    {
+      "event_type": "ego_lane_invasion",
+      "timestamp": 13.5,
+      "frame": 108252
+    }
+  ],
+  "collision": {
+    "occurred": true,
+    "timestamp": 10.7,
+    "frame": 108196,
+    "collision_type": "cut_in_collision",
+    "target_actor_type": null
+  },
+  "consistency_status": "consistent",
+  "gold_eligible": true
+}

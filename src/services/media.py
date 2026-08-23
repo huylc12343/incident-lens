@@ -33,8 +33,8 @@ class MediaService:
             raise ValueError("command timeout and redaction image size must be positive")
         self._command_timeout_s = command_timeout_s
         self._redaction_image_size = redaction_image_size
-        self._ffmpeg = shutil.which("ffmpeg") or get_ffmpeg_exe()
-        self._ffprobe = shutil.which("ffprobe")
+        self._ffmpeg = shutil.which("ffmpeg") or _bundled_tool("ffmpeg") or get_ffmpeg_exe()
+        self._ffprobe = shutil.which("ffprobe") or _bundled_tool("ffprobe")
 
     async def probe_video(self, video_uri: str) -> NativeVideoMetadata:
         source = _existing_file(video_uri)
@@ -188,8 +188,7 @@ class MediaService:
     ) -> NormalizedVideoArtifact:
         source = _existing_file(video_uri)
         probe = await self.probe_video(str(source))
-        if window.t_end > probe.duration_s:
-            raise MediaServiceError("CLIP_WINDOW_OUT_OF_RANGE", "incident window exceeds video duration")
+        window = bounded_incident_window(window, probe.duration_s)
         clip_start, clip_end = _expanded_clip_bounds(
             window,
             source_duration_s=probe.duration_s,
@@ -242,8 +241,8 @@ class MediaService:
             raise ValueError("frame sampling parameters must be positive")
         if start_s < 0 or start_s >= probe.duration_s:
             raise ValueError("start_s must be within the video duration")
-        clip_end = probe.duration_s if end_s is None else end_s
-        if clip_end <= start_s or clip_end > probe.duration_s:
+        clip_end = probe.duration_s if end_s is None else min(end_s, probe.duration_s)
+        if clip_end <= start_s:
             raise ValueError("end_s must be after start_s and within the video duration")
         if image_format not in {"jpeg", "png"}:
             raise ValueError("image_format must be jpeg or png")
@@ -362,3 +361,16 @@ def _expanded_clip_bounds(
     missing_s -= extend_after_s
     start_s = max(0.0, start_s - missing_s)
     return start_s, end_s
+
+
+def bounded_incident_window(window: IncidentWindow, source_duration_s: float) -> IncidentWindow:
+    """Clamp a partially overlapping model window to the real video duration."""
+    if source_duration_s <= 0:
+        raise ValueError("source duration must be positive")
+    if window.t_start >= source_duration_s:
+        raise MediaServiceError("CLIP_WINDOW_OUT_OF_RANGE", "incident window starts outside video duration")
+    start_s = max(0.0, window.t_start)
+    end_s = min(window.t_end, source_duration_s)
+    if end_s <= start_s:
+        raise MediaServiceError("CLIP_WINDOW_OUT_OF_RANGE", "incident window does not overlap video duration")
+    return IncidentWindow(t_start=start_s, t0=min(max(window.t0, start_s), end_s), t_end=end_s)

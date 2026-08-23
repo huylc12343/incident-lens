@@ -35,17 +35,14 @@ def test_video_analysis_prompt_selects_mode_instruction(
     assert "vlm_has_accident" in prompt.text
     assert "tracked_entities" not in prompt.text
     assert "timeline = []; claims = []" not in prompt.text
-    assert "khẳng định quan trọng về diễn biến của video" in prompt.text
-    assert "Timeline các sự kiện quan trọng" in prompt.text
+    assert "Claims gồm 3–10 khẳng định quan trọng" in prompt.text
     assert "Timeline mô tả toàn bộ video bằng 3–6 mốc" in prompt.text
     assert "[0, video_duration]" in prompt.text
-    assert "không mở rộng incident_window" in prompt.text
+    assert "Không kéo t_start về đầu video hoặc t_end tới cuối video" in prompt.text
     assert "[incident_window.t_start, incident_window.t_end]" not in prompt.text
     assert 'verification_status="unverified"' in prompt.text
     assert "không trả evidence_ids" in prompt.text
     assert "không trả evidence" in prompt.text
-    assert "Backend sẽ map độc lập" in prompt.text
-    assert "evidence đã tồn tại trong một claim" not in prompt.text
     assert "không trả chain-of-thought" in prompt.text
     assert "Identify the main traffic incident." not in prompt.text
     assert prompt.source == PromptSource.SYSTEM
@@ -73,10 +70,8 @@ def test_video_analysis_prompt_keeps_no_incident_window_schema_valid() -> None:
         input_mode=VLMInputMode.NATIVE_VIDEO,
     )
 
-    assert "incident_window.t_end bằng thời lượng video" in prompt.text
-    assert "bắt buộc lớn hơn 0" in prompt.text
-    assert "Tuyệt đối không đặt incident_window.t_end = 0" in prompt.text
-    assert "không để trống timeline hoặc claims chỉ vì không có tai nạn" in prompt.text
+    assert "incident_window.t_end=video_duration" in prompt.text
+    assert "Timeline và claims vẫn mô tả những diễn biến quan trọng thực sự" in prompt.text
 
 
 def test_video_analysis_prompt_treats_log_hint_as_attention_only() -> None:
@@ -92,7 +87,7 @@ def test_video_analysis_prompt_treats_log_hint_as_attention_only() -> None:
 
     assert prompt.context["log_attention_hint"] == hint
     assert "không phải evidence" in prompt.text
-    assert "không được dùng để kết luận tai nạn" in prompt.text
+    assert "không được tự đưa telemetry như brake/throttle/steering/acceleration vào VideoMemory" in prompt.text
 
 
 def test_video_analysis_rejects_blank_analyst_request() -> None:

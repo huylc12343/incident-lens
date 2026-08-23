@@ -17,6 +17,14 @@ imageio-ffmpeg>=0.6.0
 matplotlib>=3.10.0,<4.0.0
 streamlit>=1.40.0,<2.0.0
 ultralytics>=8.3.0
+# EC2 deployment is CPU-only. Pin the CPU wheels so image builds do not pull
+# CUDA/NVIDIA runtime packages that exhaust the staging host filesystem.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.6.0+cpu
+torchvision==0.21.0+cpu
+# Video redaction imports cv2 at runtime. This matches Ultralytics' runtime
+# dependency and avoids installing conflicting OpenCV distributions together.
+opencv-python>=4.10.0
 
 # Database (uncomment as needed)
 # sqlalchemy>=2.0.0

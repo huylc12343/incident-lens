@@ -2,6 +2,15 @@
 
 Backend FastAPI + LangGraph phân tích video giao thông dưới 60 giây, kết hợp log xe tùy chọn, tạo báo cáo 10 mục và dừng tại bước kỹ thuật viên review. Dự án có Streamlit client độc lập trong `main_test.py` để chạy toàn bộ lifecycle qua HTTP API.
 
+## MVP capabilities
+
+- Phân tích video dưới 60 giây để tạo incident window, timeline, claim và evidence có timestamp.
+- Đối chiếu claim với telemetry CSV theo các trạng thái `supported`, `contradicted`, `unverified`; có focused re-analysis giới hạn khi có mâu thuẫn.
+- Cắt clip/artifact, report 10 phần và LangGraph interrupt để kỹ sư approve, edit, reanalyze hoặc đánh dấu không phải sự cố.
+- Frontend Next.js để upload và review evidence; video native có thể blur khuôn mặt/biển số trước khi gửi VLM.
+
+Xem [kiến trúc](ARCHITECTURE.md), [phương pháp đánh giá](docs/EVALUATION.md) và [privacy/redaction](docs/PRIVACY.md). Đây là MVP hỗ trợ review, không thay thế quyết định của kỹ sư.
+
 ## Luồng xử lý
 
 ```text

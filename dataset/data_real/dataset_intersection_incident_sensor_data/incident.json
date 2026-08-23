@@ -1,0 +1,17 @@
+{
+  "incident_id": "intersection_conflict_002",
+  "ground_truth_status": "provisional_manual_ground_truth",
+  "incident_type": "intersection_near_conflict",
+  "severity": "high",
+  "start_time_s": 33.5,
+  "end_time_s": 37.2,
+  "summary": "Xe ego chạy trên đường đô thị và dừng tại giao lộ; một xe Jeep màu đỏ cắt ngang phía trước ở khoảng cách gần.",
+  "likely_cause": "Xe cắt ngang quỹ đạo tại giao lộ trong khi ego đang dừng hoặc gần dừng; không quan sát thấy va chạm thực tế.",
+  "outcome": "Xung đột giao cắt khoảng cách gần; không thấy va chạm rõ ràng.",
+  "evidence_timestamps_s": [
+    34.0,
+    35.0
+  ],
+  "confidence": 0.82,
+  "verification_required": true
+}

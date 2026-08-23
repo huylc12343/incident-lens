@@ -91,6 +91,14 @@ export type IncidentSnapshot = {
   error_message?: string | null;
   stored_at?: string | null;
 };
+export type IncidentUploadResponse = { video_uri: string; log_uri: string | null };
+export type IncidentCreateRequest = {
+  incident_id: string;
+  video_uri: string;
+  log_uri?: string | null;
+  analysis_prompt: string;
+  metadata?: Record<string, unknown>;
+};
 export type ReviewPayload = {
   action: "approve" | "edit" | "reanalyze" | "not_incident";
   reviewer: string;

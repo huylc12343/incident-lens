@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { artifactUrl, getIncident, reviewIncident } from "../../lib/incidentApi";
+import { artifactUrl, formatIncidentError, getIncident, INCIDENT_POLL_INTERVAL_MS, INCIDENT_RETRY_INTERVAL_MS, isIncidentActive, reviewIncident } from "../../lib/incidentApi";
 import { getEvaluationMismatches } from "../../lib/groundTruthEvaluation";
 import { INCIDENT_KEYS } from "../../lib/incidentSession";
 import type { Claim, IncidentSnapshot, ReviewPayload } from "../../types/incident";
@@ -42,11 +42,11 @@ export function IncidentReviewWorkspace() {
         setSnapshot(next);
         sessionStorage.setItem(INCIDENT_KEYS.snapshot, JSON.stringify(next));
         setSelectedClaimId((current) => current || next.claims[0]?.claim_id || "");
-        if (["queued", "running"].includes(next.status)) timer = setTimeout(refresh, 1500);
+        if (isIncidentActive(next.status)) timer = setTimeout(refresh, INCIDENT_POLL_INTERVAL_MS);
       } catch (cause) {
         if (active) {
           setError(cause instanceof Error ? cause.message : "Could not load incident.");
-          timer = setTimeout(refresh, 3000);
+          timer = setTimeout(refresh, INCIDENT_RETRY_INTERVAL_MS);
         }
       }
     };
@@ -82,6 +82,11 @@ export function IncidentReviewWorkspace() {
   const hasCriticalEvaluationMismatch = evaluationMismatches.some((mismatch) => mismatch.critical);
   const clip = artifactUrl(snapshot?.artifact_uris.incident_clip);
   const telemetryCharts = snapshot ? Object.entries(snapshot.artifact_uris).filter(([key, uri]) => key.startsWith("chart_") && Boolean(uri)).sort(([left], [right]) => left.localeCompare(right)).map(([id, uri]) => ({ id, uri })) : [];
+  const retry = () => {
+    sessionStorage.removeItem(INCIDENT_KEYS.incidentId);
+    sessionStorage.removeItem(INCIDENT_KEYS.snapshot);
+    router.push("/");
+  };
 
   return (
     <div className="incident-review-frame">
@@ -96,6 +101,7 @@ export function IncidentReviewWorkspace() {
         ) : (
           <>
             {evaluationMismatches.length > 0 && <section className={`ground-truth-alert ${hasCriticalEvaluationMismatch ? "critical" : "warning"}`} role="alert" aria-labelledby="ground-truth-alert-title"><div><span className="ground-truth-alert-icon" aria-hidden="true">!</span><div><strong id="ground-truth-alert-title">Cần rà soát: Kết luận AI chưa khớp Ground Truth</strong><p>{evaluationMismatches[0].description}{evaluationMismatches.length > 1 ? ` Có thêm ${evaluationMismatches.length - 1} sai lệch cần kiểm tra.` : ""}</p><small>{evaluationMismatches.map((mismatch) => mismatch.label).join(" · ")}</small></div></div><a href="#ground-truth-comparison">Xem đối chiếu</a></section>}
+            {snapshot.status === "failed" && <section className="workspace-panel workspace-state error-state" role="alert"><div><strong>Incident processing failed</strong><p>{formatIncidentError(snapshot.error_code, snapshot.error_message)}</p><button type="button" className="report-secondary-action" onClick={retry}>Retry with a new incident</button></div></section>}
             <div className="review-command-bar">
               <div><span className="command-status-dot" /><strong>{snapshot.status === "awaiting_review" ? "Ready for engineer review" : `Workflow: ${snapshot.status}`}</strong><small>{snapshot.claims.length} AI observation(s) · {snapshot.has_log ? "Video + telemetry" : "Video only"}</small></div>
               <div><a className="command-secondary" href="#selected-evidence">Inspect evidence</a><button type="button" className="command-decision" disabled={snapshot.status !== "awaiting_review" || busy} onClick={() => setDecisionOpen(true)}><span aria-hidden="true">☷</span> Make decision</button></div>
@@ -107,7 +113,7 @@ export function IncidentReviewWorkspace() {
                 <div className="evidence-presentation-stack" id="selected-evidence"><EvidenceInspector snapshot={snapshot} claim={selectedClaim} /></div>
               </main>
               <div className="incident-decision-column">
-                {["queued", "running"].includes(snapshot.status) && <div id="processing-status"><ProcessingPipeline snapshot={snapshot} /></div>}
+                {isIncidentActive(snapshot.status) && <div id="processing-status"><ProcessingPipeline snapshot={snapshot} /></div>}
                 <ReviewSidebar snapshot={snapshot} selectedClaim={selectedClaim} busy={busy} error={error} onSelectClaim={selectClaim} onReview={submitReview} />
               </div>
             </div>

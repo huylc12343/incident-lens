@@ -14,7 +14,7 @@ const formatBytes = (bytes: number) =>
   bytes < 1024 * 1024
     ? `${(bytes / 1024).toFixed(1)} KB`
     : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-const telemetryExtensions = [".csv", ".txt", ".json", ".xls", ".xlsx"];
+const telemetryExtensions = [".csv"];
 const videoIconSrc = "/images/play.png";
 const telemetryIconSrc = "/images/waveform.png";
 
@@ -28,7 +28,7 @@ export function FileUploadCard({ kind, files, onChange }: Props) {
     : text("Vehicle Telemetry (optional)", "Telemetry phương tiện (tùy chọn)");
   const accept = isVideo
     ? ".mp4,video/mp4"
-    : ".csv,.txt,.json,.xls,.xlsx,text/csv,text/plain,application/json,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    : ".csv,text/csv";
   const validate = (candidates: File[]) => {
     if (!candidates.length) return;
     const validFiles = candidates.filter((candidate) => {
@@ -49,18 +49,7 @@ export function FileUploadCard({ kind, files, onChange }: Props) {
       onChange([validFiles[0]]);
       return;
     }
-    const combined = [...files, ...validFiles];
-    onChange(
-      combined.filter(
-        (file, index) =>
-          combined.findIndex(
-            (item) =>
-              item.name === file.name &&
-              item.size === file.size &&
-              item.lastModified === file.lastModified,
-          ) === index,
-      ),
-    );
+    onChange([validFiles[0]]);
   };
   const selectFile = (event: ChangeEvent<HTMLInputElement>) => {
     validate(Array.from(event.target.files ?? []));
@@ -114,7 +103,7 @@ export function FileUploadCard({ kind, files, onChange }: Props) {
           <button className="add-more-files" type="button" onClick={() => input.current?.click()}>
             {isVideo ? text("Change video", "Đổi video") : text("+ Add more files", "+ Thêm tệp")}
           </button>
-          <input ref={input} type="file" hidden multiple accept={accept} onChange={selectFile} aria-label={`Add more ${label} files`} />
+          <input ref={input} type="file" hidden accept={accept} onChange={selectFile} aria-label={`Add more ${label} files`} />
         </div>
       ) : (
         <div
@@ -142,7 +131,6 @@ export function FileUploadCard({ kind, files, onChange }: Props) {
           <input
             ref={input}
             type="file"
-            multiple={!isVideo}
             accept={accept}
             onChange={selectFile}
             aria-label={`Choose ${label}`}

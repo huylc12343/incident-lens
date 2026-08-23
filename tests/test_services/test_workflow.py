@@ -74,6 +74,44 @@ def _review_state(incident_id: str) -> dict[str, object]:
     }
 
 
+async def _wait_for_workflow(service: WorkflowService, incident_id: str):
+    for _ in range(20):
+        snapshot = await service.get(incident_id)
+        if snapshot.status not in {"queued", "running"}:
+            return snapshot
+        await asyncio.sleep(0)
+    raise AssertionError("enqueued workflow did not publish a terminal or reviewable snapshot")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("log_uri", [None, "vehicle.csv"])
+async def test_create_enqueues_video_workflow_and_publishes_review_snapshot(log_uri: str | None) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def start(state):
+        started.set()
+        await release.wait()
+        return _review_state(state["incident_id"])
+
+    service = WorkflowService(
+        runner=SimpleNamespace(start=AsyncMock(side_effect=start), resume=AsyncMock()),
+        repository=InMemoryReportRepository(),
+    )
+    incident_id = "INC-WITH-LOG" if log_uri else "INC-VIDEO-ONLY"
+    queued = await service.create(
+        IncidentCreateRequest(incident_id=incident_id, video_uri="video.mp4", log_uri=log_uri, analysis_prompt="Analyze")
+    )
+
+    assert queued.status == "queued"
+    await started.wait()
+    assert (await service.get(incident_id)).status == "running"
+    release.set()
+    reviewable = await _wait_for_workflow(service, incident_id)
+    assert reviewable.status == "awaiting_review"
+    assert reviewable.has_log is bool(log_uri)
+
+
 @pytest.mark.asyncio
 async def test_workflow_create_review_and_store_terminal_report() -> None:
     runner = SimpleNamespace(start=AsyncMock(), resume=AsyncMock())
@@ -95,8 +133,9 @@ async def test_workflow_create_review_and_store_terminal_report() -> None:
         ReviewDecision(action="approve", reviewer="reviewer@example.com"),
     )
 
-    assert pending.status == "awaiting_review"
-    assert pending.video_summary == "The vehicle approached a hazard and stopped after the incident."
+    assert pending.status == "queued"
+    reviewable = await service.get("INC-API")
+    assert reviewable.video_summary == "The vehicle approached a hazard and stopped after the incident."
     assert pending.has_log is False
     assert terminal.status == "approved"
     assert terminal.final_report == _report("INC-API")
@@ -122,7 +161,8 @@ async def test_workflow_uses_video_memory_claims_over_legacy_top_level_claims() 
     )
     await service.review("INC-CANONICAL-CLAIMS", ReviewDecision(action="approve", reviewer="reviewer"))
 
-    assert [claim.claim_id for claim in pending.claims] == ["claim-1"]
+    assert pending.status == "queued"
+    assert [claim.claim_id for claim in (await service.get("INC-CANONICAL-CLAIMS")).claims] == ["claim-1"]
     assert "claims" not in service._states["INC-CANONICAL-CLAIMS"]
     stored = repository.get("INC-CANONICAL-CLAIMS")
     assert stored is not None
@@ -359,9 +399,10 @@ async def test_failed_snapshot_does_not_expose_provider_error_text() -> None:
     )
     service = WorkflowService(runner=runner, repository=InMemoryReportRepository())
 
-    snapshot = await service.create(
+    await service.create(
         IncidentCreateRequest(incident_id="INC-FAILED", video_uri="video.mp4", analysis_prompt="Analyze")
     )
+    snapshot = await _wait_for_workflow(service, "INC-FAILED")
 
     assert snapshot.status == "failed"
     assert "sk-secret-value" not in (snapshot.error_message or "")
@@ -382,9 +423,10 @@ async def test_failed_snapshot_explains_safe_openai_authentication_error() -> No
     )
     service = WorkflowService(runner=runner, repository=InMemoryReportRepository())
 
-    snapshot = await service.create(
+    await service.create(
         IncidentCreateRequest(incident_id="INC-AUTH-FAILED", video_uri="video.mp4", analysis_prompt="Analyze")
     )
+    snapshot = await _wait_for_workflow(service, "INC-AUTH-FAILED")
 
     assert snapshot.error_message is not None
     assert "OPENAI_API_KEY" in snapshot.error_message
@@ -409,12 +451,14 @@ async def test_invalid_runner_output_does_not_reserve_incident_id() -> None:
         analysis_prompt="Analyze",
     )
 
-    with pytest.raises(WorkflowError) as exc_info:
-        await service.create(request)
-    recovered = await service.create(request)
+    queued = await service.create(request)
+    failed = await _wait_for_workflow(service, "INC-INVALID")
 
-    assert exc_info.value.code == "WORKFLOW_OUTPUT_INVALID"
-    assert recovered.status == "awaiting_review"
+    assert queued.status == "queued"
+    assert failed.status == "failed"
+    assert failed.error_code == "WORKFLOW_EXECUTION_FAILED"
+    with pytest.raises(WorkflowError, match="incident ID already exists"):
+        await service.create(request)
 
 
 @pytest.mark.asyncio
@@ -431,6 +475,7 @@ async def test_workflow_lists_and_deletes_one_incident_history() -> None:
     await service.create(
         IncidentCreateRequest(incident_id="INC-HISTORY", video_uri="video.mp4", analysis_prompt="Analyze")
     )
+    await _wait_for_workflow(service, "INC-HISTORY")
 
     assert await service.list_incident_ids() == ["INC-HISTORY"]
     await service.delete("INC-HISTORY")
@@ -470,6 +515,7 @@ async def test_delete_removes_incident_artifacts_and_uploaded_inputs(tmp_path) -
     await service.create(
         IncidentCreateRequest(incident_id="INC-CLEAN", video_uri=str(uploaded_video), analysis_prompt="Analyze")
     )
+    await _wait_for_workflow(service, "INC-CLEAN")
 
     await service.delete("INC-CLEAN")
 

@@ -40,7 +40,7 @@ from src.models.incidents import (
     VideoSequenceManifest,
     VLMInputMode,
 )
-from src.prompts.auto_reanalysis import build_auto_reanalysis_prompt_for_conflicts
+from src.prompts.auto_reanalysis import build_auto_reanalysis_prompt
 from src.prompts.reanalysis import build_human_reanalysis_prompt
 from src.prompts.video_analysis import build_video_analysis_prompt
 from src.services.log_analysis import (
@@ -60,10 +60,6 @@ from src.services.video_memory import (
     reconcile_video_memory_patch_evidence,
     validate_video_memory,
 )
-
-# Product requirement: each contradicted claim receives at most two seconds of
-# visual context on either side unless its short windows overlap another claim.
-REANALYSIS_CLIP_RADIUS_S = 2.0
 
 
 class MediaWorkflowService(Protocol):
@@ -584,14 +580,17 @@ async def align_and_verify_claims_node(
                 sample_radius=sample_radius,
                 video_duration_s=telemetry_duration_s,
             )
-            result = await verification.verify(
-                VerificationRequest(
-                    incident_id=incident_id,
-                    claims=claims_to_verify,
-                    claim_log_summaries=claim_log_summaries,
-                    claim_verification_contexts=claim_verification_contexts,
-                    timestamp_tolerance_s=timestamp_tolerance_s,
-                )
+            request = VerificationRequest(
+                incident_id=incident_id,
+                claims=claims_to_verify,
+                claim_log_summaries=claim_log_summaries,
+                claim_verification_contexts=claim_verification_contexts,
+                timestamp_tolerance_s=timestamp_tolerance_s,
+            )
+            result = (
+                await verification.reverify(request)
+                if _is_automatic_reverification(state, changed_ids)
+                else await verification.verify(request)
             )
         else:
             claim_log_summaries = []
@@ -600,7 +599,8 @@ async def align_and_verify_claims_node(
             result, claim_log_summaries = _merge_selective_verification(
                 memory,
                 previous_verification=state.get("verification"),
-                next_verification=result,
+                next_results=result.results,
+                next_has_accident=getattr(result, "has_accident", None),
                 previous_summaries=state.get("claim_log_summaries", []),
                 next_summaries=claim_log_summaries,
                 changed_claim_ids=set(changed_ids),
@@ -637,7 +637,10 @@ async def align_and_verify_claims_node(
                 for claim in memory.claims
                 if claim.claim_id in changed_id_set
             )
-            fallback_verification = VerificationResult(results=preserved)
+            fallback_verification = VerificationResult(
+                has_accident=previous.has_accident if previous is not None else None,
+                results=preserved,
+            )
             return {
                 "status": "running",
                 "verification": fallback_verification,
@@ -672,46 +675,41 @@ async def auto_reanalyze_node(
     if any(conflict.claim_id not in claims for conflict in conflicts):
         return _failure("AUTO_REANALYSIS_CLAIM_MISSING", "contradicted claim is absent from video memory")
     try:
-        target_ids = [conflict.claim_id for conflict in conflicts]
-        reasons = {conflict.claim_id: conflict.reason for conflict in conflicts}
         duration_s = _video_duration_s(state, memory)
-        groups = _reanalysis_claim_groups(memory, target_ids, duration_s=duration_s)
         merged = memory
         artifact_uris = dict(state.get("artifact_uris", {}))
-        changed_claim_ids: list[str] = []
-        for group_ids, reanalysis_window in groups:
+        reverified_claim_ids: list[str] = []
+        for conflict in conflicts:
             current_claims = {claim.claim_id: claim for claim in merged.claims}
-            target_claims = [current_claims[claim_id] for claim_id in group_ids]
-            prompt = build_auto_reanalysis_prompt_for_conflicts(
-                conflict_claims=target_claims,
-                verification_reasons={claim_id: reasons[claim_id] for claim_id in group_ids},
-                reanalysis_window=reanalysis_window,
+            target_claim = current_claims[conflict.claim_id]
+            reanalysis_window = _reanalysis_window(
+                target_claim,
+                duration_s=duration_s,
+                radius_s=workflow.config.auto_reanalysis_clip_radius_s,
+            )
+            prompt = build_auto_reanalysis_prompt(
+                conflict_claim=target_claim,
+                verification_reason=conflict.reason,
                 version=prompt_version,
             )
-            before = {claim_id: current_claims[claim_id] for claim_id in group_ids}
             merged, artifact_uris = await _reanalyze(
                 state,
                 media=media,
                 workflow=workflow,
                 prompt=prompt,
-                target_claim_ids=group_ids,
+                target_claim_ids=[target_claim.claim_id],
                 memory=merged,
                 artifact_uris=artifact_uris,
                 reanalysis_window=reanalysis_window,
             )
-            after = {claim.claim_id: claim for claim in merged.claims}
-            changed_claim_ids.extend(
-                claim_id
-                for claim_id, previous_claim in before.items()
-                if claim_id not in after or _claim_content_changed(previous_claim, after[claim_id])
-            )
+            reverified_claim_ids.append(target_claim.claim_id)
         return {
             "status": "running",
             "video_memory": merged,
             "remote_media_handles": merged.remote_media_handles,
             "artifact_uris": artifact_uris,
             "auto_reanalysis_count": state.get("auto_reanalysis_count", 0) + 1,
-            "auto_reanalysis_changed_claim_ids": list(dict.fromkeys(changed_claim_ids)),
+            "auto_reanalysis_changed_claim_ids": list(dict.fromkeys(reverified_claim_ids)),
         }
     except Exception as exc:
         return _failure(getattr(exc, "code", "AUTO_REANALYSIS_FAILED"), str(exc))
@@ -780,11 +778,20 @@ def _reanalysis_changed_claim_ids(state: IncidentState) -> list[str] | None:
     return None
 
 
+def _is_automatic_reverification(state: IncidentState, changed_ids: list[str] | None) -> bool:
+    return (
+        changed_ids is not None
+        and state.get("last_review_action") != "reanalyze"
+        and "auto_reanalysis_changed_claim_ids" in state
+    )
+
+
 def _merge_selective_verification(
     memory: VideoMemory,
     *,
     previous_verification: VerificationResult | None,
-    next_verification: VerificationResult,
+    next_results: list[ClaimVerification],
+    next_has_accident: bool | None,
     previous_summaries: list,
     next_summaries: list,
     changed_claim_ids: set[str],
@@ -796,12 +803,12 @@ def _merge_selective_verification(
         for item in (previous_verification.results if previous_verification is not None else [])
         if item.claim_id not in changed_claim_ids and item.claim_id in active_claim_ids
     }
-    result_by_claim_id.update({item.claim_id: item for item in next_verification.results})
+    result_by_claim_id.update({item.claim_id: item for item in next_results})
     merged_result = VerificationResult(
         has_accident=(
             previous_verification.has_accident
             if previous_verification is not None and previous_verification.has_accident is not None
-            else next_verification.has_accident
+            else next_has_accident
         ),
         results=[
             result_by_claim_id[claim.claim_id]
@@ -1091,10 +1098,14 @@ async def _reanalyze(
         if claim.claim_id in set(target_claim_ids)
     }
     if any(
-        abs(claim.timestamp_s - original_timestamp_by_claim_id[claim.claim_id]) > REANALYSIS_CLIP_RADIUS_S
+        abs(claim.timestamp_s - original_timestamp_by_claim_id[claim.claim_id])
+        > config.auto_reanalysis_clip_radius_s
         for claim in patch.claims
     ):
-        raise ValueError("reanalysis claim timestamp cannot move more than two seconds from its original claim")
+        raise ValueError("reanalysis claim timestamp cannot move outside its configured radius from the original claim")
+    # Focused re-analysis only owns the requested claims. The prompt has no
+    # full-timeline context, so preserve the workflow's canonical timeline.
+    patch = patch.model_copy(update={"video_summary": None, "timeline": None})
     patch = reconcile_video_memory_patch_evidence(
         patch,
         frame_manifest.frames,
@@ -1138,45 +1149,14 @@ def _semantic_sampling_bounds(memory: VideoMemory) -> tuple[float, float]:
     return min(timestamps), max(timestamps)
 
 
-def _reanalysis_claim_groups(
-    memory: VideoMemory,
-    target_claim_ids: list[str],
-    *,
-    duration_s: float,
-) -> list[tuple[list[str], IncidentWindow]]:
-    """Group only overlapping ±2s claim clips, preserving short visual input by default."""
-    claims = {claim.claim_id: claim for claim in memory.claims}
-    windows: list[tuple[str, float, float]] = []
-    for claim_id in target_claim_ids:
-        claim = claims[claim_id]
-        if claim.timestamp_s is None:
-            raise ValueError(f"claim {claim_id} must have timestamp_s for automatic re-analysis")
-        windows.append(
-            (
-                claim_id,
-                max(0.0, claim.timestamp_s - REANALYSIS_CLIP_RADIUS_S),
-                min(duration_s, claim.timestamp_s + REANALYSIS_CLIP_RADIUS_S),
-            )
-        )
-    windows.sort(key=lambda item: (item[1], item[2], item[0]))
-    groups: list[tuple[list[str], float, float]] = []
-    for claim_id, start_s, end_s in windows:
-        if groups and start_s < groups[-1][2]:
-            group_ids, group_start_s, group_end_s = groups[-1]
-            groups[-1] = (group_ids + [claim_id], group_start_s, max(group_end_s, end_s))
-        else:
-            groups.append(([claim_id], start_s, end_s))
-    return [
-        (
-            group_ids,
-            IncidentWindow(
-                t_start=start_s,
-                t0=(start_s + end_s) / 2,
-                t_end=end_s,
-            ),
-        )
-        for group_ids, start_s, end_s in groups
-    ]
+def _reanalysis_window(claim: Claim, *, duration_s: float, radius_s: float) -> IncidentWindow:
+    if claim.timestamp_s is None:
+        raise ValueError(f"claim {claim.claim_id} must have timestamp_s for automatic re-analysis")
+    return IncidentWindow(
+        t_start=max(0.0, claim.timestamp_s - radius_s),
+        t0=claim.timestamp_s,
+        t_end=min(duration_s, claim.timestamp_s + radius_s),
+    )
 
 
 def _video_duration_s(state: IncidentState, memory: VideoMemory) -> float:

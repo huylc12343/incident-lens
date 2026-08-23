@@ -10,7 +10,7 @@ from src.models.incidents import (
     ClaimTelemetrySnapshot,
     ClaimVerificationContext,
 )
-from src.prompts.verification import build_verification_prompt
+from src.prompts.verification import build_reverification_prompt, build_verification_prompt
 from src.services.log_analysis import build_claim_verification_inputs
 
 
@@ -41,7 +41,7 @@ def test_verification_system_prompt_matches_approved_text_exactly() -> None:
     )
 
     assert sha256(prompt.text.encode("utf-8")).hexdigest() == (
-        "3e0ca11938e3e78dd10a9eb8e6c51d1889bc4e9a7a303646db9d80b76fe58fa6"
+        "dddc7af3e3f3f4a6f384b3150a55e5880b5b59af2c09d5f68e0c305eb1dca4bd"
     )
 
 
@@ -77,8 +77,8 @@ def test_verification_prompt_requires_one_result_per_claim() -> None:
     assert "Trả chính xác một result cho mỗi claim_id" in prompt.text
     assert "supported" in prompt.text
     assert "supported, contradicted, unverified" in prompt.text
-    assert "Log chỉ có thẩm quyền với telemetry" in prompt.text
-    assert "Không suy ra có/không có va chạm" in prompt.text
+    assert "Log chỉ có thẩm quyền với chuyển động của xe ego" in prompt.text
+    assert "Không dùng telemetry gián tiếp để phủ định hiện tượng hình ảnh" in prompt.text
     assert "has_accident" in prompt.text
     assert "reason phải ngắn, rõ" in prompt.text
     item = prompt.context["verification_items"][0]
@@ -100,7 +100,7 @@ def test_verification_prompt_requires_one_result_per_claim() -> None:
     }
     assert "verification_items" not in prompt.text
     assert "Brake tăng mạnh tại 12.5 giây." not in prompt.text
-    assert "brake và throttle thuộc [0,1]" in prompt.text
+    assert "brake, throttle thuộc [0,1]" in prompt.text
     assert "Trong tolerance:" not in str(item)
     assert "Log có thể kiểm tra" not in str(item)
     assert "claim_log_summary" not in prompt.text
@@ -123,6 +123,21 @@ def test_verification_prompt_requires_one_result_per_claim() -> None:
     }
     assert "change_points" not in item["log_facts"]
     assert "level" not in str(item["log_facts"]["derived_dynamics"])
+
+
+def test_reverification_prompt_is_claim_only_and_excludes_accident_decision() -> None:
+    prompt = build_reverification_prompt(
+        claims=[Claim(claim_id="claim-1", text="Hard braking", timestamp_s=12.5)],
+        claim_log_summaries=[ClaimLogSummary(claim_id="claim-1", summary="Log available.")],
+        claim_verification_contexts=[_compact_context("claim-1", brake=0.82)],
+        timestamp_tolerance_s=0.5,
+    )
+
+    assert "XÁC THỰC LẠI sau automatic reanalysis" in prompt.text
+    assert "không đánh giá có/không có tai nạn" in prompt.text
+    assert "has_accident" not in prompt.text
+    assert list(prompt.context) == ["verification_items"]
+    assert prompt.context["verification_items"][0]["claim"]["claim_id"] == "claim-1"
 
 
 def test_verification_prompt_is_deterministic() -> None:

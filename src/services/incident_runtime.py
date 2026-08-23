@@ -126,6 +126,7 @@ async def incident_workflow_service(
             frame_jpeg_quality=settings.vlm_frame_jpeg_quality,
             incident_frame_fps=settings.vlm_reanalysis_frame_fps,
             incident_max_frames=settings.vlm_reanalysis_max_frames,
+            auto_reanalysis_clip_radius_s=settings.auto_reanalysis_clip_radius_s,
             incident_clip_min_duration_s=settings.incident_clip_min_duration_s,
             incident_clip_pre_roll_s=settings.incident_clip_pre_roll_s,
             incident_clip_post_roll_s=settings.incident_clip_post_roll_s,

@@ -13,6 +13,7 @@ from src.models.incidents import (
     ClaimTelemetrySnapshot,
     ClaimVerification,
     ClaimVerificationContext,
+    ReverificationResult,
     VerificationRequest,
     VerificationResult,
     VerificationStatus,
@@ -84,6 +85,30 @@ async def test_openai_verification_uses_structured_output() -> None:
     assert [message["role"] for message in call["input"]] == ["system", "user"]
     assert "claim-1" not in call["input"][0]["content"]
     assert "claim-1" in call["input"][1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_openai_reverification_uses_claim_only_output_schema() -> None:
+    reverification = ReverificationResult(
+        results=[
+            ClaimVerification(
+                claim_id="claim-1",
+                status=VerificationStatus.SUPPORTED,
+                reason="Brake rise matches the revised claim timestamp.",
+                evidence_ids=["log-row:7.5"],
+            )
+        ]
+    )
+    client = SimpleNamespace(
+        responses=SimpleNamespace(parse=AsyncMock(return_value=SimpleNamespace(output_parsed=reverification)))
+    )
+
+    result = await OpenAIVerificationService(model="gpt-test", client=client).reverify(_request())
+
+    assert result == reverification
+    call = client.responses.parse.await_args.kwargs
+    assert call["text_format"] is ReverificationResult
+    assert "has_accident" not in call["input"][0]["content"]
 
 
 @pytest.mark.asyncio

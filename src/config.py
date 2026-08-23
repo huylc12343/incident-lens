@@ -83,6 +83,7 @@ class Settings(BaseSettings):
     report_timeout_s: float = Field(default=60.0, gt=0)
     report_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     auto_reanalysis_enabled: bool = True
+    auto_reanalysis_clip_radius_s: float = Field(default=2.0, gt=0)
 
     # Workflow and incident inputs
     human_prompt_max_length: int = Field(default=5000, gt=0)

@@ -193,6 +193,19 @@ class VideoMemoryPatch(ContractModel):
         return self
 
 
+class AutomaticReanalysisClaim(ContractModel):
+    claim_id: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+    timestamp_s: float = Field(ge=0)
+    verification_status: Literal[VerificationStatus.UNVERIFIED]
+
+
+class AutomaticReanalysisOutput(ContractModel):
+    """The minimal Qwen response for one automatically re-analyzed claim."""
+
+    claims: list[AutomaticReanalysisClaim] = Field(min_length=1, max_length=1)
+
+
 class TimestampedFramesAnalysisRequest(ContractModel):
     """Legacy provider-neutral request contract retained for stored workflow data."""
 
@@ -378,6 +391,12 @@ class VerificationResult(ContractModel):
     results: list[ClaimVerification]
 
 
+class ReverificationResult(ContractModel):
+    """Claim-level results produced after automatic re-analysis only."""
+
+    results: list[ClaimVerification]
+
+
 class ReportRequest(ContractModel):
     incident_id: str = Field(min_length=1)
     video_memory: VideoMemory
@@ -490,6 +509,8 @@ class MemoryReanalysisService(Protocol):
 @runtime_checkable
 class VerificationService(Protocol):
     async def verify(self, request: VerificationRequest) -> VerificationResult: ...
+
+    async def reverify(self, request: VerificationRequest) -> ReverificationResult: ...
 
 
 @runtime_checkable

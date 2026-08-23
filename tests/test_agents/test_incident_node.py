@@ -31,6 +31,7 @@ from src.models.incidents import (
     PromptSource,
     RemoteMediaHandle,
     ReportModelOutput,
+    ReverificationResult,
     TimelineEvent,
     TimestampedFrame,
     VerificationResult,
@@ -1063,12 +1064,12 @@ async def test_auto_reanalysis_resamples_claim_window_once(tmp_path: Path) -> No
         target_claim_ids=["claim-1"],
         claims=[Claim(claim_id="claim-1", text="Vehicle does not brake", timestamp_s=2)],
         video_summary="Vehicle drives before braking.",
-        timeline=[TimelineEvent(timestamp_s=0, description="Vehicle drives.")],
+        timeline=[],
         base_revision=1,
     )
     workflow = VideoMemoryWorkflow(
         vlm=service,
-        config=VideoMemoryWorkflowConfig(artifact_dir=str(tmp_path)),
+        config=VideoMemoryWorkflowConfig(artifact_dir=str(tmp_path), auto_reanalysis_clip_radius_s=1),
     )
     manifest = VideoSequenceManifest(
         frames=[
@@ -1119,22 +1120,21 @@ async def test_auto_reanalysis_resamples_claim_window_once(tmp_path: Path) -> No
     assert result["status"] == "running"
     assert result["auto_reanalysis_count"] == 1
     assert result["video_memory"].claims[0].text == "Vehicle does not brake"
-    assert result["video_memory"].video_summary == "Vehicle drives before braking."
-    assert result["video_memory"].timeline[0].description == "Vehicle drives."
+    assert result["video_memory"].video_summary == "Vehicle drives straight before braking."
+    assert result["video_memory"].timeline[0].description == "Vehicle drives straight."
     media.sample_frames.assert_awaited_once()
-    assert media.sample_frames.await_args.kwargs["start_s"] == 0
+    assert media.sample_frames.await_args.kwargs["start_s"] == 1
     assert media.sample_frames.await_args.kwargs["end_s"] == 3
-    assert media.cut_incident_clip.await_args.kwargs["window"] == IncidentWindow(t_start=0, t0=1.5, t_end=3)
+    assert media.cut_incident_clip.await_args.kwargs["window"] == IncidentWindow(t_start=1, t0=2, t_end=3)
     request = service.reanalyze_claims.await_args.args[0]
     assert request.prompt.source == PromptSource.AGENT_GENERATED
     assert request.frame_manifest == manifest
     assert request.normalized_video_uri == short_clip.uri
-    assert request.input_video_start_s == 0
+    assert request.input_video_start_s == 1
     assert request.input_video_end_s == 3
     assert request.prompt.context == {
-        "target_claims": [{"claim_id": "claim-1", "text": "Vehicle brakes", "timestamp_s": 2}],
+        "target_claim": {"claim_id": "claim-1", "text": "Vehicle brakes", "timestamp_s": 2},
         "verification_reasons": {"claim-1": "Log has no brake rise"},
-        "reanalysis_window": [0, 3],
     }
     assert "max_brake" not in str(request.prompt.context)
 
@@ -1722,7 +1722,7 @@ async def test_conflict_can_be_reanalyzed_once_then_verified_supported(tmp_path:
         workflow=workflow,
         prompt_version="v1",
     )
-    supported = VerificationResult(
+    supported = ReverificationResult(
         results=[
             ClaimVerification(
                 claim_id="claim-1",
@@ -1731,7 +1731,7 @@ async def test_conflict_can_be_reanalyzed_once_then_verified_supported(tmp_path:
             )
         ]
     )
-    verifier = SimpleNamespace(verify=AsyncMock(return_value=supported))
+    verifier = SimpleNamespace(reverify=AsyncMock(return_value=supported))
     log = tmp_path / "vehicle.csv"
     log.write_text("timestamp,brake\n2.0,1\n", encoding="utf-8")
 
@@ -1784,6 +1784,7 @@ async def test_auto_reanalysis_reverifies_only_changed_claim_and_keeps_supported
         analysis_mode=AnalysisMode.SINGLE_REQUEST,
     )
     prior = VerificationResult(
+        has_accident=True,
         results=[
             ClaimVerification(
                 claim_id="claim-1",
@@ -1798,7 +1799,7 @@ async def test_auto_reanalysis_reverifies_only_changed_claim_and_keeps_supported
             ),
         ]
     )
-    reverified = VerificationResult(
+    reverified = ReverificationResult(
         results=[
             ClaimVerification(
                 claim_id="claim-1",
@@ -1808,7 +1809,7 @@ async def test_auto_reanalysis_reverifies_only_changed_claim_and_keeps_supported
             )
         ]
     )
-    verifier = SimpleNamespace(verify=AsyncMock(return_value=reverified))
+    verifier = SimpleNamespace(reverify=AsyncMock(return_value=reverified))
 
     result = await align_and_verify_claims_node(
         {
@@ -1823,9 +1824,11 @@ async def test_auto_reanalysis_reverifies_only_changed_claim_and_keeps_supported
         timestamp_tolerance_s=0.1,
     )
 
-    request = verifier.verify.await_args.args[0]
+    request = verifier.reverify.await_args.args[0]
     assert [claim.claim_id for claim in request.claims] == ["claim-1"]
     assert [item.claim_id for item in result["verification"].results] == ["claim-1", "claim-4"]
+    assert result["verification"].has_accident is True
+    assert result["verification"].results[0].status == VerificationStatus.SUPPORTED
     assert result["verification"].results[1].reason == "Keep this prior result"
     assert result["video_memory"].claims[1].verification_status == VerificationStatus.SUPPORTED
 
@@ -1863,7 +1866,7 @@ async def test_auto_reanalysis_drop_removes_old_result_without_rechecking_untouc
             ),
         ]
     )
-    verifier = SimpleNamespace(verify=AsyncMock())
+    verifier = SimpleNamespace(reverify=AsyncMock())
 
     result = await align_and_verify_claims_node(
         {
@@ -1878,7 +1881,7 @@ async def test_auto_reanalysis_drop_removes_old_result_without_rechecking_untouc
         timestamp_tolerance_s=0.1,
     )
 
-    verifier.verify.assert_not_awaited()
+    verifier.reverify.assert_not_awaited()
     assert [item.claim_id for item in result["verification"].results] == ["claim-4"]
     assert result["verification"].results[0].reason == "Keep this prior result"
     assert result["video_memory"].claims[0].verification_status == VerificationStatus.SUPPORTED
@@ -1973,9 +1976,8 @@ async def test_auto_reanalysis_uses_short_native_clip_with_global_source_window(
     assert request.input_video_end_s == 28.5
     assert "automatic reanalysis, không phải phân tích video ban đầu" in request.prompt.text
     assert request.prompt.context == {
-        "target_claims": [{"claim_id": "claim-1", "text": "Vehicle begins turning.", "timestamp_s": 26.5}],
+        "target_claim": {"claim_id": "claim-1", "text": "Vehicle begins turning.", "timestamp_s": 26.5},
         "verification_reasons": {"claim-1": "Telemetry does not support the original turn claim."},
-        "reanalysis_window": [24.5, 28.5],
     }
     assert result["auto_reanalysis_changed_claim_ids"] == ["claim-1"]
 
@@ -2054,7 +2056,114 @@ async def test_auto_reanalysis_never_accepts_target_timestamp_more_than_two_seco
 
     request = service.reanalyze_claims.await_args.args[0]
     assert request.input_video_start_s == 8
-    assert request.input_video_end_s == 14
+    assert request.input_video_end_s == 12
     assert result["status"] == "failed"
     assert result["error_code"] == "AUTO_REANALYSIS_FAILED"
-    assert "more than two seconds" in result["error_message"]
+    assert "inside the submitted clip window" in result["error_message"]
+
+
+@pytest.mark.asyncio
+async def test_auto_reanalysis_calls_qwen_once_for_each_contradicted_claim(tmp_path: Path) -> None:
+    memory = VideoMemory(
+        global_scene="Road scene",
+        incident_window=IncidentWindow(t_start=0, t0=2, t_end=4),
+        claims=[
+            Claim(
+                claim_id="claim-1",
+                text="First event",
+                timestamp_s=1,
+                evidence=[EvidenceReference(evidence_id="frame-1", timestamp_s=1)],
+            ),
+            Claim(
+                claim_id="claim-2",
+                text="Second event",
+                timestamp_s=3,
+                evidence=[EvidenceReference(evidence_id="frame-2", timestamp_s=3)],
+            ),
+        ],
+        analysis_mode=AnalysisMode.SINGLE_REQUEST,
+    )
+    service = _service(VLMInputMode.TIMESTAMPED_FRAMES, memory)
+    service.reanalyze_claims.side_effect = [
+        VideoMemoryPatch(
+            target_claim_ids=["claim-1"],
+            claims=[Claim(claim_id="claim-1", text="Corrected first event", timestamp_s=1)],
+            base_revision=1,
+        ),
+        VideoMemoryPatch(
+            target_claim_ids=["claim-2"],
+            claims=[Claim(claim_id="claim-2", text="Corrected second event", timestamp_s=3)],
+            base_revision=2,
+        ),
+    ]
+    workflow = VideoMemoryWorkflow(
+        vlm=service,
+        config=VideoMemoryWorkflowConfig(artifact_dir=str(tmp_path), auto_reanalysis_clip_radius_s=1),
+    )
+    manifests = [
+        VideoSequenceManifest(
+            source_video_uri="video.mp4",
+            duration_s=4,
+            frames=[
+                TimestampedFrame(
+                    frame_id="frame-1",
+                    sequence_index=0,
+                    timestamp_s=1,
+                    delta_from_previous_s=0,
+                    image_uri="frame-1.jpg",
+                )
+            ],
+        ),
+        VideoSequenceManifest(
+            source_video_uri="video.mp4",
+            duration_s=4,
+            frames=[
+                TimestampedFrame(
+                    frame_id="frame-2",
+                    sequence_index=0,
+                    timestamp_s=3,
+                    delta_from_previous_s=0,
+                    image_uri="frame-2.jpg",
+                )
+            ],
+        ),
+    ]
+    media = SimpleNamespace(sample_frames=AsyncMock(side_effect=manifests))
+    verification = VerificationResult(
+        results=[
+            ClaimVerification(
+                claim_id="claim-1",
+                status=VerificationStatus.CONTRADICTED,
+                reason="First conflict",
+            ),
+            ClaimVerification(
+                claim_id="claim-2",
+                status=VerificationStatus.CONTRADICTED,
+                reason="Second conflict",
+            ),
+        ]
+    )
+
+    result = await auto_reanalyze_node(
+        {
+            "incident_id": "INC-ONE-CALL-PER-CLAIM",
+            "video_uri": "video.mp4",
+            "video_memory": memory,
+            "verification": verification,
+            "log_evidence_summary": LogEvidenceSummary(),
+            "auto_reanalysis_count": 0,
+        },
+        media=media,
+        workflow=workflow,
+        prompt_version="v1",
+    )
+
+    requests = [call.args[0] for call in service.reanalyze_claims.await_args_list]
+    assert result["status"] == "running"
+    assert result["auto_reanalysis_changed_claim_ids"] == ["claim-1", "claim-2"]
+    assert [request.target_claim_ids for request in requests] == [["claim-1"], ["claim-2"]]
+    assert [(request.input_video_start_s, request.input_video_end_s) for request in requests] == [(0, 2), (2, 4)]
+    assert [request.prompt.context["verification_reasons"] for request in requests] == [
+        {"claim-1": "First conflict"},
+        {"claim-2": "Second conflict"},
+    ]

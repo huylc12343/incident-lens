@@ -5,7 +5,6 @@ from src.models.incidents import (
     Claim,
     EvidenceReference,
     IncidentWindow,
-    LogEvidenceSummary,
     PromptSource,
     VideoMemory,
 )
@@ -17,29 +16,24 @@ def test_auto_reanalysis_contains_only_automatic_context() -> None:
     prompt = build_auto_reanalysis_prompt(
         conflict_claim=Claim(claim_id="claim-1", text="The vehicle braked hard", timestamp_s=12.5),
         verification_reason="Brake signal did not rise near the claimed timestamp.",
-        log_evidence_summary=LogEvidenceSummary(
-            metrics={"max_brake": 0.12},
-            events=[{"timestamp_s": 12.5, "type": "speed_drop"}],
-            evidence_ids=["log-1"],
-        ),
-        timestamp_window=IncidentWindow(t_start=11.2, t0=12.5, t_end=15.1),
         version="auto-v2",
     )
 
     assert prompt.source == PromptSource.AGENT_GENERATED
     assert prompt.version == "auto-v2"
-    assert set(prompt.context) == {"target_claims", "verification_reasons", "reanalysis_window"}
+    assert set(prompt.context) == {"target_claim", "verification_reasons"}
     assert "feedback" not in prompt.context
     assert "claim-1" not in prompt.text
     assert prompt.context["verification_reasons"] == {
         "claim-1": "Brake signal did not rise near the claimed timestamp."
     }
-    assert prompt.context["target_claims"] == [
-        {"claim_id": "claim-1", "text": "The vehicle braked hard", "timestamp_s": 12.5}
-    ]
-    assert prompt.context["reanalysis_window"] == [11.2, 15.1]
+    assert prompt.context["target_claim"] == {
+        "claim_id": "claim-1",
+        "text": "The vehicle braked hard",
+        "timestamp_s": 12.5,
+    }
     assert "log_evidence_summary" not in prompt.context
-    assert "không trả evidence" in prompt.text
+    assert "không trả target_claim_ids, base_revision, evidence, timeline" in prompt.text
     assert "không có log telemetry" in prompt.text
     assert "cùng sự kiện và ngữ cảnh" in prompt.text
     assert "không bỏ claim" in prompt.text
@@ -94,8 +88,6 @@ def test_auto_and_human_prompts_are_deterministic_and_distinct() -> None:
     auto_kwargs = {
         "conflict_claim": claim,
         "verification_reason": "Conflict",
-        "log_evidence_summary": LogEvidenceSummary(),
-        "timestamp_window": IncidentWindow(t_start=1, t0=2, t_end=3),
     }
     human_kwargs = {
         "target_claim_ids": ["claim-1"],

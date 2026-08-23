@@ -17,6 +17,7 @@ from src.models.incidents import (
     ClaimVerification,
     IncidentWindow,
     ReportModelOutput,
+    ReverificationResult,
     VerificationResult,
     VerificationStatus,
     VideoMemory,
@@ -173,7 +174,7 @@ async def test_real_graph_log_conflict_reanalyzes_once_and_reports_warning(tmp_p
         qwen=vlm_client,
         openai_verification=_client(
             SimpleNamespace(output_parsed=contradicted),
-            SimpleNamespace(output_parsed=contradicted),
+            SimpleNamespace(output_parsed=ReverificationResult(results=contradicted.results)),
         ),
         openai_report=_client(SimpleNamespace(output_parsed=_narrative())),
     )

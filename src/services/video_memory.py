@@ -62,6 +62,7 @@ class VideoMemoryWorkflowConfig:
     frame_max_batches: int = 8
     incident_frame_fps: float = 4.0
     incident_max_frames: int = 60
+    auto_reanalysis_clip_radius_s: float = 2.0
     incident_clip_min_duration_s: float = 5.0
     incident_clip_pre_roll_s: float = 1.0
     incident_clip_post_roll_s: float = 2.0
@@ -87,6 +88,7 @@ class VideoMemoryWorkflowConfig:
             self.frame_max_batches,
             self.incident_frame_fps,
             self.incident_max_frames,
+            self.auto_reanalysis_clip_radius_s,
             self.incident_clip_min_duration_s,
             self.video_target_width,
             self.video_target_height,

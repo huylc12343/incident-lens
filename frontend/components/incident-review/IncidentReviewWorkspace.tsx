@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { artifactUrl, formatIncidentError, getIncident, INCIDENT_POLL_INTERVAL_MS, INCIDENT_RETRY_INTERVAL_MS, isIncidentActive, reviewIncident } from "../../lib/incidentApi";
+import { artifactUrl, getIncident, reviewIncident } from "../../lib/incidentApi";
 import { getEvaluationMismatches } from "../../lib/groundTruthEvaluation";
 import { INCIDENT_KEYS } from "../../lib/incidentSession";
+import { loadUploadedVideo } from "../../lib/uploadStorage";
 import type { Claim, IncidentSnapshot, ReviewPayload } from "../../types/incident";
 import { ProcessingPipeline } from "../ProcessingPipeline";
 import { DecisionModal } from "./DecisionModal";
@@ -23,6 +24,7 @@ export function IncidentReviewWorkspace() {
   const [selectedClaimId, setSelectedClaimId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [originalVideoUrl, setOriginalVideoUrl] = useState("");
   const [decisionOpen, setDecisionOpen] = useState(false);
 
   useEffect(() => {
@@ -34,19 +36,22 @@ export function IncidentReviewWorkspace() {
     const id = sessionStorage.getItem(INCIDENT_KEYS.incidentId);
     if (!id) { setError("No active incident. Start an analysis or open one from History."); return; }
     let active = true;
+    let failures = 0;
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
       try {
         const next = await getIncident(id);
         if (!active) return;
+        failures = 0;
         setSnapshot(next);
         sessionStorage.setItem(INCIDENT_KEYS.snapshot, JSON.stringify(next));
         setSelectedClaimId((current) => current || next.claims[0]?.claim_id || "");
-        if (isIncidentActive(next.status)) timer = setTimeout(refresh, INCIDENT_POLL_INTERVAL_MS);
+        if (["queued", "running"].includes(next.status)) timer = setTimeout(refresh, 1500);
       } catch (cause) {
         if (active) {
+          failures += 1;
           setError(cause instanceof Error ? cause.message : "Could not load incident.");
-          timer = setTimeout(refresh, INCIDENT_RETRY_INTERVAL_MS);
+          if (failures < 5) timer = setTimeout(refresh, 3000);
         }
       }
     };
@@ -78,15 +83,31 @@ export function IncidentReviewWorkspace() {
   };
 
   const report = snapshot?.final_report ?? snapshot?.draft_report;
+  const aiFoundNoIncident = snapshot?.status === "awaiting_review" && report?.type_of_accident === "no_incident";
   const evaluationMismatches = snapshot ? getEvaluationMismatches(snapshot) : [];
   const hasCriticalEvaluationMismatch = evaluationMismatches.some((mismatch) => mismatch.critical);
   const clip = artifactUrl(snapshot?.artifact_uris.incident_clip);
   const telemetryCharts = snapshot ? Object.entries(snapshot.artifact_uris).filter(([key, uri]) => key.startsWith("chart_") && Boolean(uri)).sort(([left], [right]) => left.localeCompare(right)).map(([id, uri]) => ({ id, uri })) : [];
-  const retry = () => {
-    sessionStorage.removeItem(INCIDENT_KEYS.incidentId);
-    sessionStorage.removeItem(INCIDENT_KEYS.snapshot);
-    router.push("/");
-  };
+
+  useEffect(() => {
+    if (!aiFoundNoIncident || clip) {
+      setOriginalVideoUrl("");
+      return;
+    }
+    let active = true;
+    let blobUrl = "";
+    const sessionVideoUrl = sessionStorage.getItem("vlens:video-url");
+    if (sessionVideoUrl) setOriginalVideoUrl(sessionVideoUrl);
+    void loadUploadedVideo().then((video) => {
+      if (!active || !video) return;
+      blobUrl = URL.createObjectURL(video);
+      setOriginalVideoUrl(blobUrl);
+    }).catch(() => { /* Session playback remains the fallback when IndexedDB is unavailable. */ });
+    return () => {
+      active = false;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  }, [aiFoundNoIncident, clip]);
 
   return (
     <div className="incident-review-frame">
@@ -101,19 +122,20 @@ export function IncidentReviewWorkspace() {
         ) : (
           <>
             {evaluationMismatches.length > 0 && <section className={`ground-truth-alert ${hasCriticalEvaluationMismatch ? "critical" : "warning"}`} role="alert" aria-labelledby="ground-truth-alert-title"><div><span className="ground-truth-alert-icon" aria-hidden="true">!</span><div><strong id="ground-truth-alert-title">Cần rà soát: Kết luận AI chưa khớp Ground Truth</strong><p>{evaluationMismatches[0].description}{evaluationMismatches.length > 1 ? ` Có thêm ${evaluationMismatches.length - 1} sai lệch cần kiểm tra.` : ""}</p><small>{evaluationMismatches.map((mismatch) => mismatch.label).join(" · ")}</small></div></div><a href="#ground-truth-comparison">Xem đối chiếu</a></section>}
-            {snapshot.status === "failed" && <section className="workspace-panel workspace-state error-state" role="alert"><div><strong>Incident processing failed</strong><p>{formatIncidentError(snapshot.error_code, snapshot.error_message)}</p><button type="button" className="report-secondary-action" onClick={retry}>Retry with a new incident</button></div></section>}
-            <div className="review-command-bar">
+            {aiFoundNoIncident && <section className="ground-truth-alert warning" role="status" aria-live="polite"><div><span className="ground-truth-alert-icon" aria-hidden="true">!</span><div><strong>AI chưa phát hiện sự cố.</strong><p>Vui lòng kiểm tra bằng chứng và xác nhận đóng case nếu đồng ý.</p></div></div><a href="#engineer-review">Mở phần rà soát</a></section>}
+              <div className="review-command-bar">
               <div><span className="command-status-dot" /><strong>{snapshot.status === "awaiting_review" ? "Ready for engineer review" : `Workflow: ${snapshot.status}`}</strong><small>{snapshot.claims.length} AI observation(s) · {snapshot.has_log ? "Video + telemetry" : "Video only"}</small></div>
               <div><a className="command-secondary" href="#selected-evidence">Inspect evidence</a><button type="button" className="command-decision" disabled={snapshot.status !== "awaiting_review" || busy} onClick={() => setDecisionOpen(true)}><span aria-hidden="true">☷</span> Make decision</button></div>
-            </div>
-            <div className="incident-review-workspace" id="engineer-review">
+              </div>
+              {snapshot.status === "failed" && <section className="workspace-panel workspace-state error-state" role="alert"><div><strong>Phân tích không hoàn tất</strong><p>{snapshot.error_message || "Workflow đã dừng trước khi tạo kết quả review."}</p><button type="button" className="command-secondary" onClick={() => router.push("/")}>Quay lại tải lên và thử lại</button></div></section>}
+              <div className="incident-review-workspace" id="engineer-review">
               <main className="incident-evidence-column">
-                <IncidentClipPlayer clipUrl={clip} start={report?.incident_window?.t_start} focus={report?.incident_window?.t0} end={report?.incident_window?.t_end} claims={snapshot.claims} selectedId={selectedClaim?.claim_id ?? ""} onSelect={selectClaim} videoRef={videoRef} />
+                <IncidentClipPlayer clipUrl={clip || originalVideoUrl} isOriginalVideo={aiFoundNoIncident && !clip} noIncident={aiFoundNoIncident} start={report?.incident_window?.t_start} focus={report?.incident_window?.t0} end={report?.incident_window?.t_end} claims={snapshot.claims} selectedId={selectedClaimId} onSelect={selectClaim} videoRef={videoRef} />
                 <TelemetryPanel summaries={snapshot.claim_log_summaries} selectedClaimId={selectedClaim?.claim_id ?? ""} hasLog={snapshot.has_log} chartUris={telemetryCharts} comparison={<GroundTruthComparison snapshot={snapshot} />} />
                 <div className="evidence-presentation-stack" id="selected-evidence"><EvidenceInspector snapshot={snapshot} claim={selectedClaim} /></div>
               </main>
               <div className="incident-decision-column">
-                {isIncidentActive(snapshot.status) && <div id="processing-status"><ProcessingPipeline snapshot={snapshot} /></div>}
+                {["queued", "running"].includes(snapshot.status) && <div id="processing-status"><ProcessingPipeline snapshot={snapshot} /></div>}
                 <ReviewSidebar snapshot={snapshot} selectedClaim={selectedClaim} busy={busy} error={error} onSelectClaim={selectClaim} onReview={submitReview} />
               </div>
             </div>

@@ -1312,6 +1312,7 @@ async def test_manual_reanalysis_verifies_only_changed_claims_and_merges_old_res
         analysis_mode=AnalysisMode.SINGLE_REQUEST,
     )
     previous = VerificationResult(
+        has_accident=True,
         results=[
             ClaimVerification(
                 claim_id="claim-1",
@@ -1327,6 +1328,7 @@ async def test_manual_reanalysis_verifies_only_changed_claims_and_merges_old_res
         ]
     )
     updated = VerificationResult(
+        has_accident=False,
         results=[
             ClaimVerification(
                 claim_id="claim-1",
@@ -1355,6 +1357,7 @@ async def test_manual_reanalysis_verifies_only_changed_claims_and_merges_old_res
     request = verifier.verify.await_args.args[0]
     assert [claim.claim_id for claim in request.claims] == ["claim-1"]
     assert [item.claim_id for item in result["verification"].results] == ["claim-1", "claim-2"]
+    assert result["verification"].has_accident is True
     assert result["verification"].results[1].reason == "Keep this result"
     assert result["video_memory"].claims[1].verification_status == VerificationStatus.SUPPORTED
     assert "claims" not in result
@@ -1446,7 +1449,7 @@ async def test_draft_report_falls_back_to_vlm_video_summary() -> None:
 
     assert result["status"] == "running"
     assert result["draft_report"].summary == memory.video_summary
-    assert result["draft_report"].type_of_accident == "other_unknown"
+    assert result["draft_report"].type_of_accident == "vehicle_collision"
     assert result["draft_report"].alignment.verification is None
     assert any("report model unavailable" in warning for warning in result["warnings"])
 
@@ -1494,7 +1497,7 @@ async def test_draft_report_uses_code_log_summary_and_verification_alignment() -
         warnings=["TAKEOVER"],
     )
     narrative = ReportModelOutput(
-        type_of_accident="rear_end_collision",
+        type_of_accident="vehicle_collision",
         incident_window=memory.incident_window,
         representative_timestamp_s=memory.incident_window.t0,
         timeline="Timeline.",
@@ -1516,7 +1519,7 @@ async def test_draft_report_uses_code_log_summary_and_verification_alignment() -
     )
 
     draft = result["draft_report"]
-    assert draft.type_of_accident == "rear_end_collision"
+    assert draft.type_of_accident == "vehicle_collision"
     assert draft.summary == memory.global_scene
     assert draft.log_findings.narrative == log_summary.summary
     assert "claim-1 được log hỗ trợ" in draft.alignment.narrative
@@ -1539,7 +1542,7 @@ async def test_draft_report_can_correct_default_vlm_incident_window() -> None:
         analysis_mode=AnalysisMode.SINGLE_REQUEST,
     )
     narrative = ReportModelOutput(
-        type_of_accident="static_object_collision",
+        type_of_accident="environment_collision",
         incident_window=IncidentWindow(t_start=25, t0=27, t_end=29),
         representative_timestamp_s=27,
         timeline="Xe tiếp cận, va chạm rồi dừng lại.",
@@ -1608,7 +1611,7 @@ async def test_cut_after_report_uses_report_corrected_incident_window(tmp_path: 
     report = SimpleNamespace(
         build_narrative=AsyncMock(
             return_value=ReportModelOutput(
-                type_of_accident="static_object_collision",
+                type_of_accident="environment_collision",
                 incident_window=IncidentWindow(t_start=25, t0=27, t_end=29),
                 representative_timestamp_s=27,
                 timeline="Xe va chạm rồi dừng lại.",

@@ -75,14 +75,4 @@ scripts/
 .aider/
 .continue/
 .amazonq/
-
-# Local caches, temporary tooling and generated artifacts
-.cache/
-.npm-cache/
-.pytest_cache/
-.pytest-tmp/
-.tools/
-*.zip
-
-# Media samples must use Git LFS when intentionally versioned.
-*.mp4
+golden_set/

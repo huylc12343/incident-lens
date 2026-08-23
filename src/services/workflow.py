@@ -69,10 +69,11 @@ class WorkflowService:
         self._audit: dict[str, list[ReviewAuditEntry]] = {}
         self._stored_at: dict[str, datetime] = {}
         self._pending_terminal: dict[str, tuple[IncidentState, ReviewDecision]] = {}
-        self._workflow_tasks: dict[str, asyncio.Task[None]] = {}
+        self._background_tasks: dict[str, asyncio.Task[None]] = {}
         self._registry_lock = asyncio.Lock()
 
-    async def create(self, request: IncidentCreateRequest) -> IncidentSnapshot:
+    async def enqueue(self, request: IncidentCreateRequest) -> IncidentSnapshot:
+        """Register an incident and return immediately while analysis runs in the background."""
         if self._input_validator is not None:
             await self._input_validator.validate(request)
         incident_id = request.incident_id.strip()
@@ -101,13 +102,9 @@ class WorkflowService:
             self._states[incident_id] = initial
             self._review_locks[incident_id] = asyncio.Lock()
             self._audit[incident_id] = []
-        # The HTTP request only reserves an incident and schedules the expensive
-        # graph.  Clients receive this queued snapshot and follow state changes
-        # through GET /incidents/{incident_id}; this is the same lifecycle used
-        # by the Streamlit client.
-        self._workflow_tasks[incident_id] = asyncio.create_task(
-            self._run_enqueued(initial), name=f"incident-workflow-{incident_id}"
-        )
+            task = asyncio.create_task(self._run_enqueued(initial), name=f"incident:{incident_id}")
+            self._background_tasks[incident_id] = task
+            task.add_done_callback(lambda _: self._background_tasks.pop(incident_id, None))
         return self._snapshot(initial)
 
     async def _run_enqueued(self, initial: IncidentState) -> None:
@@ -119,15 +116,64 @@ class WorkflowService:
             state = _without_legacy_claim_projection({**running, **result})
             self._snapshot(state)
         except Exception as exc:
-            code = exc.code if isinstance(exc, WorkflowError) else "WORKFLOW_EXECUTION_FAILED"
             state = {
                 **running,
                 "status": "failed",
-                "error_code": code,
-                "error_message": "incident workflow could not complete",
+                "error_code": getattr(exc, "code", "WORKFLOW_EXECUTION_FAILED"),
+                "error_message": str(exc) or "incident workflow failed",
             }
         self._states[incident_id] = state
-        self._workflow_tasks.pop(incident_id, None)
+
+    async def create(self, request: IncidentCreateRequest) -> IncidentSnapshot:
+        if self._input_validator is not None:
+            await self._input_validator.validate(request)
+        incident_id = request.incident_id.strip()
+        initial: IncidentState = {
+            "incident_id": incident_id,
+            "video_uri": request.video_uri,
+            "log_uri": request.log_uri,
+            "analysis_prompt": request.analysis_prompt,
+            "metadata": request.metadata,
+            "status": "running",
+            "auto_reanalysis_count": 0,
+            "manual_reanalysis_count": 0,
+            "artifact_uris": {},
+            "warnings": [],
+            "review_audit": [],
+            "model_activities": [],
+        }
+        async with self._registry_lock:
+            checkpoint_state = await self._checkpoint_state(incident_id)
+            if (
+                incident_id in self._states
+                or checkpoint_state is not None
+                or await _repository_call(self._repository, "aget", "get", incident_id) is not None
+            ):
+                raise WorkflowError("INCIDENT_ALREADY_EXISTS", "incident ID already exists")
+            self._states[incident_id] = initial
+            self._review_locks[incident_id] = asyncio.Lock()
+            self._audit[incident_id] = []
+        try:
+            result = await self._runner.start(initial)
+        except Exception as exc:
+            async with self._registry_lock:
+                self._states.pop(incident_id, None)
+                self._review_locks.pop(incident_id, None)
+                self._audit.pop(incident_id, None)
+            if isinstance(exc, WorkflowError):
+                raise
+            raise WorkflowError("WORKFLOW_EXECUTION_FAILED", "incident workflow could not start") from exc
+        state = _without_legacy_claim_projection({**initial, **result})
+        try:
+            snapshot = self._snapshot(state)
+        except Exception as exc:
+            async with self._registry_lock:
+                self._states.pop(incident_id, None)
+                self._review_locks.pop(incident_id, None)
+                self._audit.pop(incident_id, None)
+            raise WorkflowError("WORKFLOW_OUTPUT_INVALID", "incident workflow returned invalid state") from exc
+        self._states[incident_id] = state
+        return snapshot
 
     async def get(self, incident_id: str) -> IncidentSnapshot:
         state = self._states.get(incident_id)
@@ -174,7 +220,6 @@ class WorkflowService:
                 self._audit.pop(incident_id, None)
                 self._stored_at.pop(incident_id, None)
                 self._pending_terminal.pop(incident_id, None)
-                self._workflow_tasks.pop(incident_id, None)
             if self._observability is not None:
                 self._observability.delete(incident_id)
 
@@ -201,10 +246,6 @@ class WorkflowService:
             _delete_scoped_path(target)
 
     async def review(self, incident_id: str, decision: ReviewDecision) -> IncidentSnapshot:
-        # Give a just-enqueued workflow a chance to publish its first state
-        # before evaluating the review transition.  This keeps in-process API
-        # callers deterministic without making the create endpoint synchronous.
-        await asyncio.sleep(0)
         lock = self._review_locks.get(incident_id)
         if lock is None:
             recovered = await self._checkpoint_state(incident_id)

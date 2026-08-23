@@ -49,6 +49,15 @@ def api_request(
             message = detail.get("message", "Yêu cầu API thất bại.")
             if detail.get("code"):
                 message = f"{detail['code']}: {message}"
+        elif isinstance(detail, list):
+            errors: list[str] = []
+            for error in detail:
+                if not isinstance(error, dict):
+                    continue
+                location = ".".join(str(item) for item in error.get("loc", []) if item != "body")
+                reason = error.get("msg", "giá trị không hợp lệ")
+                errors.append(f"{location or 'request'}: {reason}")
+            message = "Lỗi validation (HTTP 422): " + "; ".join(errors) if errors else str(detail)
         else:
             message = str(detail)
         raise RuntimeError(message)
@@ -81,7 +90,12 @@ def main() -> None:
         if video_file is None:
             st.error("Bạn phải chọn một file video.")
         else:
+            st.session_state.pop("incident_error", None)
             _upload_and_start_async(base_url, incident_id, analysis_prompt, video_file, log_file)
+
+    incident_error = st.session_state.get("incident_error")
+    if isinstance(incident_error, str) and incident_error:
+        st.error(incident_error)
 
     active_id = st.session_state.get("incident_id", "")
     if st.button("Làm mới trạng thái") and active_id:
@@ -206,7 +220,9 @@ def _upload_and_start(
         st.session_state.draft_incident_id = _new_incident_id()
         st.success("Upload và tạo incident thành công.")
     except (KeyError, RuntimeError) as exc:
-        st.error(str(exc) if isinstance(exc, RuntimeError) else "API upload trả về dữ liệu không hợp lệ.")
+        message = str(exc) if isinstance(exc, RuntimeError) else "API upload trả về dữ liệu không hợp lệ."
+        st.session_state.incident_error = message
+        st.error(message)
 
 
 def _upload_and_start_async(
@@ -228,15 +244,15 @@ def _upload_and_start_async(
         }
         if uploaded.get("log_uri"):
             payload["log_uri"] = uploaded["log_uri"]
-        st.session_state.incident_id = incident_id
-        _remember_incident(incident_id)
-        st.session_state.draft_incident_id = _new_incident_id()
+        st.session_state.pending_incident_id = incident_id
         st.session_state.incident_future = _REQUEST_EXECUTOR.submit(
             api_request, "POST", base_url, "/api/v1/incidents", payload
         )
-        st.success("Upload thành công. Workflow đang chạy và giao diện sẽ cập nhật theo thời gian thực.")
+        st.info("Upload thành công. Đang tạo incident và kiểm tra dữ liệu đầu vào…")
     except (KeyError, RuntimeError) as exc:
-        st.error(str(exc) if isinstance(exc, RuntimeError) else "API upload trả về dữ liệu không hợp lệ.")
+        message = str(exc) if isinstance(exc, RuntimeError) else "API upload trả về dữ liệu không hợp lệ."
+        st.session_state.incident_error = message
+        st.error(message)
 
 
 def _remember_incident(incident_id: str) -> None:
@@ -247,15 +263,28 @@ def _remember_incident(incident_id: str) -> None:
 
 @st.fragment(run_every=1)
 def _render_live_incident(base_url: str, incident_id: str) -> None:
+    incident_error = st.session_state.get("incident_error")
+    if isinstance(incident_error, str) and incident_error:
+        st.error(incident_error)
+
     future = st.session_state.get("incident_future")
     if isinstance(future, Future):
         if future.done():
             try:
                 st.session_state.snapshot = future.result()
+                created_id = st.session_state.snapshot.get("incident_id")
+                if isinstance(created_id, str) and created_id:
+                    st.session_state.incident_id = created_id
+                    _remember_incident(created_id)
+                    st.session_state.draft_incident_id = _new_incident_id()
+                st.success("Tạo incident thành công. Workflow đang chạy.")
             except RuntimeError as exc:
-                st.error(str(exc))
+                message = f"Không thể tạo incident: {exc}"
+                st.session_state.incident_error = message
+                st.error(message)
             finally:
                 del st.session_state.incident_future
+                st.session_state.pop("pending_incident_id", None)
         elif incident_id:
             try:
                 st.session_state.snapshot = api_request(
@@ -558,13 +587,10 @@ def _verification_status_label(value: Any) -> str:
 
 def _accident_type_label(value: Any) -> str:
     return {
-        "rear_end_collision": "Đâm xe phía trước",
+        "vehicle_collision": "Va chạm với phương tiện khác",
         "crossing_collision": "Va chạm xe cắt ngang",
-        "side_collision": "Va chạm bên hông / chuyển làn",
-        "head_on_collision": "Va chạm đối đầu",
         "pedestrian_collision": "Va chạm người đi bộ",
-        "static_object_collision": "Va chạm vật thể tĩnh",
-        "roadside_collision": "Va chạm môi trường ven đường / rời đường",
+        "environment_collision": "Va chạm môi trường / rời khỏi phần đường",
         "no_incident": "Không có tai nạn của ego",
         "other_unknown": "Có tai nạn nhưng chưa xác định được loại",
     }.get(value, "Chưa phân loại")

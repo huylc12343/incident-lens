@@ -1,0 +1,459 @@
+{
+  "sample_id": "CARLA_INC_TBONE_000019_7EE15BB6_DC856AA2",
+  "analysis_prompt": "Phân tích sự cố giao thông trong toàn bộ video.",
+  "workflow_status": "awaiting_review",
+  "auto_reanalysis_count": 0,
+  "manual_reanalysis_count": 0,
+  "has_reanalyze": false,
+  "warnings": [
+    "LOG_ADAPTIVE_STEERING_CHANGE at 3.9s: adaptive change (peak z-score 3.75) merged from 3.900s to 3.900s",
+    "LOG_EXTREME_ACCELERATION at 9.9s: adaptive change (peak z-score 35.96) merged from 9.900s to 9.900s"
+  ],
+  "model_outputs": {
+    "vlm_initial": {
+      "global_scene": "Video ghi lại cảnh lái xe từ camera trước trên một con đường thành phố nhiều làn, có các tòa nhà cao tầng hai bên. Xe ego di chuyển theo lane bên trái, phía trước có một xe màu xanh dương và một xe cứu thương (ambulance) đang di chuyển cùng hướng. Có một tàu điện ngầm màu đỏ đang di chuyển song song ở phía bên phải.",
+      "vlm_has_accident": false,
+      "video_summary": "Xe ego bắt đầu di chuyển trên đường phố, tiến về phía trước với tốc độ ổn định. Phía trước có một xe sedan màu xanh và một xe cứu thương đang di chuyển cùng chiều. Xe ego dần dần tiến gần hơn đến hai phương tiện này. Tuy nhiên, khoảng cách giữa xe ego và xe xanh dương không giảm quá nhanh để gây va chạm, và xe ego dường như duy trì tốc độ hoặc giảm tốc nhẹ để giữ khoảng cách an toàn. Không có dấu hiệu va chạm vật lý, né tránh gấp hoặc bất thường nghiêm trọng nào xảy ra. Xe ego tiếp tục di chuyển thẳng trên đường.",
+      "incident_window": {
+        "t_start": 0.0,
+        "t0": 0.0,
+        "t_end": 45.0
+      },
+      "representative_timestamp_s": 10.0,
+      "timeline": [
+        {
+          "timestamp_s": 0.0,
+          "description": "Xe ego bắt đầu di chuyển trên đường phố, phía trước có xe xanh và xe cứu thương.",
+          "evidence_ids": []
+        },
+        {
+          "timestamp_s": 10.0,
+          "description": "Xe ego tiến gần đến xe xanh dương và xe cứu thương, khoảng cách giảm dần nhưng không có va chạm.",
+          "evidence_ids": []
+        },
+        {
+          "timestamp_s": 20.0,
+          "description": "Xe ego tiếp tục di chuyển theo lane, khoảng cách với các xe phía trước được duy trì.",
+          "evidence_ids": []
+        },
+        {
+          "timestamp_s": 45.0,
+          "description": "Video kết thúc, xe ego vẫn đang di chuyển bình thường trên đường, không có sự cố nào xảy ra.",
+          "evidence_ids": []
+        }
+      ],
+      "claims": [
+        {
+          "claim_id": "1",
+          "text": "Xe ego di chuyển trên đường phố nhiều làn, phía trước có xe xanh và xe cứu thương.",
+          "timestamp_s": 0.0,
+          "evidence": [],
+          "verification_status": "unverified"
+        },
+        {
+          "claim_id": "2",
+          "text": "Xe ego tiến gần đến các phương tiện phía trước nhưng không có va chạm vật lý.",
+          "timestamp_s": 10.0,
+          "evidence": [],
+          "verification_status": "unverified"
+        },
+        {
+          "claim_id": "3",
+          "text": "Không có dấu hiệu tai nạn, né tránh gấp hoặc bất thường nghiêm trọng trong suốt video.",
+          "timestamp_s": 45.0,
+          "evidence": [],
+          "verification_status": "unverified"
+        }
+      ],
+      "revision": 1,
+      "analysis_mode": "native_video",
+      "sampling_metadata": {
+        "requested_fps": 5.0,
+        "sampled_frame_count": 225,
+        "source_duration_s": 45.0,
+        "batch_count": 1
+      },
+      "remote_media_handles": []
+    },
+    "verification_final": {
+      "has_accident": true,
+      "results": [
+        {
+          "claim_id": "1",
+          "status": "supported",
+          "reason": "Trong window, xe ego đang tăng tốc từ 1.764 lên 41.124 km/h; steering chuyển từ trái (-0.38) về gần thẳng (-0.0058).",
+          "evidence_ids": [
+            "log-row:0.05",
+            "log-row:3.25"
+          ]
+        },
+        {
+          "claim_id": "2",
+          "status": "supported",
+          "reason": "Trong window, xe ego đang di chuyển rồi giảm tốc rõ rệt từ 40.969 xuống 8.567 km/h; brake bằng 0 và throttle về 0.0.",
+          "evidence_ids": [
+            "log-row:6.8",
+            "log-row:10",
+            "log-row:13.2"
+          ]
+        },
+        {
+          "claim_id": "3",
+          "status": "supported",
+          "reason": "Trong window, xe ego gần như đứng yên ở 0.229 km/h, steering giữ thẳng và không có biến động steering đáng kể; tốc độ ổn định, không có pha giảm tốc đáng kể.",
+          "evidence_ids": [
+            "log-row:41.8",
+            "log-row:45"
+          ]
+        }
+      ]
+    },
+    "verification_raw_final": {
+      "has_accident": true,
+      "results": [
+        {
+          "claim_id": "1",
+          "status": "supported",
+          "reason": "Trong window, xe ego đang tăng tốc từ 1.764 lên 41.124 km/h; steering chuyển từ trái (-0.38) về gần thẳng (-0.0058).",
+          "evidence_ids": [
+            "log-row:0.05",
+            "log-row:3.25"
+          ]
+        },
+        {
+          "claim_id": "2",
+          "status": "supported",
+          "reason": "Trong window, xe ego đang di chuyển rồi giảm tốc rõ rệt từ 40.969 xuống 8.567 km/h; brake bằng 0 và throttle về 0.0.",
+          "evidence_ids": [
+            "log-row:6.8",
+            "log-row:10",
+            "log-row:13.2"
+          ]
+        },
+        {
+          "claim_id": "3",
+          "status": "supported",
+          "reason": "Trong window, xe ego gần như đứng yên ở 0.229 km/h, steering giữ thẳng và không có biến động steering đáng kể; tốc độ ổn định, không có pha giảm tốc đáng kể.",
+          "evidence_ids": [
+            "log-row:41.8",
+            "log-row:45"
+          ]
+        }
+      ]
+    },
+    "verification_allowed_evidence_ids": {
+      "1": [
+        "log-row:0.05",
+        "log-row:0.1",
+        "log-row:0.15",
+        "log-row:0.2",
+        "log-row:0.25",
+        "log-row:0.3",
+        "log-row:0.35",
+        "log-row:0.4",
+        "log-row:0.45",
+        "log-row:0.5",
+        "log-row:0.55",
+        "log-row:0.6",
+        "log-row:0.65",
+        "log-row:0.7",
+        "log-row:0.75",
+        "log-row:0.8",
+        "log-row:0.85",
+        "log-row:0.9",
+        "log-row:0.95",
+        "log-row:1",
+        "log-row:1.05",
+        "log-row:1.1",
+        "log-row:1.15",
+        "log-row:1.2",
+        "log-row:1.25",
+        "log-row:1.3",
+        "log-row:1.35",
+        "log-row:1.4",
+        "log-row:1.45",
+        "log-row:1.5",
+        "log-row:1.55",
+        "log-row:1.6",
+        "log-row:1.65",
+        "log-row:1.7",
+        "log-row:1.75",
+        "log-row:1.8",
+        "log-row:1.85",
+        "log-row:1.9",
+        "log-row:1.95",
+        "log-row:2",
+        "log-row:2.05",
+        "log-row:2.1",
+        "log-row:2.15",
+        "log-row:2.2",
+        "log-row:2.25",
+        "log-row:2.3",
+        "log-row:2.35",
+        "log-row:2.4",
+        "log-row:2.45",
+        "log-row:2.5",
+        "log-row:2.55",
+        "log-row:2.6",
+        "log-row:2.65",
+        "log-row:2.7",
+        "log-row:2.75",
+        "log-row:2.8",
+        "log-row:2.85",
+        "log-row:2.9",
+        "log-row:2.95",
+        "log-row:3",
+        "log-row:3.05",
+        "log-row:3.1",
+        "log-row:3.15",
+        "log-row:3.2",
+        "log-row:3.25"
+      ],
+      "2": [
+        "log-row:6.8",
+        "log-row:6.85",
+        "log-row:6.9",
+        "log-row:6.95",
+        "log-row:7",
+        "log-row:7.05",
+        "log-row:7.1",
+        "log-row:7.15",
+        "log-row:7.2",
+        "log-row:7.25",
+        "log-row:7.3",
+        "log-row:7.35",
+        "log-row:7.4",
+        "log-row:7.45",
+        "log-row:7.5",
+        "log-row:7.55",
+        "log-row:7.6",
+        "log-row:7.65",
+        "log-row:7.7",
+        "log-row:7.75",
+        "log-row:7.8",
+        "log-row:7.85",
+        "log-row:7.9",
+        "log-row:7.95",
+        "log-row:8",
+        "log-row:8.05",
+        "log-row:8.1",
+        "log-row:8.15",
+        "log-row:8.2",
+        "log-row:8.25",
+        "log-row:8.3",
+        "log-row:8.35",
+        "log-row:8.4",
+        "log-row:8.45",
+        "log-row:8.5",
+        "log-row:8.55",
+        "log-row:8.6",
+        "log-row:8.65",
+        "log-row:8.7",
+        "log-row:8.75",
+        "log-row:8.8",
+        "log-row:8.85",
+        "log-row:8.9",
+        "log-row:8.95",
+        "log-row:9",
+        "log-row:9.05",
+        "log-row:9.1",
+        "log-row:9.15",
+        "log-row:9.2",
+        "log-row:9.25",
+        "log-row:9.3",
+        "log-row:9.35",
+        "log-row:9.4",
+        "log-row:9.45",
+        "log-row:9.5",
+        "log-row:9.55",
+        "log-row:9.6",
+        "log-row:9.65",
+        "log-row:9.7",
+        "log-row:9.75",
+        "log-row:9.8",
+        "log-row:9.85",
+        "log-row:9.9",
+        "log-row:9.95",
+        "log-row:10",
+        "log-row:10.05",
+        "log-row:10.1",
+        "log-row:10.15",
+        "log-row:10.2",
+        "log-row:10.25",
+        "log-row:10.3",
+        "log-row:10.35",
+        "log-row:10.4",
+        "log-row:10.45",
+        "log-row:10.5",
+        "log-row:10.55",
+        "log-row:10.6",
+        "log-row:10.65",
+        "log-row:10.7",
+        "log-row:10.75",
+        "log-row:10.8",
+        "log-row:10.85",
+        "log-row:10.9",
+        "log-row:10.95",
+        "log-row:11",
+        "log-row:11.05",
+        "log-row:11.1",
+        "log-row:11.15",
+        "log-row:11.2",
+        "log-row:11.25",
+        "log-row:11.3",
+        "log-row:11.35",
+        "log-row:11.4",
+        "log-row:11.45",
+        "log-row:11.5",
+        "log-row:11.55",
+        "log-row:11.6",
+        "log-row:11.65",
+        "log-row:11.7",
+        "log-row:11.75",
+        "log-row:11.8",
+        "log-row:11.85",
+        "log-row:11.9",
+        "log-row:11.95",
+        "log-row:12",
+        "log-row:12.05",
+        "log-row:12.1",
+        "log-row:12.15",
+        "log-row:12.2",
+        "log-row:12.25",
+        "log-row:12.3",
+        "log-row:12.35",
+        "log-row:12.4",
+        "log-row:12.45",
+        "log-row:12.5",
+        "log-row:12.55",
+        "log-row:12.6",
+        "log-row:12.65",
+        "log-row:12.7",
+        "log-row:12.75",
+        "log-row:12.8",
+        "log-row:12.85",
+        "log-row:12.9",
+        "log-row:12.95",
+        "log-row:13",
+        "log-row:13.05",
+        "log-row:13.1",
+        "log-row:13.15",
+        "log-row:13.2"
+      ],
+      "3": [
+        "log-row:41.8",
+        "log-row:41.85",
+        "log-row:41.9",
+        "log-row:41.95",
+        "log-row:42",
+        "log-row:42.05",
+        "log-row:42.1",
+        "log-row:42.15",
+        "log-row:42.2",
+        "log-row:42.25",
+        "log-row:42.3",
+        "log-row:42.35",
+        "log-row:42.4",
+        "log-row:42.45",
+        "log-row:42.5",
+        "log-row:42.55",
+        "log-row:42.6",
+        "log-row:42.65",
+        "log-row:42.7",
+        "log-row:42.75",
+        "log-row:42.8",
+        "log-row:42.85",
+        "log-row:42.9",
+        "log-row:42.95",
+        "log-row:43",
+        "log-row:43.05",
+        "log-row:43.1",
+        "log-row:43.15",
+        "log-row:43.2",
+        "log-row:43.25",
+        "log-row:43.3",
+        "log-row:43.35",
+        "log-row:43.4",
+        "log-row:43.45",
+        "log-row:43.5",
+        "log-row:43.55",
+        "log-row:43.6",
+        "log-row:43.65",
+        "log-row:43.7",
+        "log-row:43.75",
+        "log-row:43.8",
+        "log-row:43.85",
+        "log-row:43.9",
+        "log-row:43.95",
+        "log-row:44",
+        "log-row:44.05",
+        "log-row:44.1",
+        "log-row:44.15",
+        "log-row:44.2",
+        "log-row:44.25",
+        "log-row:44.3",
+        "log-row:44.35",
+        "log-row:44.4",
+        "log-row:44.45",
+        "log-row:44.5",
+        "log-row:44.55",
+        "log-row:44.6",
+        "log-row:44.65",
+        "log-row:44.7",
+        "log-row:44.75",
+        "log-row:44.8",
+        "log-row:44.85",
+        "log-row:44.9",
+        "log-row:44.95",
+        "log-row:45"
+      ]
+    },
+    "report_final": {
+      "type_of_accident": "other_unknown",
+      "incident_window": {
+        "t_start": 0.0,
+        "t0": 10.0,
+        "t_end": 45.0
+      },
+      "representative_timestamp_s": 10.0,
+      "timeline": "Tại 0.0 giây, xe ego di chuyển trên đường phố nhiều làn, phía trước có các phương tiện cùng hướng. Đến 10.0 giây, ego tiến gần các phương tiện phía trước và giảm tốc. Sau đó, xe tiếp tục trong trạng thái chuyển động chậm hơn; đến 45.0 giây, video kết thúc. Verifier xác nhận có tai nạn, nhưng các mốc và quan sát trong context không cho phép xác định thời điểm biểu hiện rõ, đối tượng liên quan hoặc cơ chế va chạm cụ thể.",
+      "video_observations": "Xe ego có tai nạn theo kết luận của verifier; tuy nhiên, cơ chế chính không xác định được từ context nên phân loại là other_unknown. Hình ảnh và các claim chỉ thể hiện ego tiếp cận các phương tiện phía trước rồi giảm tốc, không ghi nhận rõ điểm tiếp xúc hoặc quỹ đạo va chạm; vì vậy không thể quy kết tai nạn là va chạm với xe phía trước hay một loại đối tượng cụ thể nào.",
+      "hypothesized_causes": "Không đủ bằng chứng để xác định nguyên nhân trực tiếp. Việc ego tiến gần các phương tiện phía trước trước thời điểm đại diện có thể là yếu tố liên quan, nhưng không đủ để kết luận là nguyên nhân. Không có dữ liệu đáng tin cậy về quỹ đạo giao cắt, vật cản hoặc hành vi cụ thể khác dẫn đến sự cố."
+    }
+  },
+  "metrics": {
+    "vlm": {
+      "has_accident": false,
+      "t0_error_s": null,
+      "temporal_iou": null,
+      "event_matches": [
+        {
+          "gold_event_index": 2,
+          "pred_event_index": 1,
+          "gold_event_type": "closing_distance",
+          "gold_timestamp": 0.0,
+          "pred_timestamp": 10.0
+        }
+      ]
+    },
+    "verifier": {
+      "has_accident": true,
+      "evidence_id_validity": {
+        "evidence_id_precision": 1.0,
+        "claim_evidence_validity_rate": 1.0,
+        "invalid_evidence_ids": []
+      },
+      "status_distribution": {
+        "supported": 1.0,
+        "contradicted": 0.0,
+        "unverified": 0.0
+      }
+    },
+    "report": {
+      "type_of_accident": "other_unknown",
+      "has_accident": true,
+      "t0_error_s": 0.09999999999999964,
+      "temporal_iou": 0.3822222222222222
+    }
+  }
+}

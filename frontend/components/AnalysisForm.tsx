@@ -115,16 +115,16 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
     const previousUrl = sessionStorage.getItem("vlens:video-url");
     if (previousUrl) URL.revokeObjectURL(previousUrl);
     sessionStorage.setItem("vlens:video-url", URL.createObjectURL(video));
-    // IndexedDB is only a playback convenience on the review screen. Some
-    // browsers can keep its write transaction pending for a long time, so it
-    // must never block evidence upload or incident creation.
-    void saveUploadedVideo(video).catch(() => {
-      // The session object URL above remains available as the playback fallback.
-    });
     sessionStorage.setItem("vlens:video-name", video.name);
     const incidentId = `INC-${crypto.randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
     try {
       const uploaded = await uploadIncident(video, telemetry[0], groundTruth ?? undefined);
+      // Start the optional IndexedDB playback cache only after fetch has
+      // finished reading the File. Concurrent IndexedDB and multipart reads of
+      // the same Blob can stall indefinitely in some browsers.
+      void saveUploadedVideo(video).catch(() => {
+        // The session object URL above remains available as the playback fallback.
+      });
       const snapshot = await createIncident({
         incident_id: incidentId,
         video_uri: uploaded.video_uri,

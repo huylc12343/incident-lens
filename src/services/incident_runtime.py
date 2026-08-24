@@ -49,9 +49,7 @@ class WorkerAsyncSqliteSaver(SqliteSaver):
         return await self._worker.call(self.get_tuple, config)
 
     async def alist(self, config, *, filter=None, before=None, limit=None):
-        items = await self._worker.call(
-            lambda: list(self.list(config, filter=filter, before=before, limit=limit))
-        )
+        items = await self._worker.call(lambda: list(self.list(config, filter=filter, before=before, limit=limit)))
         for item in items:
             yield item
 
@@ -108,7 +106,10 @@ async def incident_workflow_service(
     clients: ProviderClients | None = None,
 ) -> AsyncIterator[WorkflowService]:
     clients = clients or ProviderClients()
-    media = MediaService(redaction_image_size=settings.redaction_image_size)
+    media = MediaService(
+        redaction_image_size=settings.redaction_image_size,
+        redaction_detection_fps=settings.redaction_detection_fps,
+    )
     tracing = build_langsmith_tracing(settings)
     observability = ModelActivityRegistry(
         max_provider_requests_per_incident=settings.provider_request_limit_per_incident,
@@ -129,6 +130,7 @@ async def incident_workflow_service(
             incident_clip_min_duration_s=settings.incident_clip_min_duration_s,
             incident_clip_pre_roll_s=settings.incident_clip_pre_roll_s,
             incident_clip_post_roll_s=settings.incident_clip_post_roll_s,
+            incident_clip_display_fps=settings.incident_clip_display_fps,
             video_target_width=settings.vlm_video_target_width,
             video_target_height=settings.vlm_video_target_height,
             video_target_fps=settings.vlm_video_target_fps,

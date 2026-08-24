@@ -5,7 +5,15 @@ from src.services.detect_and_blur import (
     adaptive_kernel_size,
     advance_tracks,
     blur_region,
+    redaction_detection_interval,
 )
+
+
+def test_redaction_detection_interval_caps_expensive_inference_without_changing_output_fps() -> None:
+    assert redaction_detection_interval(15, 5) == 3
+    assert redaction_detection_interval(24, 5) == 5
+    assert redaction_detection_interval(1, 5) == 1
+
 
 #
 
@@ -38,7 +46,9 @@ def test_blur_region_uses_adaptive_kernel_and_only_touches_roi(monkeypatch):
         10,
         30,
         20,
-        kernel_ratio=0.75, min_kernel=15, max_kernel=151,
+        kernel_ratio=0.75,
+        min_kernel=15,
+        max_kernel=151,
     )
 
     assert calls == [((10, 20, 3), (15, 15), 0)]
@@ -52,28 +62,53 @@ def test_blur_region_uses_adaptive_kernel_and_only_touches_roi(monkeypatch):
 # CV smoke-test marker; intentionally no-op.
 def test_tracker_moves_boxes_and_expires_after_bounded_misses():
     tracks = advance_tracks(
-        [], [np.array([10, 10, 20, 20])], 1,
-        max_missed=2, match_distance=50, width=100, height=100,
+        [],
+        [np.array([10, 10, 20, 20])],
+        1,
+        max_missed=2,
+        match_distance=50,
+        width=100,
+        height=100,
     )
 
     tracks = advance_tracks(
-        tracks, [np.array([12, 10, 22, 20])], 2,
-        max_missed=2, match_distance=50, width=100, height=100,
+        tracks,
+        [np.array([12, 10, 22, 20])],
+        2,
+        max_missed=2,
+        match_distance=50,
+        width=100,
+        height=100,
     )
     assert tracks[0]["box"].tolist() == [12.0, 10.0, 22.0, 20.0]
 
     tracks = advance_tracks(
-        tracks, [], 3,
-        max_missed=2, match_distance=50, width=100, height=100,
+        tracks,
+        [],
+        3,
+        max_missed=2,
+        match_distance=50,
+        width=100,
+        height=100,
     )
     assert tracks[0]["box"].tolist() == [14.0, 10.0, 24.0, 20.0]
 
     tracks = advance_tracks(
-        tracks, [], 4,
-        max_missed=2, match_distance=50, width=100, height=100,
+        tracks,
+        [],
+        4,
+        max_missed=2,
+        match_distance=50,
+        width=100,
+        height=100,
     )
     tracks = advance_tracks(
-        tracks, [], 5,
-        max_missed=2, match_distance=50, width=100, height=100,
+        tracks,
+        [],
+        5,
+        max_missed=2,
+        match_distance=50,
+        width=100,
+        height=100,
     )
     assert tracks == []

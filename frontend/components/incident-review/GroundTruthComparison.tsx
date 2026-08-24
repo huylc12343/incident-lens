@@ -10,13 +10,14 @@ export function GroundTruthComparison({ snapshot }: { snapshot: IncidentSnapshot
   const truth = snapshot.ground_truth;
   const evaluation = snapshot.ai_evaluation;
   if (!truth) return null;
+  const isProcessing = snapshot.status === "queued" || snapshot.status === "running";
   const prediction = evaluation?.prediction;
   const truthTimeline = truth.timeline;
   const predictionTimeline = prediction?.timeline;
 
   return <section className="workspace-panel ground-truth-comparison" id="ground-truth-comparison" aria-labelledby="ground-truth-title">
     <div className="workspace-panel-heading"><div><p className="eyebrow">ĐÁNH GIÁ CHẤT LƯỢNG AI</p><h2 id="ground-truth-title">Đối chiếu với Ground Truth</h2><p className="comparison-subtitle">So sánh kết quả AI với annotation hoặc nhãn mô phỏng đã xác nhận.</p></div><span className="ground-truth-source">{truth.source}</span></div>
-    {!evaluation && <p className="comparison-empty">Có Ground Truth nhưng chưa có kết quả dự đoán AI hợp lệ để đối chiếu.</p>}
+    {!evaluation && <p className="comparison-empty">{isProcessing ? "Ground Truth đã được nhận. Đang chờ workflow hoàn tất để đối chiếu với kết quả AI." : "Có Ground Truth nhưng chưa có kết quả dự đoán AI hợp lệ để đối chiếu."}</p>}
     <div className="comparison-table-wrap"><table className="comparison-table"><thead><tr><th>Trường</th><th>Kết quả AI</th><th>Ground Truth</th><th>Đánh giá</th></tr></thead><tbody>
       <tr><th>Loại sự cố</th><td>{value(prediction?.incident_type)}</td><td>{value(truth.incident_type)}</td><td>{verdict(evaluation?.incident_type_match)}</td></tr>
       <tr><th>Mức độ</th><td>{value(prediction?.severity)}</td><td>{value(truth.severity)}</td><td>{verdict(evaluation?.severity_match)}</td></tr>

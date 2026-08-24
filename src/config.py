@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     vlm_video_max_output_bytes: int = Field(default=100_000_000, gt=0)
     video_redaction_enabled: bool = True
     redaction_image_size: int = Field(default=512, gt=0)
+    redaction_detection_fps: float = Field(default=5.0, gt=0, le=30)
 
     # Frame artifacts used to canonicalize Qwen timestamps after analysis.
     vlm_frame_width: int = Field(default=1024, gt=0)
@@ -93,6 +94,7 @@ class Settings(BaseSettings):
     incident_clip_min_duration_s: float = Field(default=5.0, gt=0)
     incident_clip_pre_roll_s: float = Field(default=1.0, ge=0)
     incident_clip_post_roll_s: float = Field(default=2.0, ge=0)
+    incident_clip_display_fps: float = Field(default=24.0, gt=0, le=60)
     log_timestamp_tolerance_s: float = Field(default=0.5, ge=0)
     log_claim_sample_radius: int = Field(default=3, ge=0)
     artifact_dir: str = "./data/artifacts"
@@ -108,6 +110,7 @@ class Settings(BaseSettings):
 
     # Vector Store
     chroma_persist_dir: str = "./data/chroma"
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -65,6 +65,7 @@ class VideoMemoryWorkflowConfig:
     incident_clip_min_duration_s: float = 5.0
     incident_clip_pre_roll_s: float = 1.0
     incident_clip_post_roll_s: float = 2.0
+    incident_clip_display_fps: float = 24.0
     video_target_width: int = 1280
     video_target_height: int = 720
     video_target_fps: float = 15.0
@@ -88,6 +89,7 @@ class VideoMemoryWorkflowConfig:
             self.incident_frame_fps,
             self.incident_max_frames,
             self.incident_clip_min_duration_s,
+            self.incident_clip_display_fps,
             self.video_target_width,
             self.video_target_height,
             self.video_target_fps,
@@ -474,11 +476,7 @@ def merge_memory_only_patch(
     current_claims = {claim.claim_id: claim for claim in memory.claims}
     if not set(requested_target_claim_ids).issubset(current_claims):
         raise VideoMemoryError("VLM_PATCH_TARGET_MISSING", "patch targets claims not present in current memory")
-    existing_evidence = {
-        evidence.evidence_id: evidence
-        for claim in memory.claims
-        for evidence in claim.evidence
-    }
+    existing_evidence = {evidence.evidence_id: evidence for claim in memory.claims for evidence in claim.evidence}
     patch_claims = {claim.claim_id: claim for claim in patch.claims}
     if len(patch_claims) != len(patch.claims):
         raise VideoMemoryError("VLM_PATCH_CLAIM_DUPLICATE", "memory-only patch contains duplicate claim IDs")
@@ -507,9 +505,7 @@ def merge_memory_only_patch(
         current_claims[claim_id] = normalized_claim.model_copy(
             update={
                 "verification_status": (
-                    VerificationStatus.UNVERIFIED
-                    if content_changed
-                    else previous_claim.verification_status
+                    VerificationStatus.UNVERIFIED if content_changed else previous_claim.verification_status
                 )
             }
         )
@@ -694,9 +690,7 @@ def _reconcile_frame_evidence(memory: VideoMemory, frames: list[TimestampedFrame
         frame = nearest_frame(claim.timestamp_s)
         claims.append(
             claim.model_copy(
-                update={
-                    "evidence": [EvidenceReference(evidence_id=frame.frame_id, timestamp_s=frame.timestamp_s)]
-                }
+                update={"evidence": [EvidenceReference(evidence_id=frame.frame_id, timestamp_s=frame.timestamp_s)]}
             )
         )
 

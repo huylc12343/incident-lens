@@ -12,6 +12,18 @@ const normalize = (value: string) => value
 
 const containsAny = (text: string, phrases: string[]) => phrases.some((phrase) => text.includes(phrase));
 
+const incidentTypeLabels: Record<string, string> = {
+  rear_end_collision: "Va chạm phía sau",
+  crossing_collision: "Va chạm cắt ngang",
+  side_collision: "Va chạm bên hông",
+  head_on_collision: "Va chạm đối đầu",
+  pedestrian_collision: "Va chạm với người đi bộ",
+  static_object_collision: "Va chạm vật thể tĩnh",
+  roadside_collision: "Sự cố ven đường",
+  no_incident: "Không phát hiện sự cố",
+  other_unknown: "Sự cố khác / chưa xác định",
+};
+
 export function classifyIncidentForDisplay(snapshot: IncidentSnapshot | null): DisplayIncidentClassification {
   if (!snapshot) return { type: "Phân tích sự cố", severity: "Chưa xác định" };
   // A queued/running snapshot has no final classification yet. In particular,
@@ -22,6 +34,8 @@ export function classifyIncidentForDisplay(snapshot: IncidentSnapshot | null): D
   }
 
   const source = normalize([snapshot.video_summary, ...snapshot.claims.map((claim) => claim.text)].join(" "));
+  const structuredIncidentType = snapshot.final_report?.type_of_accident
+    ?? snapshot.draft_report?.type_of_accident;
   const collisionDenied = containsAny(source, [
     "khong co va cham",
     "khong quan sat thay va cham",
@@ -49,6 +63,12 @@ export function classifyIncidentForDisplay(snapshot: IncidentSnapshot | null): D
   else if (containsAny(source, ["tu vong", "chay no", "tham khoc"])) severity = "Nghiêm trọng";
   else if (containsAny(source, ["lat xe", "va cham manh", "mat kiem soat", "hau qua dang ke"])) severity = "Cao";
   else if (collisionObserved) severity = "Trung bình";
+
+  // The structured report is the reviewed source of truth. Text inference above
+  // remains only as a fallback for older incidents without this field.
+  if (structuredIncidentType) {
+    type = incidentTypeLabels[structuredIncidentType] ?? structuredIncidentType;
+  }
 
   return { type, severity };
 }

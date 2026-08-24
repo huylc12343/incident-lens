@@ -44,6 +44,7 @@ export type ClaimLogSummary = {
 };
 export type DraftReport = {
   general_information?: { incident_id: string; video_uri: string; has_log: boolean; log_uri?: string | null };
+  type_of_accident?: string;
   incident_window?: { t_start: number; t0: number; t_end: number };
   summary: string;
   timeline?: { narrative?: string; events?: Array<{ timestamp_s: number; description: string; evidence_ids: string[] }> };
@@ -91,7 +92,7 @@ export type IncidentSnapshot = {
   error_message?: string | null;
   stored_at?: string | null;
 };
-export type IncidentUploadResponse = { video_uri: string; log_uri: string | null };
+export type IncidentUploadResponse = { video_uri: string; log_uri: string | null; ground_truth_uri: string | null };
 export type IncidentCreateRequest = {
   incident_id: string;
   video_uri: string;
@@ -105,5 +106,18 @@ export type ReviewPayload = {
   reason?: string;
   feedback?: string;
   target_claim_ids?: string[];
-  edits?: Record<string, string>;
+  edits?: {
+    type_of_accident?: string;
+    t_start?: number;
+    t0?: number;
+    t_end?: number;
+    claims?: Array<{ claim_id: string; text: string; timestamp_s: number | null; verification_status?: string; evidence_ids?: string[] }>;
+    summary?: string;
+    timeline?: string;
+    video_observations?: string;
+    log_findings?: string;
+    alignment?: string;
+    hypothesized_causes?: string;
+    warnings?: string[];
+  };
 };

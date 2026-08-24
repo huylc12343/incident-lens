@@ -39,11 +39,18 @@ class NormalizedVideoArtifact:
 
 
 class MediaService:
-    def __init__(self, *, command_timeout_s: float = 120.0, redaction_image_size: int = 512) -> None:
-        if command_timeout_s <= 0 or redaction_image_size <= 0:
-            raise ValueError("command timeout and redaction image size must be positive")
+    def __init__(
+        self,
+        *,
+        command_timeout_s: float = 120.0,
+        redaction_image_size: int = 512,
+        redaction_detection_fps: float = 5.0,
+    ) -> None:
+        if command_timeout_s <= 0 or redaction_image_size <= 0 or redaction_detection_fps <= 0:
+            raise ValueError("media service configuration must be positive")
         self._command_timeout_s = command_timeout_s
         self._redaction_image_size = redaction_image_size
+        self._redaction_detection_fps = redaction_detection_fps
         self._ffmpeg = shutil.which("ffmpeg") or _bundled_tool("ffmpeg") or get_ffmpeg_exe()
         self._ffprobe = shutil.which("ffprobe") or _bundled_tool("ffprobe")
 
@@ -181,6 +188,7 @@ class MediaService:
                 video_uri,
                 output_uri,
                 imgsz=self._redaction_image_size,
+                detection_fps=self._redaction_detection_fps,
             )
         except Exception as exc:
             raise MediaServiceError("VIDEO_REDACTION_FAILED", "video redaction failed") from exc
@@ -196,6 +204,7 @@ class MediaService:
         min_duration_s: float = 5.0,
         pre_roll_s: float = 1.0,
         post_roll_s: float = 2.0,
+        output_fps: float | None = None,
     ) -> NormalizedVideoArtifact:
         source = _existing_file(video_uri)
         probe = await self.probe_video(str(source))
@@ -209,7 +218,9 @@ class MediaService:
         )
         output = Path(output_uri).resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
-        await self._run_command(
+        if output_fps is not None and output_fps <= 0:
+            raise ValueError("output FPS must be positive")
+        command = [
             self._ffmpeg,
             "-y",
             "-ss",
@@ -218,16 +229,23 @@ class MediaService:
             str(source),
             "-t",
             str(clip_end - clip_start),
-            "-c:v",
-            codec,
-            "-pix_fmt",
-            pixel_format,
-            "-c:a",
-            "aac",
-            "-movflags",
-            "+faststart",
-            str(output),
+        ]
+        if output_fps is not None:
+            command.extend(["-vf", f"fps={output_fps}"])
+        command.extend(
+            [
+                "-c:v",
+                codec,
+                "-pix_fmt",
+                pixel_format,
+                "-c:a",
+                "aac",
+                "-movflags",
+                "+faststart",
+                str(output),
+            ]
         )
+        await self._run_command(*command)
         if not output.is_file():
             raise MediaServiceError("INCIDENT_CLIP_FAILED", "ffmpeg did not create the incident clip")
         return NormalizedVideoArtifact(uri=str(output), metadata=await self.probe_video(str(output)))
@@ -260,13 +278,17 @@ class MediaService:
         if not 1 <= jpeg_quality <= 100:
             raise ValueError("jpeg_quality must be between 1 and 100")
 
+        # Never invent duplicate frames when the requested evidence rate is
+        # higher than the source. Besides wasting work, duplicates used to be
+        # assigned synthetic timestamps that could not map back to the claim.
+        effective_fps = min(fps, probe.fps)
         destination = Path(output_dir).resolve()
         destination.mkdir(parents=True, exist_ok=True)
         extension = "jpg" if image_format == "jpeg" else "png"
         output_pattern = destination / f"frame-%06d.{extension}"
         duration_s = clip_end - start_s
         video_filter = (
-            f"fps={fps},scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"fps={effective_fps},scale={width}:{height}:force_original_aspect_ratio=decrease,"
             f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
         )
         command = [
@@ -293,13 +315,13 @@ class MediaService:
             raise MediaServiceError("FRAME_SAMPLING_FAILED", "ffmpeg did not produce any frames")
         frames = []
         for index, path in enumerate(frame_paths):
-            timestamp_s = min(start_s + (index / fps), clip_end)
+            timestamp_s = min(start_s + (index / effective_fps), clip_end)
             frames.append(
                 TimestampedFrame(
                     frame_id=path.stem,
                     sequence_index=index,
                     timestamp_s=timestamp_s,
-                    delta_from_previous_s=0.0 if index == 0 else 1 / fps,
+                    delta_from_previous_s=0.0 if index == 0 else 1 / effective_fps,
                     image_uri=str(path),
                     mime_type="image/jpeg" if image_format == "jpeg" else "image/png",
                 )

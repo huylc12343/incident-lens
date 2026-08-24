@@ -130,6 +130,51 @@ async def test_workflow_enqueue_returns_queued_before_background_analysis_finish
 
 
 @pytest.mark.asyncio
+async def test_workflow_exposes_ground_truth_then_evaluates_completed_analysis(tmp_path) -> None:
+    ground_truth_path = tmp_path / "ground_truth.json"
+    ground_truth_path.write_text(
+        '{"label_provenance":"carla_simulator","incident_type":"side_collision",'
+        '"severity":"high","timeline":{"t_start":1,"t0":2,"t_end":3}}',
+        encoding="utf-8",
+    )
+    release = asyncio.Event()
+
+    async def start(state: dict[str, object]) -> dict[str, object]:
+        await release.wait()
+        return _review_state(str(state["incident_id"]))
+
+    runner = SimpleNamespace(start=AsyncMock(side_effect=start), resume=AsyncMock())
+    service = WorkflowService(
+        runner=runner,
+        repository=InMemoryReportRepository(),
+        upload_dir=str(tmp_path),
+    )
+
+    queued = await service.enqueue(
+        IncidentCreateRequest(
+            incident_id="INC-GROUND-TRUTH",
+            video_uri="video.mp4",
+            analysis_prompt="Analyze",
+            metadata={"ground_truth_uri": str(ground_truth_path)},
+        )
+    )
+
+    assert queued.ground_truth is not None
+    assert queued.ground_truth.source == "CARLA Incident"
+    assert queued.ai_evaluation is None
+
+    release.set()
+    for _ in range(10):
+        completed = await service.get("INC-GROUND-TRUTH")
+        if completed.status == "awaiting_review":
+            break
+        await asyncio.sleep(0)
+    assert completed.ai_evaluation is not None
+    assert completed.ai_evaluation.timeline_iou == 1
+    assert completed.ai_evaluation.t0_delta_s == 0
+
+
+@pytest.mark.asyncio
 async def test_workflow_uses_video_memory_claims_over_legacy_top_level_claims() -> None:
     initial = _review_state("INC-CANONICAL-CLAIMS")
     initial["claims"] = [Claim(claim_id="stale-claim", text="Stale claim")]

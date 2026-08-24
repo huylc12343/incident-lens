@@ -24,6 +24,7 @@ def test_incident_clip_context_defaults() -> None:
     assert settings.provider_network_retries == 0
     assert settings.video_redaction_enabled is True
     assert settings.redaction_image_size == 512
+    assert settings.redaction_detection_fps == 5
     assert not hasattr(settings, "log_strong_deceleration_threshold_mps2")
     assert not hasattr(settings, "log_brake_rise_threshold")
 

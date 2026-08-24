@@ -9,7 +9,7 @@ import { createIncident, uploadIncident } from "../lib/incidentApi";
 import { uiText as text } from "../lib/ui-copy";
 
 type DemoSample = {
-  id: "with-ground-truth" | "with-log-no-ground-truth" | "video-only";
+  id: "with-log" | "video-only";
   title: string;
   description: string;
   detail: string;
@@ -17,37 +17,23 @@ type DemoSample = {
   videoName: string;
   telemetryPath?: string;
   telemetryName?: string;
-  groundTruthPath?: string;
-  groundTruthName?: string;
 };
 
 const demoSamples: DemoSample[] = [
   {
-    id: "with-ground-truth",
-    title: "Video + log + ground truth đầy đủ",
-    description: "Va chạm cắt ngang, có dữ liệu xe và nhãn mô phỏng đã xác nhận.",
-    detail: "Gửi inference_vehicle_state.csv + ground_truth.json",
+    id: "with-log",
+    title: "Video có Vehicle State",
+    description: "Video tình huống giao thông kèm dữ liệu ga, phanh và góc lái của xe.",
+    detail: "Gửi video + inference_vehicle_state.csv",
     videoPath: "/demo-samples/with-ground-truth/cut-in-ground-truth.mp4",
     videoName: "cut-in-ground-truth.mp4",
     telemetryPath: "/demo-samples/with-ground-truth/telemetry.csv",
     telemetryName: "inference_vehicle_state.csv",
-    groundTruthPath: "/demo-samples/with-ground-truth/ground_truth.json",
-    groundTruthName: "ground_truth.json",
-  },
-  {
-    id: "with-log-no-ground-truth",
-    title: "Video + log, không có ground truth",
-    description: "Tình huống người đi bộ, có các thông số như ga, phanh và lái.",
-    detail: "Chỉ gửi inference_vehicle_state.csv",
-    videoPath: "/demo-samples/with-log-no-ground-truth/pedestrian-no-ground-truth.mp4",
-    videoName: "pedestrian-no-ground-truth.mp4",
-    telemetryPath: "/demo-samples/with-log-no-ground-truth/telemetry.csv",
-    telemetryName: "inference_vehicle_state.csv",
   },
   {
     id: "video-only",
-    title: "Chỉ có video",
-    description: "Video lái xe thực tế, không có dữ liệu xe hoặc ground truth.",
+    title: "Video không có Vehicle State",
+    description: "Video lái xe không kèm log hoặc dữ liệu trạng thái phương tiện.",
     detail: "Chỉ gửi video hành trình",
     videoPath: "/demo-samples/video-only/normal-driving-video-only.mp4",
     videoName: "normal-driving-video-only.mp4",
@@ -74,7 +60,6 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
   const router = useRouter();
   const [video, setVideo] = useState<File | null>(null);
   const [telemetry, setTelemetry] = useState<File[]>([]);
-  const [groundTruth, setGroundTruth] = useState<File | null>(null);
   const [toast, setToast] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitProgress, setSubmitProgress] = useState(0);
@@ -97,18 +82,14 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
     setLoadingDemo(sample.id);
     setError("");
     try {
-      const [demoVideo, demoTelemetry, demoGroundTruth] = await Promise.all([
+      const [demoVideo, demoTelemetry] = await Promise.all([
         loadDemoFile(sample.videoPath, sample.videoName, "video/mp4"),
         sample.telemetryPath && sample.telemetryName
           ? loadDemoFile(sample.telemetryPath, sample.telemetryName, "text/csv")
           : Promise.resolve(null),
-        sample.groundTruthPath && sample.groundTruthName
-          ? loadDemoFile(sample.groundTruthPath, sample.groundTruthName, "application/json")
-          : Promise.resolve(null),
       ]);
       setVideo(demoVideo);
       setTelemetry(demoTelemetry ? [demoTelemetry] : []);
-      setGroundTruth(demoGroundTruth);
       setSelectedDemo(sample.id);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load the demo sample.");
@@ -123,18 +104,7 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
     setSubmitting(true);
     setError("");
     try {
-      const previousUrl = sessionStorage.getItem("vlens:video-url");
-      if (previousUrl) URL.revokeObjectURL(previousUrl);
-      sessionStorage.setItem("vlens:video-url", URL.createObjectURL(video));
-      sessionStorage.setItem("vlens:video-name", video.name);
-      const incidentId = createIncidentId();
-      const uploaded = await uploadIncident(video, telemetry[0], groundTruth ?? undefined);
-      // Start the optional IndexedDB playback cache only after fetch has
-      // finished reading the File. Concurrent IndexedDB and multipart reads of
-      // the same Blob can stall indefinitely in some browsers.
-      void saveUploadedVideo(video).catch(() => {
-        // The session object URL above remains available as the playback fallback.
-      });
+      const uploaded = await uploadIncident(video, telemetry[0]);
       const snapshot = await createIncident({
         incident_id: incidentId,
         video_uri: uploaded.video_uri,
@@ -145,7 +115,6 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
         metadata: {
           timestamp_detection: "automatic",
           telemetry_files: telemetry.map((file) => file.name),
-          ground_truth_uri: uploaded.ground_truth_uri,
         },
       });
       setSubmitProgress(100);
@@ -187,14 +156,6 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
               setSelectedDemo(null);
             }}
           />
-          <FileUploadCard
-            kind="groundTruth"
-            files={groundTruth ? [groundTruth] : []}
-            onChange={(files) => {
-              setGroundTruth(files[0] ?? null);
-              setSelectedDemo(null);
-            }}
-          />
         </div>
         <section className="demo-sample-picker" aria-labelledby="demo-samples-title">
           <div>
@@ -212,7 +173,7 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
                 disabled={Boolean(loadingDemo) || submitting}
                 aria-pressed={selectedDemo === sample.id}
               >
-                <span className="demo-sample-status">{sample.id === "with-ground-truth" ? "Có ground truth" : sample.id === "with-log-no-ground-truth" ? "Có log" : "Chỉ video"}</span>
+                <span className="demo-sample-status">{sample.id === "with-log" ? "Có Vehicle State" : "Chỉ video"}</span>
                 <strong>{sample.title}</strong>
                 <span>{loadingDemo === sample.id ? "Đang nạp dữ liệu mẫu…" : sample.description}</span>
                 <small>{sample.detail}</small>

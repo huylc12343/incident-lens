@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { secondsToTimestamp } from "../../lib/incidentSession";
 import type { Claim, IncidentSnapshot, ReviewPayload } from "../../types/incident";
 import { uiText as text } from "../../lib/ui-copy";
 import { classifyIncidentForDisplay } from "../../lib/incidentClassification";
+import { formatEvidenceWarning } from "../../lib/evidenceWarnings";
+import { StructuredReportEditor } from "./StructuredReportEditor";
+import { incidentStatusLabel } from "../../lib/incidentStatus";
 
 type Props = {
   snapshot: IncidentSnapshot;
@@ -20,11 +23,8 @@ export function ReviewSidebar({ snapshot, selectedClaim, busy, error, onSelectCl
   const window = report?.incident_window;
   const [reviewer, setReviewer] = useState("engineer@example.com");
   const [reason, setReason] = useState("Insufficient evidence");
-  const [summary, setSummary] = useState(report?.summary ?? snapshot.video_summary);
-  const [editingSummary, setEditingSummary] = useState(false);
+  const [editingReport, setEditingReport] = useState(false);
   const [feedback, setFeedback] = useState("");
-
-  useEffect(() => setSummary(report?.summary ?? snapshot.video_summary), [report?.summary, snapshot.video_summary]);
 
   const counts = snapshot.claims.reduce<Record<string, number>>((result, claim) => {
     result[claim.verification_status] = (result[claim.verification_status] ?? 0) + 1;
@@ -33,17 +33,12 @@ export function ReviewSidebar({ snapshot, selectedClaim, busy, error, onSelectCl
   const canReview = snapshot.status === "awaiting_review" && !busy;
   const warnings = [...new Set([...snapshot.warnings, ...(report?.evidence_and_warnings?.warnings ?? [])])];
   const classification = classifyIncidentForDisplay(snapshot);
-  const groundTruth = snapshot.ground_truth;
-  const rawAccuracy = snapshot.ai_evaluation?.overall_accuracy;
-  const accuracy = typeof rawAccuracy === "number" && Number.isFinite(rawAccuracy) ? Math.round(rawAccuracy <= 1 ? rawAccuracy * 100 : rawAccuracy) : null;
-  const scoreTone = accuracy === null ? "pending" : accuracy >= 85 ? "high" : accuracy >= 70 ? "good" : accuracy >= 50 ? "medium" : "low";
-  const evaluation = snapshot.ai_evaluation;
 
   return (
     <aside className="incident-review-sidebar expanded-ai-review report-style-review">
       <header className="ai-review-report-header">
         <h2>{text("AI-assisted evidence review", "Rà soát bằng chứng với AI")}</h2>
-        <span className={`status ${snapshot.status}`}>{snapshot.status.replaceAll("_", " ")}</span>
+        <span className={`status ${snapshot.status}`}>{incidentStatusLabel(snapshot.status)}</span>
       </header>
 
       <section className="ai-report-section incident-report-information">
@@ -53,23 +48,10 @@ export function ReviewSidebar({ snapshot, selectedClaim, busy, error, onSelectCl
           <div><dt>{text("Analysis window", "Khoảng phân tích")}</dt><dd className="mono-value">{secondsToTimestamp(window?.t_start ?? 0)} → {secondsToTimestamp(window?.t_end ?? 0)}</dd></div>
           <div><dt>{text("Detected event", "Sự kiện phát hiện")}</dt><dd className="mono-value">{secondsToTimestamp(window?.t0 ?? 0)}</dd></div>
           <div><dt>{text("Incident type", "Loại sự cố")}</dt><dd>{classification.type}</dd></div>
-          <div><dt>{text("Severity", "Mức độ nghiêm trọng")}</dt><dd>{classification.severity}</dd></div>
           <div><dt>{text("Evidence sources", "Nguồn bằng chứng")}</dt><dd>{snapshot.has_log ? "Video + telemetry" : text("Video only", "Chỉ video")}</dd></div>
           <div><dt>{text("AI observations", "Quan sát AI")}</dt><dd>{snapshot.claims.length} {text("grounded claim(s)", "nhận định có bằng chứng")}</dd></div>
-          <div><dt>{text("Review status", "Trạng thái rà soát")}</dt><dd>{snapshot.status.replaceAll("_", " ")}</dd></div>
+          <div><dt>{text("Review status", "Trạng thái rà soát")}</dt><dd>{incidentStatusLabel(snapshot.status)}</dd></div>
         </dl>
-      </section>
-
-      <section className="ai-report-section ai-evaluation-section">
-        <h3>Đánh giá AI</h3>
-        {!groundTruth ? <div className="ground-truth-empty"><strong>Chưa có Ground Truth</strong><p>Incident này chưa thể đo độ chính xác AI.</p><span>Chưa đánh giá</span></div> : <>
-          <div className="evaluation-data-columns"><div><strong>Dự đoán AI</strong><dl><div><dt>Loại sự cố</dt><dd>{evaluation?.prediction?.incident_type ?? "Không có dữ liệu"}</dd></div><div><dt>Mức độ</dt><dd>{evaluation?.prediction?.severity ?? "Không có dữ liệu"}</dd></div><div><dt>t0</dt><dd>{typeof evaluation?.prediction?.timeline?.t0 === "number" ? `${evaluation.prediction.timeline.t0.toFixed(2)}s` : "Không có dữ liệu"}</dd></div></dl></div><div><strong>Ground Truth</strong><dl><div><dt>Loại sự cố</dt><dd>{groundTruth.incident_type ?? "Không có dữ liệu"}</dd></div><div><dt>Mức độ</dt><dd>{groundTruth.severity ?? "Không có dữ liệu"}</dd></div><div><dt>t0</dt><dd>{typeof groundTruth.timeline?.t0 === "number" ? `${groundTruth.timeline.t0.toFixed(2)}s` : "Không có dữ liệu"}</dd></div><div><dt>Nguồn</dt><dd>{groundTruth.source}</dd></div></dl></div></div>
-          {accuracy === null ? <div className="ground-truth-empty evaluation-pending"><strong>Chưa đủ dữ liệu đánh giá</strong><p>Ground Truth đã có, nhưng chưa có dự đoán AI hợp lệ để tính độ chính xác.</p><span>Chưa đánh giá</span></div> : <>
-          <div className={`accuracy-card ${scoreTone}`}><div><span>Độ chính xác tổng thể</span><strong>{accuracy}%</strong></div><span className="ground-truth-badge">{groundTruth.source}</span><div className="accuracy-progress" role="progressbar" aria-label="Độ chính xác tổng thể" aria-valuemin={0} aria-valuemax={100} aria-valuenow={accuracy}><i style={{ width: `${accuracy}%` }} /></div></div>
-          <div className="accuracy-metrics"><div><span>Loại sự cố</span><strong>{evaluation?.incident_type_match === true ? "Khớp" : evaluation?.incident_type_match === false ? "Không khớp" : "Không có dữ liệu"}</strong></div><div><span>Mức độ</span><strong>{evaluation?.severity_match === true ? "Khớp" : evaluation?.severity_match === false ? "Không khớp" : "Không có dữ liệu"}</strong></div><div><span>Sai lệch t0</span><strong>{typeof evaluation?.t0_delta_s === "number" ? `${evaluation.t0_delta_s.toFixed(2)} giây` : "Không có dữ liệu"}</strong></div><div><span>Timeline IoU</span><strong>{typeof evaluation?.timeline_iou === "number" ? `${Math.round(evaluation.timeline_iou * 100)}%` : "Không có dữ liệu"}</strong></div></div>
-          <a className="comparison-link" href="#ground-truth-comparison">Xem đối chiếu chi tiết</a>
-          </>}
-        </>}
       </section>
 
       <section className="ai-report-section all-ai-observations">
@@ -95,8 +77,8 @@ export function ReviewSidebar({ snapshot, selectedClaim, busy, error, onSelectCl
       </section>
 
       <section className="ai-report-section structured-summary">
-        <div className="ai-report-section-heading"><h3>{text("Final structured summary", "Tóm tắt có cấu trúc cuối cùng")}</h3><button type="button" className="report-text-action" disabled={!canReview || busy} onClick={() => setEditingSummary((current) => !current)}>{editingSummary ? text("Cancel", "Hủy") : text("Edit", "Chỉnh sửa")}</button></div>
-        {editingSummary ? <><textarea aria-label="Chỉnh sửa tóm tắt có cấu trúc" value={summary} onChange={(event) => setSummary(event.target.value)} /><button type="button" className="report-secondary-action summary-save-action" disabled={!summary.trim() || busy} onClick={() => void onReview({ action: "edit", reviewer, edits: { summary } }).then(() => setEditingSummary(false))}>Lưu chỉnh sửa</button></> : <p>{summary}</p>}
+        <div className="ai-report-section-heading"><h3>{text("Structured report", "Báo cáo có cấu trúc")}</h3><button type="button" className="report-text-action" disabled={!canReview || busy || !report} onClick={() => setEditingReport((current) => !current)}>{editingReport ? text("Cancel", "Hủy") : text("Edit report", "Chỉnh sửa báo cáo")}</button></div>
+        {editingReport && report ? <StructuredReportEditor snapshot={snapshot} report={report} reviewer={reviewer} busy={busy} onCancel={() => setEditingReport(false)} onReview={onReview} /> : <p>{report?.summary ?? snapshot.video_summary}</p>}
       </section>
 
       <ReportNarrative title={text("Timeline assessment", "Đánh giá dòng thời gian")} content={report?.timeline?.narrative || text("No additional timeline narrative.", "Không có mô tả dòng thời gian bổ sung.")} />
@@ -105,7 +87,7 @@ export function ReviewSidebar({ snapshot, selectedClaim, busy, error, onSelectCl
       <ReportNarrative title={text("Evidence alignment", "Đối chiếu bằng chứng")} content={report?.alignment?.narrative || text("No additional alignment narrative.", "Không có mô tả đối chiếu bổ sung.")} />
       <ReportNarrative title={text("Hypothesized causes", "Nguyên nhân giả định")} content={report?.hypothesized_causes || text("No cause hypothesis was recorded.", "Chưa ghi nhận giả thuyết nguyên nhân.")} />
 
-      {warnings.length > 0 && <section className="ai-report-section evidence-limitations" role="note"><h3><span aria-hidden="true">!</span> {text("Evidence limitations", "Hạn chế của bằng chứng")}</h3><ul>{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></section>}
+      {warnings.length > 0 && <section className="ai-report-section evidence-limitations" role="note"><h3><span aria-hidden="true">!</span> {text("Evidence warnings", "Cảnh báo bằng chứng")}</h3><ul>{warnings.map((warning) => <li key={warning}>{formatEvidenceWarning(warning)}</li>)}</ul></section>}
 
       <section className="ai-report-section interactive-reanalysis">
         <div className="ai-report-section-heading"><h3>{text("Focused re-analysis", "Phân tích lại có trọng tâm")}</h3><span>{selectedClaim?.claim_id ?? text("Select a claim", "Chọn một nhận định")}</span></div>

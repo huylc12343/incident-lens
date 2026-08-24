@@ -27,6 +27,7 @@ export function Header({
   const [dashscopeKey, setDashscopeKey] = useState("");
   const [langsmithKey, setLangsmithKey] = useState("");
   const [settingsMessage, setSettingsMessage] = useState("");
+  const [featureMessage, setFeatureMessage] = useState("");
   const [isSavingSettings, setIsSavingSettings] = useState(false);
 
   useEffect(() => {
@@ -44,6 +45,11 @@ export function Header({
     clearDemoSession();
     setIsSettingsOpen(false);
     router.replace("/login");
+  };
+
+  const showComingSoon = () => {
+    setFeatureMessage("Tính năng sắp được triển khai.");
+    window.setTimeout(() => setFeatureMessage(""), 2800);
   };
 
   const loadAiSettings = async () => {
@@ -89,7 +95,7 @@ export function Header({
         </nav>
         <div className="nav-actions">
           {processing && <span className="header-status">{text("Incident Review", "Rà soát sự cố")}</span>}
-          <button className="icon-button notification-button" aria-label={text("Notifications", "Thông báo")}>
+          <button className="icon-button notification-button" type="button" onClick={showComingSoon} aria-label={text("Notifications", "Thông báo")}>
             <Icon>
               <path
                 d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"
@@ -164,13 +170,13 @@ export function Header({
                   {settingsMessage && <p className="ai-settings-message" role="status">{settingsMessage}</p>}
                 </form>
               )}
-              <button className="settings-support-option" type="button">{text("Support", "Hỗ trợ")}</button>
-              <button className="settings-history-option" type="button">{text("History", "Lịch sử")}</button>
+              <button className="settings-support-option" type="button" onClick={showComingSoon}>{text("Support", "Hỗ trợ")}</button>
+              <button className="settings-history-option" type="button" onClick={showComingSoon}>{text("History", "Lịch sử")}</button>
               <button
                 className={`settings-light-option${isLightOptionDark ? " is-black" : ""}`}
                 type="button"
                 aria-pressed={isLightOptionDark}
-                onClick={() => setIsLightOptionDark((current) => !current)}
+                onClick={() => { setIsLightOptionDark((current) => !current); showComingSoon(); }}
               >
                 {text("Light", "Ánh sáng")}
               </button>
@@ -179,6 +185,7 @@ export function Header({
           </section>
         </div>
       )}
+      {featureMessage && <div className="feature-coming-soon" role="status" aria-live="polite">{featureMessage}</div>}
     </header>
   );
 }

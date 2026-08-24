@@ -73,12 +73,7 @@ export default function LoginPage() {
             <h1>Review incidents with<br />evidence, not assumptions.</h1>
             <p>Hệ thống AI tiên tiến giúp kỹ sư QA và AI phân tích sự cố từ video và dữ liệu telemetry xe một cách chính xác.</p>
           </div>
-          <div className={styles.evidencePanel} aria-hidden="true">
-            <div className={styles.panelTop}><span>INCIDENT REVIEW / 04:18:29</span><i /></div>
-            <div className={styles.videoFrame}><span className={styles.scanLine} /><div className={styles.play}>▶</div><div className={styles.frameLabel}>CAMERA 01 · FRONT</div></div>
-            <div className={styles.chart}><span /><span /><span /><svg viewBox="0 0 400 70" preserveAspectRatio="none"><polyline points="0,48 35,40 68,44 98,19 131,48 166,37 202,43 235,13 269,30 302,26 334,52 365,36 400,42" /></svg></div>
-            <div className={styles.timeline}><i /><b /><i /><i /><i /><strong>04:18:29.320</strong></div>
-          </div>
+          <div className={styles.evidencePanel} aria-label="VLens incident detected" role="img" />
           <div className={styles.signal}><span />AI-assisted evidence chain verified</div>
         </aside>
 

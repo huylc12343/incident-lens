@@ -1,3 +1,4 @@
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -228,6 +229,16 @@ async def test_fastapi_lifespan_bootstraps_configured_workflow(monkeypatch, tmp_
                     "analysis_prompt": "Analyze",
                 },
             )
+            assert created.status_code == 202
+            assert created.json()["status"] == "queued"
+            completed = None
+            for _ in range(600):
+                current = await client.get("/api/v1/incidents/INC-BOOTSTRAP")
+                if current.json()["status"] == "awaiting_review":
+                    completed = current
+                    break
+                await asyncio.sleep(0.1)
+            assert completed is not None
             closed = await client.post(
                 "/api/v1/incidents/INC-BOOTSTRAP/review",
                 json={
@@ -238,10 +249,8 @@ async def test_fastapi_lifespan_bootstraps_configured_workflow(monkeypatch, tmp_
             )
 
     assert health.status_code == 200
-    assert created.status_code == 202
-    assert created.json()["status"] == "awaiting_review"
-    assert created.json()["draft_report"]["type_of_accident"] == "no_incident"
-    activities = created.json()["model_activities"]
+    assert completed.json()["draft_report"]["type_of_accident"] == "no_incident"
+    activities = completed.json()["model_activities"]
     assert [(item["step"], item["status"]) for item in activities] == [
         ("vlm", "completed"),
         ("report", "completed"),

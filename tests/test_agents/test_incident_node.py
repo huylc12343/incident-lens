@@ -98,6 +98,7 @@ async def test_analyze_video_node_builds_frame_request(tmp_path: Path) -> None:
     assert result["status"] == "running"
     assert isinstance(result["video_memory"], VideoMemory)
     assert result["video_duration_s"] == 2
+    assert result["review_video_uri"] == "video.mp4"
     media.sample_frames.assert_awaited_once()
     media.normalize_video.assert_not_awaited()
     request = service.analyze_video.await_args.args[0]
@@ -214,6 +215,7 @@ async def test_analyze_video_node_builds_native_request(tmp_path: Path) -> None:
     request = service.analyze_video.await_args.args[0]
     assert request.normalized_video_uri == redacted.uri
     assert result["video_uri"] == redacted.uri
+    assert result["review_video_uri"] == "video.mp4"
     assert result["artifact_uris"] == {"normalized_video": redacted.uri}
 
 
@@ -295,11 +297,16 @@ async def test_cut_incident_video_node_creates_clip_and_frames(tmp_path: Path) -
     )
     workflow = VideoMemoryWorkflow(
         vlm=_service(VLMInputMode.TIMESTAMPED_FRAMES, memory),
-        config=VideoMemoryWorkflowConfig(artifact_dir=str(tmp_path)),
+        config=VideoMemoryWorkflowConfig(artifact_dir=str(tmp_path), video_redaction_enabled=False),
     )
 
     result = await cut_incident_video_node(
-        {"incident_id": "INC 003", "video_uri": "video.mp4", "video_memory": memory},
+        {
+            "incident_id": "INC 003",
+            "video_uri": "model-video.mp4",
+            "review_video_uri": "original-video.mp4",
+            "video_memory": memory,
+        },
         media=media,
         workflow=workflow,
     )
@@ -307,6 +314,7 @@ async def test_cut_incident_video_node_creates_clip_and_frames(tmp_path: Path) -
     assert result["status"] == "running"
     assert result["artifact_uris"]["incident_clip"] == clip.uri
     assert result["artifact_uris"]["representative_frame"] == str(tmp_path / "frame-peak.jpg")
+    assert media.cut_incident_clip.await_args.args[0] == "original-video.mp4"
     assert media.cut_incident_clip.await_args.kwargs == {
         "window": memory.incident_window,
         "codec": workflow.config.video_codec,
@@ -314,6 +322,7 @@ async def test_cut_incident_video_node_creates_clip_and_frames(tmp_path: Path) -
         "min_duration_s": workflow.config.incident_clip_min_duration_s,
         "pre_roll_s": workflow.config.incident_clip_pre_roll_s,
         "post_roll_s": workflow.config.incident_clip_post_roll_s,
+        "output_fps": workflow.config.incident_clip_display_fps,
     }
     assert media.sample_frames.await_args.kwargs["start_s"] == memory.incident_window.t_start
     assert media.sample_frames.await_args.kwargs["end_s"] == memory.incident_window.t_end
@@ -800,10 +809,7 @@ async def test_align_and_verify_claims_builds_per_claim_log_summary(tmp_path: Pa
     memory = _claim_memory(AnalysisMode.SINGLE_REQUEST)
     log = tmp_path / "vehicle.csv"
     log.write_text(
-        "timestamp,camera_frame,speed_kmh,brake,steer\n"
-        "1.5,10,30,0,0\n"
-        "2.0,11,20,1,0.5\n"
-        "2.5,12,10,1,0.2\n",
+        "timestamp,camera_frame,speed_kmh,brake,steer\n1.5,10,30,0,0\n2.0,11,20,1,0.5\n2.5,12,10,1,0.2\n",
         encoding="utf-8",
     )
     verification = VerificationResult(
@@ -853,10 +859,7 @@ async def test_align_and_verify_clips_claim_log_to_video_duration(tmp_path: Path
     )
     log = tmp_path / "vehicle.csv"
     log.write_text(
-        "timestamp,speed_kmh,brake\n"
-        "1.8,10,0\n"
-        "2.0,9,0\n"
-        "2.1,0,1\n",
+        "timestamp,speed_kmh,brake\n1.8,10,0\n2.0,9,0\n2.1,0,1\n",
         encoding="utf-8",
     )
     verifier = SimpleNamespace(
@@ -903,11 +906,7 @@ async def test_align_and_verify_uses_full_telemetry_for_claim_outside_incident_w
     )
     log = tmp_path / "vehicle.csv"
     log.write_text(
-        "timestamp,speed_kmh,brake\n"
-        "9.5,20,0\n"
-        "10.0,18,0\n"
-        "10.5,16,0\n"
-        "45.1,0,1\n",
+        "timestamp,speed_kmh,brake\n9.5,20,0\n10.0,18,0\n10.5,16,0\n45.1,0,1\n",
         encoding="utf-8",
     )
     verifier = SimpleNamespace(
@@ -1019,15 +1018,21 @@ async def test_verification_uses_only_the_saved_full_video_log_artifact(tmp_path
         full_video_timestamps = [float(row["timestamp_s"]) for row in csv.DictReader(file)]
     request = verifier.verify.await_args.args[0]
     evidence_timestamps = [
-        evidence.timestamp_s
-        for summary in request.claim_log_summaries
-        for evidence in summary.evidence
+        evidence.timestamp_s for summary in request.claim_log_summaries for evidence in summary.evidence
     ]
     assert saved_timestamps == {2.5, 3.0, 3.5, 5.0, 6.0, 12.0, 12.5, 13.0, 14.0}
     assert full_video_timestamps == [2.5, 3.0, 3.5, 5.0, 6.0, 12.0, 12.5, 13.0, 14.0]
     assert set(evidence_timestamps) <= saved_timestamps
     assert [item.timestamp_s for item in request.claim_log_summaries[0].evidence] == [2.5, 3.0, 3.5, 5.0, 6.0]
-    assert [item.timestamp_s for item in request.claim_log_summaries[1].evidence] == [3.5, 5.0, 6.0, 12.0, 12.5, 13.0, 14.0]
+    assert [item.timestamp_s for item in request.claim_log_summaries[1].evidence] == [
+        3.5,
+        5.0,
+        6.0,
+        12.0,
+        12.5,
+        13.0,
+        14.0,
+    ]
 
 
 @pytest.mark.asyncio
@@ -1324,11 +1329,15 @@ async def test_manual_reanalysis_uses_memory_only_without_video_or_frames(tmp_pa
         mime_type="video/mp4",
         local_artifact_uri=str(tmp_path / "normalized.mp4"),
     )
-    reanalysis = SimpleNamespace(reanalyze_claims=AsyncMock(return_value=VideoMemoryPatch(
-        target_claim_ids=["claim-1"],
-        claims=[Claim(claim_id="claim-1", text="Human-reviewed claim", timestamp_s=2)],
-        base_revision=1,
-    )))
+    reanalysis = SimpleNamespace(
+        reanalyze_claims=AsyncMock(
+            return_value=VideoMemoryPatch(
+                target_claim_ids=["claim-1"],
+                claims=[Claim(claim_id="claim-1", text="Human-reviewed claim", timestamp_s=2)],
+                base_revision=1,
+            )
+        )
+    )
 
     result = await manual_reanalyze_node(
         {
@@ -1387,7 +1396,7 @@ async def test_manual_reanalysis_verifies_only_changed_claims_and_merges_old_res
                 reason="Keep this result",
                 evidence_ids=["log-row:2"],
             ),
-        ]
+        ],
     )
     updated = VerificationResult(
         has_accident=False,
@@ -1398,7 +1407,7 @@ async def test_manual_reanalysis_verifies_only_changed_claims_and_merges_old_res
                 reason="New result",
                 evidence_ids=["log-row:1"],
             )
-        ]
+        ],
     )
     verifier = SimpleNamespace(verify=AsyncMock(return_value=updated))
 
@@ -1821,9 +1830,7 @@ async def test_auto_reanalysis_reverifies_only_changed_claim_and_keeps_supported
     """A retry for one conflict must not degrade an unrelated verified claim."""
     log = tmp_path / "vehicle.csv"
     log.write_text(
-        "timestamp,speed_kmh\n"
-        "1.0,20\n"
-        "2.0,18\n",
+        "timestamp,speed_kmh\n1.0,20\n2.0,18\n",
         encoding="utf-8",
     )
     memory = VideoMemory(

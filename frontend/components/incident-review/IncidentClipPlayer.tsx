@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent, type RefObject } from "react";
 import { secondsToTimestamp } from "../../lib/incidentSession";
 import type { Claim } from "../../types/incident";
 import { uiText as text } from "../../lib/ui-copy";
@@ -27,6 +27,9 @@ const playerTime = (seconds: number) => {
 
 export function IncidentClipPlayer({ clipUrl, isOriginalVideo = false, noIncident = false, start, focus, end, claims, selectedId, onSelect, videoRef }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const progressFillRef = useRef<HTMLSpanElement>(null);
+  const playheadRef = useRef<HTMLElement>(null);
+  const currentTimeRef = useRef<HTMLElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -47,6 +50,25 @@ export function IncidentClipPlayer({ clipUrl, isOriginalVideo = false, noInciden
     setPlaying(false);
   }, [clipUrl]);
 
+  // Paint playback controls at the browser refresh rate without triggering a
+  // React render for every video frame. Analysis FPS/model inputs are untouched.
+  useEffect(() => {
+    if (!playing) return;
+    let animationFrame = 0;
+    const refreshPlayhead = () => {
+      const liveTime = videoRef.current?.currentTime ?? 0;
+      const liveProgress = timelineDuration > 0
+        ? Math.max(0, Math.min(100, (liveTime / timelineDuration) * 100))
+        : 0;
+      if (progressFillRef.current) progressFillRef.current.style.width = `${liveProgress}%`;
+      if (playheadRef.current) playheadRef.current.style.left = `${liveProgress}%`;
+      if (currentTimeRef.current) currentTimeRef.current.textContent = playerTime(liveTime);
+      animationFrame = window.requestAnimationFrame(refreshPlayhead);
+    };
+    animationFrame = window.requestAnimationFrame(refreshPlayhead);
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [playing, timelineDuration, videoRef]);
+
   const togglePlayback = async () => {
     const video = videoRef.current;
     if (!video) return;
@@ -55,10 +77,12 @@ export function IncidentClipPlayer({ clipUrl, isOriginalVideo = false, noInciden
 
   const seek = (time: number) => {
     if (!videoRef.current) return;
-    videoRef.current.currentTime = Math.max(0, Math.min(timelineDuration, time));
+    const nextTime = Math.max(0, Math.min(timelineDuration, time));
+    videoRef.current.currentTime = nextTime;
+    setCurrentTime(nextTime);
   };
 
-  const seekFromTrack = (event: MouseEvent<HTMLDivElement>) => {
+  const seekFromTrack = (event: PointerEvent<HTMLDivElement>) => {
     if (!timelineDuration) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     seek(((event.clientX - bounds.left) / bounds.width) * timelineDuration);
@@ -83,7 +107,7 @@ export function IncidentClipPlayer({ clipUrl, isOriginalVideo = false, noInciden
             <video
               ref={videoRef}
               playsInline
-              preload="metadata"
+              preload="auto"
               src={clipUrl}
               aria-label={isOriginalVideo ? text("Original video for engineer review", "Video gốc để kỹ sư rà soát") : text("Incident evidence clip", "Video bằng chứng sự cố")}
               onClick={togglePlayback}
@@ -94,21 +118,21 @@ export function IncidentClipPlayer({ clipUrl, isOriginalVideo = false, noInciden
               onPause={() => setPlaying(false)}
               onEnded={() => setPlaying(false)}
             />
-          ) : <div className="clip-empty-state">{!noIncident && <span className="state-spinner" />}<p>{noIncident ? text("AI did not identify an incident. Loading the original video for review…", "AI chưa phát hiện sự cố. Đang tải video gốc để rà soát…") : text("Generating evidence clip...", "Đang tạo video bằng chứng...")}</p></div>}
+          ) : <div className="clip-empty-state">{!noIncident && <span className="state-spinner" />}<p>{noIncident ? text("Loading the original video for review…", "Đang tải video gốc để rà soát…") : text("Generating evidence clip...", "Đang tạo video bằng chứng...")}</p></div>}
         </div>
 
         <div className="refined-clip-controls">
-          <div className="clip-progress-track" onClick={seekFromTrack} role="slider" tabIndex={0} aria-label={text("Video timeline", "Dòng thời gian video")} aria-valuemin={0} aria-valuemax={timelineDuration} aria-valuenow={currentTime}>
-            <span className="clip-progress-fill" style={{ width: `${progress}%` }} />
+          <div className="clip-progress-track" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); seekFromTrack(event); }} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) seekFromTrack(event); }} onPointerUp={(event) => { seekFromTrack(event); event.currentTarget.releasePointerCapture(event.pointerId); }} onKeyDown={(event) => { if (event.key === "ArrowLeft") seek(currentTime - .25); if (event.key === "ArrowRight") seek(currentTime + .25); }} role="slider" tabIndex={0} aria-label={text("Video timeline", "Dòng thời gian video")} aria-valuemin={0} aria-valuemax={timelineDuration} aria-valuenow={currentTime}>
+            <span ref={progressFillRef} className="clip-progress-fill" style={{ width: `${progress}%` }} />
             {markers.map(({ claim, clipTime }) => <button key={claim.claim_id} type="button" className={`clip-evidence-marker ${claim.claim_id === selectedId ? "selected" : ""}`} style={{ left: `${position(clipTime)}%` }} onClick={(event) => { event.stopPropagation(); onSelect(claim); seek(clipTime); }} aria-label={`Seek to ${claim.claim_id} at ${secondsToTimestamp(claim.timestamp_s)}`} title={`${claim.claim_id} · ${secondsToTimestamp(claim.timestamp_s)}`} />)}
             {eventClipTime !== undefined && <button type="button" className="clip-main-event-marker" style={{ left: `${position(eventClipTime)}%` }} onClick={(event) => { event.stopPropagation(); seek(eventClipTime); }} aria-label={`Seek to detected event at ${secondsToTimestamp(focus ?? 0)}`} title={`Detected event · ${secondsToTimestamp(focus ?? 0)}`} />}
-            <i className="clip-playhead" style={{ left: `${progress}%` }} />
+            <i ref={playheadRef} className="clip-playhead" style={{ left: `${progress}%` }} />
           </div>
           <div className="clip-control-row">
             <button type="button" className="clip-play-button" onClick={togglePlayback} disabled={!clipUrl} aria-label={playing ? text("Pause video", "Tạm dừng video") : text("Play video", "Phát video")}>
               {playing ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z" /></svg>}
             </button>
-            <span className="clip-current-time">{playerTime(currentTime)} <i>/</i> {playerTime(timelineDuration)}</span>
+            <span className="clip-current-time"><b ref={currentTimeRef}>{playerTime(currentTime)}</b> <i>/</i> {playerTime(timelineDuration)}</span>
           </div>
         </div>
       </div>

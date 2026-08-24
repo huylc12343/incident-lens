@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "incident_id": "INC_CUT_IN_SEED5_20260809_111228",
   "scenario": "cut_in",
-  "incident_type": "cut_in_collision",
+  "incident_type": "side_collision",
   "seed": 5,
   "severity": "high",
   "timeline": {

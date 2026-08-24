@@ -26,7 +26,7 @@
   {  
      "sample_id": "CARLA_INC_CUT_IN_000011_D4928379_13ADAB0E"  
      "is_incident": true,  
-     "incident_type": "cut_in_collision",  
+     "incident_type": "side_collision",
      "timeline": {  
        "t_start": 10.0,  
        "t0": 10.65,  

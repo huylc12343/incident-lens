@@ -112,6 +112,31 @@ async def test_normalize_video_fits_qwen_base64_limit(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_sample_frames_covers_requested_interval_when_ffmpeg_emits_fewer_frames(tmp_path: Path) -> None:
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    destination = tmp_path / "frames"
+    metadata = NativeVideoMetadata(duration_s=10, width=160, height=90, fps=5, size_bytes=100)
+    service = MediaService()
+    service.probe_video = AsyncMock(return_value=metadata)
+
+    async def emit_three_frames(*args: str) -> tuple[str, str]:
+        output_pattern = Path(args[-1])
+        output_pattern.parent.mkdir(parents=True, exist_ok=True)
+        for index in range(1, 4):
+            (output_pattern.parent / f"frame-{index:06d}.jpg").write_bytes(b"frame")
+        return "", ""
+
+    service._run_command = AsyncMock(side_effect=emit_three_frames)
+    manifest = await service.sample_frames(
+        str(source), str(destination), fps=0.4, width=160, height=90,
+        image_format="jpeg", jpeg_quality=80, max_frames=3, start_s=2, end_s=8,
+    )
+
+    assert [frame.timestamp_s for frame in manifest.frames] == [2, 5, 8]
+
+
+@pytest.mark.asyncio
 async def test_cut_incident_clip_from_real_video(tmp_path: Path) -> None:
     service = MediaService(command_timeout_s=60)
     output = tmp_path / "incident_clip.mp4"

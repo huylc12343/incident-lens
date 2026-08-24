@@ -292,8 +292,13 @@ class MediaService:
         if not frame_paths:
             raise MediaServiceError("FRAME_SAMPLING_FAILED", "ffmpeg did not produce any frames")
         frames = []
+        # ffmpeg may emit one fewer frame than the nominal ``fps * duration``
+        # at a fractional frame rate.  Spread the manifest timestamps over the
+        # requested interval instead of deriving them solely from fps, so a VLM
+        # timestamp at either semantic boundary can always map to an artifact.
+        timestamp_step = duration_s / max(len(frame_paths) - 1, 1)
         for index, path in enumerate(frame_paths):
-            timestamp_s = min(start_s + (index / fps), clip_end)
+            timestamp_s = min(start_s + (index * timestamp_step), clip_end)
             frames.append(
                 TimestampedFrame(
                     frame_id=path.stem,

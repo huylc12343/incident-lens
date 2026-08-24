@@ -115,11 +115,13 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
     const previousUrl = sessionStorage.getItem("vlens:video-url");
     if (previousUrl) URL.revokeObjectURL(previousUrl);
     sessionStorage.setItem("vlens:video-url", URL.createObjectURL(video));
-    try {
-      await saveUploadedVideo(video);
-    } catch {
+    // IndexedDB is only a playback convenience on the review screen. Some
+    // browsers can keep its write transaction pending for a long time (for
+    // example under storage pressure), so it must never block the actual
+    // evidence upload or prevent an incident from being created.
+    void saveUploadedVideo(video).catch(() => {
       // The session object URL above remains available as the playback fallback.
-    }
+    });
     sessionStorage.setItem("vlens:video-name", video.name);
     const incidentId = `INC-${crypto.randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
     try {

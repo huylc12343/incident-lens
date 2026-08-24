@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
+import shutil
 from pathlib import Path
 from typing import Protocol
 
@@ -334,6 +336,11 @@ async def cut_incident_video_node(
             "incident_clip": clip.uri,
             "incident_frames": str(frame_dir),
         }
+        await _materialize_canonical_evidence_frames(
+            memory,
+            canonical_frame_dir=state.get("artifact_uris", {}).get("canonical_evidence_frames"),
+            incident_frame_dir=frame_dir,
+        )
         target_timestamp_s = _representative_timestamp(memory)
         representative = min(frames.frames, key=lambda frame: abs(frame.timestamp_s - target_timestamp_s))
         artifact_uris["representative_frame"] = representative.image_uri
@@ -429,6 +436,31 @@ async def map_canonical_evidence_node(
         }
     except Exception as exc:
         return _failure(getattr(exc, "code", "CANONICAL_EVIDENCE_MAPPING_FAILED"), str(exc))
+
+
+async def _materialize_canonical_evidence_frames(
+    memory: VideoMemory,
+    *,
+    canonical_frame_dir: str | None,
+    incident_frame_dir: Path,
+) -> None:
+    """Copy canonical evidence under stable IDs into the review-frame directory."""
+    if not canonical_frame_dir:
+        return
+    source_dir = Path(canonical_frame_dir)
+    if not source_dir.is_dir():
+        return
+    evidence_ids = {
+        evidence.evidence_id for claim in memory.claims for evidence in claim.evidence
+    } | {evidence_id for event in memory.timeline for evidence_id in event.evidence_ids}
+    for evidence_id in evidence_ids:
+        for extension in (".jpg", ".png"):
+            source = source_dir / f"{evidence_id}{extension}"
+            if source.is_file():
+                destination = incident_frame_dir / source.name
+                if source.resolve() != destination.resolve():
+                    await asyncio.to_thread(shutil.copy2, source, destination)
+                break
 
 
 def _restore_claim_verification_statuses(
@@ -1277,11 +1309,17 @@ def _fallback_accident_type(memory: VideoMemory) -> AccidentType:
         term in text
         for term in ("lan can", "guardrail", "hàng rào", "tường", "cây", "cột", "rời đường", "roadside")
     ):
-        return AccidentType.ENVIRONMENT_COLLISION
+        return AccidentType.ROADSIDE_COLLISION
     if any(term in text for term in ("barrier", "vật cản", "static object")):
-        return AccidentType.ENVIRONMENT_COLLISION
+        return AccidentType.STATIC_OBJECT_COLLISION
+    if any(term in text for term in ("đối đầu", "ngược chiều", "head-on", "head on")):
+        return AccidentType.HEAD_ON_COLLISION
+    if any(term in text for term in ("nhập làn", "đổi làn", "cùng hướng", "bên hông", "cut-in", "cut in")):
+        return AccidentType.SIDE_COLLISION
+    if any(term in text for term in ("đâm đuôi", "phía sau", "rear-end", "rear end")):
+        return AccidentType.REAR_END_COLLISION
     if any(term in text for term in ("xe", "phương tiện", "vehicle", "car", "truck", "motorcycle")):
-        return AccidentType.VEHICLE_COLLISION
+        return AccidentType.OTHER_UNKNOWN
     return AccidentType.OTHER_UNKNOWN
 
 

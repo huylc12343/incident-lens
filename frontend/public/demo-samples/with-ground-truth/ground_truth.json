@@ -3,7 +3,7 @@
   "sample_id": "CARLA_INC_CUT_IN_000001_CC42DD4D_4D0D1FB0",
   "label_provenance": "carla_simulator",
   "is_incident": true,
-  "incident_type": "cut_in_collision",
+  "incident_type": "side_collision",
   "severity": "high",
   "timeline": {
     "t_start": 10.0,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import shutil
 from collections.abc import Awaitable, Callable
@@ -21,6 +22,28 @@ from src.models.api import (
 from src.models.incidents import VerificationStatus
 from src.services.model_observability import ModelActivityRegistry
 from src.services.report_repository import ReportRepository, ReportRepositoryError
+
+
+# Uvicorn configures this logger to stdout, so transitions are visible through
+# `docker compose logs -f` without requiring an additional logging setup.
+logger = logging.getLogger("uvicorn.error")
+
+
+def _log_transition(
+    incident_id: str,
+    previous_status: str | None,
+    next_status: str,
+    *,
+    event: str,
+) -> None:
+    """Emit a queryable workflow state transition in the container log."""
+    logger.info(
+        "workflow_transition incident_id=%s event=%s from_status=%s to_status=%s",
+        incident_id,
+        event,
+        previous_status or "none",
+        next_status,
+    )
 
 
 class WorkflowError(RuntimeError):
@@ -100,6 +123,7 @@ class WorkflowService:
             ):
                 raise WorkflowError("INCIDENT_ALREADY_EXISTS", "incident ID already exists")
             self._states[incident_id] = initial
+            _log_transition(incident_id, None, "queued", event="enqueued")
             self._review_locks[incident_id] = asyncio.Lock()
             self._audit[incident_id] = []
             task = asyncio.create_task(self._run_enqueued(initial), name=f"incident:{incident_id}")
@@ -111,10 +135,12 @@ class WorkflowService:
         incident_id = initial["incident_id"]
         running = {**initial, "status": "running"}
         self._states[incident_id] = running
+        _log_transition(incident_id, "queued", "running", event="background_started")
         try:
             result = await self._runner.start(running)
             state = _without_legacy_claim_projection({**running, **result})
             self._snapshot(state)
+            _log_transition(incident_id, "running", str(state.get("status")), event="background_finished")
         except Exception as exc:
             state = {
                 **running,
@@ -122,6 +148,7 @@ class WorkflowService:
                 "error_code": getattr(exc, "code", "WORKFLOW_EXECUTION_FAILED"),
                 "error_message": str(exc) or "incident workflow failed",
             }
+            _log_transition(incident_id, "running", "failed", event="background_failed")
         self._states[incident_id] = state
 
     async def create(self, request: IncidentCreateRequest) -> IncidentSnapshot:
@@ -300,6 +327,12 @@ class WorkflowService:
                 self._commit_review(incident_id, updated, decision, stored.stored_at)
             else:
                 self._commit_review(incident_id, updated, decision)
+            _log_transition(
+                incident_id,
+                str(state.get("status")),
+                str(updated.get("status")),
+                event=f"review_{decision.action}",
+            )
             return self._snapshot(updated)
 
     def _commit_review(

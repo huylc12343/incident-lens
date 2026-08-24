@@ -53,8 +53,8 @@ def test_report_prompt_requests_accident_assessment_and_taxonomy() -> None:
     assert "has_accident: quyết định có hay không có tai nạn" in prompt.text
     assert "claims[].verification" in prompt.text
     assert "claims + video_evidence + timeline" in prompt.text
-    assert "vehicle_collision" in prompt.text
-    assert "environment_collision" in prompt.text
+    assert "side_collision" in prompt.text
+    assert "static_object_collision" in prompt.text
     assert "no_incident" in prompt.text
     assert "other_unknown" in prompt.text
     assert "Nếu type_of_accident=no_incident" in prompt.text

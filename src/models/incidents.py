@@ -30,24 +30,15 @@ class VerificationStatus(StrEnum):
 
 
 class AccidentType(StrEnum):
-    VEHICLE_COLLISION = "vehicle_collision"
+    REAR_END_COLLISION = "rear_end_collision"
     CROSSING_COLLISION = "crossing_collision"
+    SIDE_COLLISION = "side_collision"
+    HEAD_ON_COLLISION = "head_on_collision"
     PEDESTRIAN_COLLISION = "pedestrian_collision"
-    ENVIRONMENT_COLLISION = "environment_collision"
+    STATIC_OBJECT_COLLISION = "static_object_collision"
+    ROADSIDE_COLLISION = "roadside_collision"
     NO_INCIDENT = "no_incident"
     OTHER_UNKNOWN = "other_unknown"
-
-    @classmethod
-    def _missing_(cls, value: object) -> AccidentType | None:
-        """Map stored reports created with the previous, more granular taxonomy."""
-        legacy_values = {
-            "rear_end_collision": cls.VEHICLE_COLLISION,
-            "side_collision": cls.VEHICLE_COLLISION,
-            "head_on_collision": cls.VEHICLE_COLLISION,
-            "static_object_collision": cls.ENVIRONMENT_COLLISION,
-            "roadside_collision": cls.ENVIRONMENT_COLLISION,
-        }
-        return legacy_values.get(value) if isinstance(value, str) else None
 
 
 class PromptSource(StrEnum):

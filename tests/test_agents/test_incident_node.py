@@ -320,6 +320,68 @@ async def test_cut_incident_video_node_creates_clip_and_frames(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
+async def test_cut_incident_video_copies_canonical_evidence_frames_for_review(tmp_path: Path) -> None:
+    memory = _memory(AnalysisMode.NATIVE_VIDEO, 2).model_copy(
+        update={
+            "claims": [
+                Claim(
+                    claim_id="claim-1",
+                    text="Vehicle collides.",
+                    evidence=[EvidenceReference(evidence_id="frame-000045", timestamp_s=1)],
+                )
+            ]
+        }
+    )
+    canonical_dir = tmp_path / "canonical_evidence_frames"
+    canonical_dir.mkdir()
+    canonical_frame = canonical_dir / "frame-000045.jpg"
+    canonical_frame.write_bytes(b"canonical evidence")
+    review_frame = tmp_path / "review-frame.jpg"
+    review_frame.write_bytes(b"review sample")
+    (tmp_path / "INC-EVIDENCE-COPY" / "incident_frames").mkdir(parents=True)
+    clip = NormalizedVideoArtifact(
+        uri=str(tmp_path / "incident_clip.mp4"),
+        metadata=NativeVideoMetadata(duration_s=2, width=160, height=90, fps=5, size_bytes=100),
+    )
+    manifest = VideoSequenceManifest(
+        source_video_uri="video.mp4",
+        duration_s=2,
+        frames=[
+            TimestampedFrame(
+                frame_id="frame-000001",
+                sequence_index=0,
+                timestamp_s=1,
+                delta_from_previous_s=0,
+                image_uri=str(review_frame),
+            )
+        ],
+    )
+    media = SimpleNamespace(
+        cut_incident_clip=AsyncMock(return_value=clip),
+        sample_frames=AsyncMock(return_value=manifest),
+    )
+    workflow = VideoMemoryWorkflow(
+        vlm=_service(VLMInputMode.NATIVE_VIDEO, memory),
+        config=VideoMemoryWorkflowConfig(artifact_dir=str(tmp_path)),
+    )
+
+    result = await cut_incident_video_node(
+        {
+            "incident_id": "INC-EVIDENCE-COPY",
+            "video_uri": "video.mp4",
+            "video_memory": memory,
+            "canonical_evidence_mapped": True,
+            "artifact_uris": {"canonical_evidence_frames": str(canonical_dir)},
+        },
+        media=media,
+        workflow=workflow,
+    )
+
+    copied = Path(result["artifact_uris"]["incident_frames"]) / "frame-000045.jpg"
+    assert copied.read_bytes() == b"canonical evidence"
+
+
+@pytest.mark.asyncio
 async def test_cut_incident_video_requires_a_representative_frame_before_review(tmp_path: Path) -> None:
     memory = _memory(AnalysisMode.SINGLE_REQUEST, 2)
     clip = NormalizedVideoArtifact(
@@ -1449,7 +1511,7 @@ async def test_draft_report_falls_back_to_vlm_video_summary() -> None:
 
     assert result["status"] == "running"
     assert result["draft_report"].summary == memory.video_summary
-    assert result["draft_report"].type_of_accident == "vehicle_collision"
+    assert result["draft_report"].type_of_accident == "other_unknown"
     assert result["draft_report"].alignment.verification is None
     assert any("report model unavailable" in warning for warning in result["warnings"])
 
@@ -1497,7 +1559,7 @@ async def test_draft_report_uses_code_log_summary_and_verification_alignment() -
         warnings=["TAKEOVER"],
     )
     narrative = ReportModelOutput(
-        type_of_accident="vehicle_collision",
+        type_of_accident="side_collision",
         incident_window=memory.incident_window,
         representative_timestamp_s=memory.incident_window.t0,
         timeline="Timeline.",
@@ -1519,7 +1581,7 @@ async def test_draft_report_uses_code_log_summary_and_verification_alignment() -
     )
 
     draft = result["draft_report"]
-    assert draft.type_of_accident == "vehicle_collision"
+    assert draft.type_of_accident == "side_collision"
     assert draft.summary == memory.global_scene
     assert draft.log_findings.narrative == log_summary.summary
     assert "claim-1 được log hỗ trợ" in draft.alignment.narrative
@@ -1542,7 +1604,7 @@ async def test_draft_report_can_correct_default_vlm_incident_window() -> None:
         analysis_mode=AnalysisMode.SINGLE_REQUEST,
     )
     narrative = ReportModelOutput(
-        type_of_accident="environment_collision",
+        type_of_accident="static_object_collision",
         incident_window=IncidentWindow(t_start=25, t0=27, t_end=29),
         representative_timestamp_s=27,
         timeline="Xe tiếp cận, va chạm rồi dừng lại.",
@@ -1611,7 +1673,7 @@ async def test_cut_after_report_uses_report_corrected_incident_window(tmp_path: 
     report = SimpleNamespace(
         build_narrative=AsyncMock(
             return_value=ReportModelOutput(
-                type_of_accident="environment_collision",
+                type_of_accident="static_object_collision",
                 incident_window=IncidentWindow(t_start=25, t0=27, t_end=29),
                 representative_timestamp_s=27,
                 timeline="Xe va chạm rồi dừng lại.",

@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "annotation_id": "ANN_CUT_IN_SEED5_20260809_111228",
   "incident_id": "INC_CUT_IN_SEED5_20260809_111228",
-  "label": "cut_in_collision",
+  "label": "side_collision",
   "severity": "high",
   "review_status": "confirmed",
   "summary": "A vehicle in the adjacent lane was traveling close to Ego, then abruptly cut into Ego's lane with a very small gap. A collision occurred.",

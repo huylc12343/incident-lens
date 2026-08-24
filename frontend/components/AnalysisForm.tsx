@@ -60,6 +60,16 @@ async function loadDemoFile(path: string, name: string, type: string) {
   return new File([await response.blob()], name, { type });
 }
 
+function createIncidentId() {
+  const bytes = new Uint8Array(6);
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    crypto.getRandomValues(bytes);
+    return `INC-${Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("").toUpperCase()}`;
+  }
+  const fallback = `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+  return `INC-${fallback.slice(0, 12).toUpperCase()}`;
+}
+
 export function AnalysisForm({ highlighted = false }: { highlighted?: boolean }) {
   const router = useRouter();
   const [video, setVideo] = useState<File | null>(null);
@@ -112,20 +122,19 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
     if (!ready || !video || submitting) return;
     setSubmitting(true);
     setError("");
-    const previousUrl = sessionStorage.getItem("vlens:video-url");
-    if (previousUrl) URL.revokeObjectURL(previousUrl);
-    sessionStorage.setItem("vlens:video-url", URL.createObjectURL(video));
-    // IndexedDB is only a playback convenience on the review screen. Some
-    // browsers can keep its write transaction pending for a long time (for
-    // example under storage pressure), so it must never block the actual
-    // evidence upload or prevent an incident from being created.
-    void saveUploadedVideo(video).catch(() => {
-      // The session object URL above remains available as the playback fallback.
-    });
-    sessionStorage.setItem("vlens:video-name", video.name);
-    const incidentId = `INC-${crypto.randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
     try {
+      const previousUrl = sessionStorage.getItem("vlens:video-url");
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
+      sessionStorage.setItem("vlens:video-url", URL.createObjectURL(video));
+      sessionStorage.setItem("vlens:video-name", video.name);
+      const incidentId = createIncidentId();
       const uploaded = await uploadIncident(video, telemetry[0], groundTruth ?? undefined);
+      // Start the optional IndexedDB playback cache only after fetch has
+      // finished reading the File. Concurrent IndexedDB and multipart reads of
+      // the same Blob can stall indefinitely in some browsers.
+      void saveUploadedVideo(video).catch(() => {
+        // The session object URL above remains available as the playback fallback.
+      });
       const snapshot = await createIncident({
         incident_id: incidentId,
         video_uri: uploaded.video_uri,

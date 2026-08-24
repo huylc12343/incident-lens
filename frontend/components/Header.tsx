@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { clearDemoSession } from "../lib/auth";
+import { getAiSettings, saveAiSettings, type AiSettings } from "../lib/settingsApi";
 import { uiText as text } from "../lib/ui-copy";
 const Icon = ({ children }: { children: React.ReactNode }) => (
   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -20,6 +21,13 @@ export function Header({
   const router = useRouter();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLightOptionDark, setIsLightOptionDark] = useState(false);
+  const [isAiSettingsOpen, setIsAiSettingsOpen] = useState(false);
+  const [aiSettings, setAiSettings] = useState<AiSettings | null>(null);
+  const [openAiKey, setOpenAiKey] = useState("");
+  const [dashscopeKey, setDashscopeKey] = useState("");
+  const [langsmithKey, setLangsmithKey] = useState("");
+  const [settingsMessage, setSettingsMessage] = useState("");
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
 
   useEffect(() => {
     if (!isSettingsOpen) return;
@@ -36,6 +44,35 @@ export function Header({
     clearDemoSession();
     setIsSettingsOpen(false);
     router.replace("/login");
+  };
+
+  const loadAiSettings = async () => {
+    setSettingsMessage("");
+    try { setAiSettings(await getAiSettings()); }
+    catch (error) { setSettingsMessage(error instanceof Error ? error.message : "Không thể tải cấu hình AI."); }
+  };
+
+  const saveSettings = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!aiSettings) return;
+    setIsSavingSettings(true);
+    setSettingsMessage("");
+    try {
+      await saveAiSettings({
+        model_name: aiSettings.model_name,
+        qwen_vlm_model_name: aiSettings.qwen_vlm_model_name,
+        verification_model_name: aiSettings.verification_model_name,
+        report_model_name: aiSettings.report_model_name,
+        langsmith_project: aiSettings.langsmith_project,
+        langsmith_tracing: aiSettings.langsmith_tracing,
+        openai_api_key: openAiKey || undefined,
+        dashscope_api_key: dashscopeKey || undefined,
+        langsmith_api_key: langsmithKey || undefined,
+      });
+      setOpenAiKey(""); setDashscopeKey(""); setLangsmithKey("");
+      setSettingsMessage("Đã lưu. Khởi động lại backend để áp dụng model và API key mới.");
+    } catch (error) { setSettingsMessage(error instanceof Error ? error.message : "Không thể lưu cấu hình AI."); }
+    finally { setIsSavingSettings(false); }
   };
 
   return (
@@ -102,6 +139,31 @@ export function Header({
               </button>
             </div>
             <div className="settings-modal-options">
+              <button className="settings-ai-option" type="button" onClick={() => setIsAiSettingsOpen((current) => !current)}>
+                {text("AI configuration", "Cấu hình AI")}
+              </button>
+              {isAiSettingsOpen && (
+                <form className="ai-settings-form" onSubmit={saveSettings}>
+                  <p>API key chỉ được gửi tới backend để lưu trong Docker volume; không hiển thị lại sau khi lưu.</p>
+                  {!aiSettings ? (
+                    <button type="button" onClick={loadAiSettings}>Tải cấu hình</button>
+                  ) : (
+                    <>
+                      <label>OpenAI API key <small>{aiSettings.openai_api_key_configured ? "Đã cấu hình" : "Chưa cấu hình"}</small><input type="password" value={openAiKey} onChange={(event) => setOpenAiKey(event.target.value)} placeholder="Giữ nguyên nếu để trống" autoComplete="new-password" /></label>
+                      <label>DashScope API key <small>{aiSettings.dashscope_api_key_configured ? "Đã cấu hình" : "Chưa cấu hình"}</small><input type="password" value={dashscopeKey} onChange={(event) => setDashscopeKey(event.target.value)} placeholder="Giữ nguyên nếu để trống" autoComplete="new-password" /></label>
+                      <label>LangSmith API key <small>{aiSettings.langsmith_api_key_configured ? "Đã cấu hình" : "Chưa cấu hình"}</small><input type="password" value={langsmithKey} onChange={(event) => setLangsmithKey(event.target.value)} placeholder="Tuỳ chọn — chỉ dùng tracing" autoComplete="new-password" /></label>
+                      <label>Qwen VLM (phân tích video)<select value={aiSettings.qwen_vlm_model_name} onChange={(event) => setAiSettings({ ...aiSettings, qwen_vlm_model_name: event.target.value })}><option value="qwen3-vl-flash">qwen3-vl-flash</option><option value="qwen3-vl-plus">qwen3-vl-plus</option></select></label>
+                      <label>OpenAI LLM (verification)<select value={aiSettings.verification_model_name} onChange={(event) => setAiSettings({ ...aiSettings, verification_model_name: event.target.value })}><option value="gpt-4o-mini">gpt-4o-mini</option><option value="gpt-4.1-mini">gpt-4.1-mini</option><option value="gpt-4o">gpt-4o</option><option value="gpt-5-mini">gpt-5-mini</option></select></label>
+                      <label>OpenAI LLM (report)<select value={aiSettings.report_model_name} onChange={(event) => setAiSettings({ ...aiSettings, report_model_name: event.target.value })}><option value="gpt-4o-mini">gpt-4o-mini</option><option value="gpt-4.1-mini">gpt-4.1-mini</option><option value="gpt-4o">gpt-4o</option><option value="gpt-5-mini">gpt-5-mini</option></select></label>
+                      <label>General OpenAI model<input value={aiSettings.model_name} onChange={(event) => setAiSettings({ ...aiSettings, model_name: event.target.value })} /></label>
+                      <label>LangSmith project<input value={aiSettings.langsmith_project} onChange={(event) => setAiSettings({ ...aiSettings, langsmith_project: event.target.value })} /></label>
+                      <label className="ai-settings-checkbox"><input type="checkbox" checked={aiSettings.langsmith_tracing} onChange={(event) => setAiSettings({ ...aiSettings, langsmith_tracing: event.target.checked })} /> Bật LangSmith tracing</label>
+                      <button type="submit" disabled={isSavingSettings}>{isSavingSettings ? "Đang lưu…" : "Lưu cấu hình AI"}</button>
+                    </>
+                  )}
+                  {settingsMessage && <p className="ai-settings-message" role="status">{settingsMessage}</p>}
+                </form>
+              )}
               <button className="settings-support-option" type="button">{text("Support", "Hỗ trợ")}</button>
               <button className="settings-history-option" type="button">{text("History", "Lịch sử")}</button>
               <button

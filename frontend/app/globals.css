@@ -1335,6 +1335,18 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
     background: #fecaca;
 }
 
+.settings-modal { max-height: min(88vh, 760px); overflow-y: auto; }
+.settings-modal-options .settings-ai-option { width: 190px; border-color: #a7c5eb; background: #e8f1ff; color: #1d4f91; }
+.ai-settings-form { display: grid; width: min(330px, 100%); gap: 10px; padding: 4px 0 8px; }
+.ai-settings-form > p { margin: 0; color: #475467; font-size: 12px; line-height: 1.45; text-align: left; }
+.ai-settings-form label { display: grid; gap: 4px; color: #344054; font-size: 12px; font-weight: 700; text-align: left; }
+.ai-settings-form label small { color: #667085; font-weight: 500; }
+.ai-settings-form input, .ai-settings-form select { width: 100%; box-sizing: border-box; padding: 9px 10px; border: 1px solid #b9bec8; border-radius: 7px; background: #fff; color: #1d2939; font: inherit; }
+.ai-settings-form .ai-settings-checkbox { display: flex; align-items: center; gap: 8px; }
+.ai-settings-form .ai-settings-checkbox input { width: auto; }
+.ai-settings-form button { width: 100%; }
+.ai-settings-form .ai-settings-message { color: #155e75; font-weight: 700; }
+
 /* Keep the product typography consistent across every UI surface. */
 body * {
     font-family: Manrope, Arial, sans-serif !important;

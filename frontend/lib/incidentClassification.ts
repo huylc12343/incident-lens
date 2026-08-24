@@ -14,6 +14,12 @@ const containsAny = (text: string, phrases: string[]) => phrases.some((phrase) =
 
 export function classifyIncidentForDisplay(snapshot: IncidentSnapshot | null): DisplayIncidentClassification {
   if (!snapshot) return { type: "Phân tích sự cố", severity: "Chưa xác định" };
+  // A queued/running snapshot has no final classification yet. In particular,
+  // an empty claims array is expected while evidence frames and the review clip
+  // are being generated, so it must not be presented as "no incident".
+  if (["queued", "running"].includes(snapshot.status)) {
+    return { type: "Đang tạo video bằng chứng…", severity: "Đang phân tích" };
+  }
 
   const source = normalize([snapshot.video_summary, ...snapshot.claims.map((claim) => claim.text)].join(" "));
   const collisionDenied = containsAny(source, [

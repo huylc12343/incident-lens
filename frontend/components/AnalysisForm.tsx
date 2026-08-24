@@ -103,6 +103,16 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
     if (!ready || !video || submitting) return;
     setSubmitting(true);
     setError("");
+    const previousUrl = sessionStorage.getItem("vlens:video-url");
+    if (previousUrl) URL.revokeObjectURL(previousUrl);
+    sessionStorage.setItem("vlens:video-url", URL.createObjectURL(video));
+    // Local persistence is a playback convenience only. Do not await it:
+    // an IndexedDB transaction may remain pending and must not block upload.
+    void saveUploadedVideo(video).catch(() => {
+      // The session object URL remains available as the playback fallback.
+    });
+    sessionStorage.setItem("vlens:video-name", video.name);
+    const incidentId = createIncidentId();
     try {
       const uploaded = await uploadIncident(video, telemetry[0]);
       const snapshot = await createIncident({

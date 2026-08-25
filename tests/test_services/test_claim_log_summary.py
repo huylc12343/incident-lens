@@ -478,3 +478,88 @@ def test_extreme_acceleration_is_preserved_in_claim_summary(tmp_path) -> None:
     assert speed["max_deceleration"] == pytest.approx(-27.777778)
     assert "-27.777" in summary.summary
     assert "Đã loại" not in summary.summary
+
+
+def _write_dynamic_log(path) -> None:
+    """A calm run, then a hard right steering jump held from 2.0s to 2.4s."""
+    rows = ["timestamp_s,speed_kmh,throttle,brake,steer"]
+    rows.extend(f"{index / 10:.1f},40,0.5,0.0,0.0" for index in range(20))
+    rows.extend(f"{(20 + index) / 10:.1f},40,0.5,0.0,0.38" for index in range(5))
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+
+def test_claim_dynamic_hints_carry_numeric_values_for_the_covering_claim(tmp_path) -> None:
+    log = tmp_path / "dynamic.csv"
+    _write_dynamic_log(log)
+
+    _, contexts = build_claim_verification_inputs(
+        str(log),
+        [Claim(claim_id="turn", text="Xe đánh lái sang phải", timestamp_s=2.0)],
+        timestamp_tolerance_s=0.2,
+    )
+
+    hints = contexts[0].dynamic_hints
+    assert [hint.signal for hint in hints] == ["steer"]
+    hint = hints[0]
+    assert hint.start_s <= 2.0 <= hint.end_s
+    # Unlike the VLM hint, the verification hint exposes the peak telemetry value.
+    assert hint.value == pytest.approx(0.38)
+    assert "trong khoảng " in hint.text
+    assert "góc đánh lái thay đổi bất thường sang phải" in hint.text
+
+
+def test_claim_dynamic_hints_skip_claims_outside_the_interval(tmp_path) -> None:
+    log = tmp_path / "dynamic.csv"
+    _write_dynamic_log(log)
+
+    _, contexts = build_claim_verification_inputs(
+        str(log),
+        [
+            Claim(claim_id="early", text="Xe đi thẳng", timestamp_s=0.5),
+            Claim(claim_id="turn", text="Xe đánh lái sang phải", timestamp_s=2.0),
+        ],
+        timestamp_tolerance_s=0.2,
+    )
+
+    # Only the claim whose timestamp the interval covers receives the hint.
+    assert contexts[0].dynamic_hints == []
+    assert [hint.signal for hint in contexts[1].dynamic_hints] == ["steer"]
+
+
+def test_claim_dynamic_hints_use_the_claim_sampling_window_not_strict_containment(tmp_path) -> None:
+    log = tmp_path / "dynamic.csv"
+    _write_dynamic_log(log)
+
+    # sample_radius is a row count; at 0.1s per row a radius of 30 spans +/- 3.0s.
+    _, contexts = build_claim_verification_inputs(
+        str(log),
+        [Claim(claim_id="turn", text="Xe đánh lái sang phải", timestamp_s=1.2)],
+        timestamp_tolerance_s=0.2,
+        sample_radius=30,
+    )
+
+    # The claim timestamp sits outside the steering interval, but the whole interval sits inside
+    # the claim window, so the hint still belongs to this claim.
+    hints = contexts[0].dynamic_hints
+    assert [hint.signal for hint in hints] == ["steer"]
+    assert not hints[0].start_s <= 1.2 <= hints[0].end_s
+
+
+def test_claim_dynamic_hints_require_most_of_the_interval_inside_the_window(tmp_path) -> None:
+    log = tmp_path / "dynamic.csv"
+    _write_dynamic_log(log)
+
+    def hints_for(sample_radius: int) -> list[str]:
+        _, contexts = build_claim_verification_inputs(
+            str(log),
+            [Claim(claim_id="before", text="Xe đi thẳng", timestamp_s=1.7)],
+            timestamp_tolerance_s=0.2,
+            sample_radius=sample_radius,
+        )
+        return [hint.signal for hint in contexts[0].dynamic_hints]
+
+    # The interval spans 1.85-2.15s. A +/-0.2s window overlaps a sixth of it and a +/-0.3s window
+    # exactly half, neither of which clears the "more than half" rule; +/-0.4s overlaps five sixths.
+    assert hints_for(2) == []
+    assert hints_for(3) == []
+    assert hints_for(4) == ["steer"]

@@ -50,8 +50,9 @@ def build_video_analysis_prompt(
             # =========================================================
             # 2. ANALYSIS PROCEDURE & ATTENTION HINT
             # =========================================================
-            "Nếu user context có log_attention_hint, dùng các timestamp đó để ưu tiên xem kỹ vùng trước–tại–sau "
-            "mốc được gợi ý. Hint chỉ là vị trí cần chú ý, không phải evidence; chỉ ghi sự kiện nếu video thực sự hỗ trợ.",
+            "Nếu user context có log_attention_hint, mỗi dòng hint là một KHOẢNG thời gian dạng 'trong khoảng Xs–Ys'. "
+            "Xem kỹ toàn bộ khoảng đó cùng vùng ngay trước và ngay sau, không chỉ một frame. Hint chỉ là vị trí cần "
+            "chú ý, không phải evidence; chỉ ghi sự kiện nếu video thực sự hỗ trợ.",
 
             "Bắt buộc xem toàn bộ video theo thứ tự thời gian đến kết cục cuối cùng. Trước tiên nhận diện các vùng "
             "bất thường hoặc được hint, sau đó xem kỹ chuỗi trước–tại–sau các vùng đó rồi mới kết luận. "

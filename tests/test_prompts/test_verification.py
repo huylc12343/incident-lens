@@ -41,7 +41,7 @@ def test_verification_system_prompt_matches_approved_text_exactly() -> None:
     )
 
     assert sha256(prompt.text.encode("utf-8")).hexdigest() == (
-        "dddc7af3e3f3f4a6f384b3150a55e5880b5b59af2c09d5f68e0c305eb1dca4bd"
+        "b0c2bec37ecdd8edeb76fcd47fa4bb6349790c8f01453346732dd56fda308f55"
     )
 
 
@@ -247,3 +247,35 @@ def test_verification_rejects_duplicate_claim_ids() -> None:
             ],
             timestamp_tolerance_s=0.5,
         )
+
+
+def test_verification_prompt_sends_claim_scoped_dynamic_hints(tmp_path) -> None:
+    log = tmp_path / "dynamic-hints.csv"
+    rows = ["timestamp_s,speed_kmh,throttle,brake,steer"]
+    rows.extend(f"{index / 10:.1f},40,0.5,0.0,0.0" for index in range(20))
+    rows.extend(f"{(20 + index) / 10:.1f},40,0.5,0.0,0.38" for index in range(5))
+    log.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    claims = [
+        Claim(claim_id="straight", text="Xe đi thẳng", timestamp_s=0.5),
+        Claim(claim_id="turn", text="Xe đánh lái sang phải", timestamp_s=2.0),
+    ]
+    summaries, compact_contexts = build_claim_verification_inputs(
+        str(log),
+        claims,
+        timestamp_tolerance_s=0.2,
+    )
+
+    prompt = build_verification_prompt(
+        claims=claims,
+        claim_log_summaries=summaries,
+        claim_verification_contexts=compact_contexts,
+        timestamp_tolerance_s=0.2,
+    )
+    straight, turn = prompt.context["verification_items"]
+
+    assert straight["log_facts"]["dynamic_hints"] == []
+    hints = turn["log_facts"]["dynamic_hints"]
+    assert [hint["signal"] for hint in hints] == ["steer"]
+    assert hints[0]["value"] == pytest.approx(0.38)
+    assert hints[0]["start_s"] <= 2.0 <= hints[0]["end_s"]
+    assert "dynamic_hints" in prompt.text

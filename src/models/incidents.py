@@ -358,12 +358,32 @@ class ClaimDerivedDynamics(ContractModel):
     )
 
 
+DynamicHintSignal = Literal["throttle", "brake", "steer", "acceleration"]
+
+
+class ClaimDynamicHint(ContractModel):
+    """One anomalous telemetry interval overlapping a claim timestamp, with its peak value."""
+
+    signal: DynamicHintSignal
+    start_s: float = Field(ge=0)
+    end_s: float = Field(ge=0)
+    text: str = Field(min_length=1)
+    value: float
+
+    @model_validator(mode="after")
+    def validate_window(self) -> ClaimDynamicHint:
+        if self.end_s < self.start_s:
+            raise ValueError("dynamic hint must satisfy start_s <= end_s")
+        return self
+
+
 class ClaimVerificationContext(ContractModel):
     claim_id: str = Field(min_length=1)
     available_signals: list[TelemetrySignalName] = Field(default_factory=list)
     raw_telemetry: ClaimRawTelemetry
     derived: ClaimTelemetryDerived
     derived_dynamics: ClaimDerivedDynamics = Field(default_factory=ClaimDerivedDynamics)
+    dynamic_hints: list[ClaimDynamicHint] = Field(default_factory=list)
     allowed_evidence_ids: list[str] = Field(default_factory=list, max_length=5)
 
 

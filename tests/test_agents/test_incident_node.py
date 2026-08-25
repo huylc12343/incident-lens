@@ -154,10 +154,11 @@ async def test_analyze_video_node_adds_qualitative_log_attention_hint(tmp_path: 
 
     context = service.analyze_video.await_args.args[0].prompt.context
     hint = context["log_attention_hint"]
-    assert "Tại giây thứ 6.0" in hint
-    assert "ga tăng bất thường so với diễn biến gần đó" in hint
-    assert "phanh tăng bất thường so với diễn biến gần đó" in hint
-    assert "gia tốc giảm bất thường so với diễn biến gần đó" in hint
+    assert "Trong khoảng " in hint
+    assert "ga tăng bất thường" in hint
+    assert "phanh tăng bất thường" in hint
+    assert "gia tốc giảm bất thường" in hint
+    assert "Tại giây thứ" not in hint
     assert "-6.0" not in hint
     assert "0.5" not in hint
 

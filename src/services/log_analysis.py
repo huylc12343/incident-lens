@@ -6,7 +6,7 @@ import csv
 import math
 from collections import deque
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
@@ -14,12 +14,14 @@ from src.models.incidents import (
     Claim,
     ClaimDerivedDynamics,
     ClaimDerivedDynamicsMetric,
+    ClaimDynamicHint,
     ClaimLogEvidence,
     ClaimLogSummary,
     ClaimRawTelemetry,
     ClaimTelemetryDerived,
     ClaimTelemetrySnapshot,
     ClaimVerificationContext,
+    DynamicHintSignal,
     LogAnalysisResult,
     LogEvent,
     LogEvidenceSummary,
@@ -70,7 +72,23 @@ ADAPTIVE_MERGE_GAP_SAMPLES = 1
 ADAPTIVE_MIN_SCALE = 0.1
 ADAPTIVE_ACCELERATION_MIN_SCALE = 1.0
 ROBUST_SCALE_NORMALIZER = 1.4826
-MAX_LOG_ATTENTION_TIMESTAMPS = 8
+MAX_LOG_ATTENTION_TIMESTAMPS = 12
+# Trần số interval cho mỗi tín hiệu, để một kênh nhiễu không chiếm hết chỗ của kênh khác.
+MAX_INTERVALS_PER_SIGNAL = 4
+# Hai đợt cùng tín hiệu và cùng hướng cách nhau dưới ngưỡng này được gộp thành một interval.
+MERGE_GAP_S = 0.3
+# Interval ngắn hơn ngưỡng này được coi là spike và mở rộng thành cửa sổ tối thiểu.
+MIN_INTERVAL_S = 0.2
+# Nửa bề rộng cửa sổ tối thiểu, mở đối xứng quanh điểm peak của spike.
+MIN_INTERVAL_PAD_S = 0.15
+# Biến thiên nhỏ hơn ngưỡng này coi như đứng yên khi gom pha chuyển tiếp.
+TRANSITION_EPSILON = 1e-6
+# Số mẫu đứng yên tối đa được phép nằm giữa một pha chuyển tiếp mà không cắt pha.
+TRANSITION_MAX_GAP_SAMPLES = 2
+# Số mẫu tối thiểu để một đoạn gia tốc vượt ngưỡng vật lý được coi là pha kéo dài.
+SUSTAINED_MIN_SAMPLES = 2
+# Phần interval phải nằm trong cửa sổ quanh claim thì hint mới được gắn vào claim đó.
+MIN_CLAIM_HINT_OVERLAP_RATIO = 0.5
 PHYSICAL_MIN_BRAKE_RISE = 0.3
 PHYSICAL_MIN_THROTTLE_DELTA = 0.2
 PHYSICAL_MIN_BRAKE_DELTA_FOR_HINT = 0.5
@@ -126,6 +144,37 @@ class AdaptiveChange:
     peak_z_score: float
     previous_value: float
     value: float
+
+
+@dataclass(frozen=True)
+class AdaptiveObservation:
+    """One sample scored against its rolling baseline, before episodes are assembled."""
+
+    index: int
+    score: float
+    direction: Literal[-1, 1]
+    previous_value: float
+    value: float
+    baseline_ready: bool
+
+
+@dataclass(frozen=True)
+class SignalInterval:
+    """An anomalous stretch of one signal, kept as a time window instead of a single instant."""
+
+    signal: DynamicHintSignal
+    start_s: float
+    end_s: float
+    peak_timestamp_s: float
+    # Prominence used only for ranking: adaptive episodes contribute their peak z-score,
+    # physical detectors contribute ENTER_Z_SCORE scaled by how far past their gate they went.
+    score: float
+    peak_value: float
+    # Value the signal moved from and to across the detected stretch, before any widening.
+    start_value: float
+    end_value: float
+    direction: Literal[-1, 1]
+    description: str
 
 
 class LogAnalysisService:
@@ -353,7 +402,7 @@ def acceleration_series(records: list[LogRecord]) -> list[float | None]:
 
 
 def build_log_attention_hint(log_uri: str, *, video_duration_s: float | None = None) -> str:
-    """Return qualitative timestamps that guide video attention without exposing telemetry values."""
+    """Return qualitative time windows that guide video attention without exposing telemetry values."""
     _, records = load_log_records(log_uri)
     if video_duration_s is not None:
         if video_duration_s <= 0:
@@ -361,77 +410,340 @@ def build_log_attention_hint(log_uri: str, *, video_duration_s: float | None = N
         records = [record for record in records if record.timestamp_s <= video_duration_s]
     if not records:
         raise LogAnalysisError("LOG_WINDOW_EMPTY", "log contains no rows within the video duration")
-    throttle = numeric_series(records, THROTTLE_ALIASES)
-    brake = numeric_series(records, BRAKE_ALIASES)
-    steering = numeric_series(records, STEERING_ALIASES)
-    acceleration = acceleration_series(records)
-    moments: dict[float, list[str]] = {}
-    moment_scores: dict[float, float] = {}
-
-    def add(timestamp_s: float, description: str, score: float) -> None:
-        descriptions = moments.setdefault(timestamp_s, [])
-        if description not in descriptions:
-            descriptions.append(description)
-        moment_scores[timestamp_s] = max(moment_scores.get(timestamp_s, 0.0), score)
-
-    for values, label, physical_gate in (
-        (throttle, "ga", PHYSICAL_MIN_THROTTLE_DELTA),
-        (brake, "phanh", PHYSICAL_MIN_BRAKE_DELTA_FOR_HINT),
-    ):
-        for change in _adaptive_changes(values, detect_delta=True):
-            change = _representative_control_change(change, values)
-            if _change_magnitude(change) < physical_gate:
-                continue
-            direction = "tăng" if change.direction > 0 else "giảm"
-            add(
-                records[change.peak_index].timestamp_s,
-                f"{label} {direction} bất thường so với diễn biến gần đó",
-                change.peak_z_score,
-            )
-
-    for change in _adaptive_changes(steering, detect_delta=True):
-        change = _representative_control_change(change, steering)
-        if _change_magnitude(change) < PHYSICAL_MIN_STEERING_DELTA:
-            continue
-        direction = "phải" if change.direction > 0 else "trái"
-        add(
-            records[change.peak_index].timestamp_s,
-            f"góc đánh lái thay đổi bất thường sang {direction}",
-            change.peak_z_score,
-        )
-
-    for change in _adaptive_changes(
-        acceleration,
-        detect_delta=False,
-        minimum_scale=ADAPTIVE_ACCELERATION_MIN_SCALE,
-    ):
-        change = _representative_acceleration_change(change, acceleration)
-        if _acceleration_event_type(change.value) is None:
-            continue
-        direction = "tăng" if change.direction > 0 else "giảm"
-        add(
-            records[change.peak_index].timestamp_s,
-            f"gia tốc {direction} bất thường so với diễn biến gần đó",
-            change.peak_z_score,
-        )
-
-    if not moments:
+    intervals = detect_signal_intervals(records, video_duration_s=video_duration_s)
+    if not intervals:
         return ""
-    selected_timestamps = sorted(
-        sorted(moments, key=lambda timestamp_s: (-moment_scores[timestamp_s], timestamp_s))[
-            :MAX_LOG_ATTENTION_TIMESTAMPS
-        ]
-    )
     lines = [
-        f"- Tại giây thứ {_format_timestamp_s(timestamp_s)}: {'; '.join(moments[timestamp_s])}."
-        for timestamp_s in selected_timestamps
+        f"- {_capitalize(interval_text(interval))}."
+        for interval in _select_hint_intervals(intervals)
     ]
     return "\n".join(
         [
-            "Attention hint từ telemetry — chỉ gợi ý thời điểm cần xem kỹ, không phải bằng chứng:",
+            "Attention hint từ telemetry — chỉ gợi ý khoảng thời gian cần xem kỹ, không phải bằng chứng:",
             *lines,
         ]
     )
+
+
+def detect_signal_intervals(
+    records: list[LogRecord],
+    *,
+    video_duration_s: float | None = None,
+) -> list[SignalInterval]:
+    """Detect anomalous stretches per signal and return them as merged, clamped time windows.
+
+    Three complementary detectors feed the same interval list. The adaptive one catches sharp
+    single-sample jumps; it cannot see a manoeuvre spread over many samples (each step stays far
+    below the z-score gate) nor a long phase right after a spike (the spike inflates the rolling
+    scale). The two physical detectors cover exactly those blind spots.
+    """
+    upper_bound_s = (
+        video_duration_s if video_duration_s is not None else max(record.timestamp_s for record in records)
+    )
+    intervals: list[SignalInterval] = []
+    for signal, aliases, physical_gate in (
+        ("throttle", THROTTLE_ALIASES, PHYSICAL_MIN_THROTTLE_DELTA),
+        ("brake", BRAKE_ALIASES, PHYSICAL_MIN_BRAKE_DELTA_FOR_HINT),
+        ("steer", STEERING_ALIASES, PHYSICAL_MIN_STEERING_DELTA),
+    ):
+        values = numeric_series(records, aliases)
+        observations = _adaptive_observations(
+            values,
+            detect_delta=True,
+            minimum_scale=ADAPTIVE_MIN_SCALE,
+        )
+        for episode in _adaptive_episodes(observations):
+            change = _representative_control_change(episode, values)
+            if _change_magnitude(change) < physical_gate:
+                continue
+            intervals.append(_signal_interval(records, observations, episode, change, signal=signal))
+        intervals.extend(
+            _transition_intervals(records, values, signal=signal, physical_gate=physical_gate)
+        )
+
+    acceleration = acceleration_series(records)
+    observations = _adaptive_observations(
+        acceleration,
+        detect_delta=False,
+        minimum_scale=ADAPTIVE_ACCELERATION_MIN_SCALE,
+    )
+    for episode in _adaptive_episodes(observations):
+        change = _representative_acceleration_change(episode, acceleration)
+        if _acceleration_event_type(change.value) is None:
+            continue
+        intervals.append(
+            _signal_interval(records, observations, episode, change, signal="acceleration")
+        )
+    intervals.extend(_sustained_acceleration_intervals(records, acceleration))
+    return _finalize_intervals(intervals, upper_bound_s=upper_bound_s)
+
+
+def _select_hint_intervals(intervals: list[SignalInterval]) -> list[SignalInterval]:
+    """Rank by prominence, but cap each signal so one noisy channel cannot fill the whole hint."""
+    selected: list[SignalInterval] = []
+    used: dict[DynamicHintSignal, int] = {}
+    for interval in sorted(intervals, key=lambda item: (-item.score, item.start_s)):
+        if used.get(interval.signal, 0) >= MAX_INTERVALS_PER_SIGNAL:
+            continue
+        used[interval.signal] = used.get(interval.signal, 0) + 1
+        selected.append(interval)
+        if len(selected) >= MAX_LOG_ATTENTION_TIMESTAMPS:
+            break
+    return sorted(selected, key=lambda item: (item.start_s, item.signal))
+
+
+def _prominence(magnitude: float, gate: float) -> float:
+    """Score a physical detection on the same scale as an adaptive z-score."""
+    return ADAPTIVE_ENTER_Z_SCORE * magnitude / gate
+
+
+def _transition_runs(values: list[float | None]) -> list[tuple[int, int, Literal[-1, 1]]]:
+    """Split a control signal into direction-consistent moves, tolerating brief plateaus."""
+    runs: list[tuple[int, int, Literal[-1, 1]]] = []
+    start: int | None = None
+    direction: Literal[-1, 1] = 1
+    last_move = 0
+    for index in range(1, len(values)):
+        current, previous = values[index], values[index - 1]
+        if current is None or previous is None:
+            step: int | None = None
+        else:
+            delta = current - previous
+            step = 0 if abs(delta) < TRANSITION_EPSILON else (1 if delta > 0 else -1)
+        if start is None:
+            if step:
+                start, direction, last_move = index - 1, step, index
+            continue
+        if step == direction:
+            last_move = index
+            continue
+        if step == 0 and index - last_move <= TRANSITION_MAX_GAP_SAMPLES:
+            continue
+        runs.append((start, last_move, direction))
+        if step:
+            start, direction, last_move = index - 1, step, index
+        else:
+            start = None
+    if start is not None:
+        runs.append((start, last_move, direction))
+    return runs
+
+
+def _transition_intervals(
+    records: list[LogRecord],
+    values: list[float | None],
+    *,
+    signal: DynamicHintSignal,
+    physical_gate: float,
+) -> list[SignalInterval]:
+    """Flag a control move whose TOTAL swing clears the gate, however many samples it took."""
+    intervals: list[SignalInterval] = []
+    for start, end, direction in _transition_runs(values):
+        first, last = values[start], values[end]
+        if first is None or last is None:
+            continue
+        swing = abs(last - first)
+        if swing < physical_gate:
+            continue
+        peak_index = end if abs(last) >= abs(first) else start
+        intervals.append(
+            SignalInterval(
+                signal=signal,
+                start_s=records[start].timestamp_s,
+                end_s=records[end].timestamp_s,
+                peak_timestamp_s=records[peak_index].timestamp_s,
+                score=_prominence(swing, physical_gate),
+                peak_value=values[peak_index],
+                start_value=first,
+                end_value=last,
+                direction=direction,
+                description=_interval_description(signal, direction),
+            )
+        )
+    return intervals
+
+
+def _sustained_acceleration_intervals(
+    records: list[LogRecord],
+    values: list[float | None],
+) -> list[SignalInterval]:
+    """Flag every stretch that stays past a physical acceleration gate for several samples."""
+    intervals: list[SignalInterval] = []
+    start: int | None = None
+    run_sign = 0
+    for index in range(len(values) + 1):
+        value = values[index] if index < len(values) else None
+        active = value is not None and _acceleration_event_type(value) is not None
+        sign = 0 if value is None else (1 if value >= 0 else -1)
+        if active and (start is None or sign == run_sign):
+            # A braking phase and an acceleration spike are separate events even when adjacent,
+            # so a sign flip always closes the current run.
+            if start is None:
+                start, run_sign = index, sign
+            continue
+        if start is None:
+            continue
+        end = index - 1
+        samples = [(position, values[position]) for position in range(start, end + 1)]
+        if end - start + 1 >= SUSTAINED_MIN_SAMPLES and samples:
+            peak_index, peak_value = max(samples, key=lambda item: abs(item[1]))
+            direction: Literal[-1, 1] = 1 if peak_value >= 0 else -1
+            gate = (
+                PHYSICAL_STRONG_ACCELERATION_MPS2
+                if direction > 0
+                else abs(PHYSICAL_STRONG_DECELERATION_MPS2)
+            )
+            intervals.append(
+                SignalInterval(
+                    signal="acceleration",
+                    start_s=records[start].timestamp_s,
+                    end_s=records[end].timestamp_s,
+                    peak_timestamp_s=records[peak_index].timestamp_s,
+                    score=_prominence(abs(peak_value), gate),
+                    peak_value=peak_value,
+                    # Start from the last sample before the phase began, so the text shows what
+                    # the signal moved away from rather than repeating the phase's own first value.
+                    start_value=_value_before(values, start, samples[0][1]),
+                    # End on the extreme reached, so the text agrees with the reported value.
+                    end_value=peak_value,
+                    direction=direction,
+                    description=_interval_description("acceleration", direction),
+                )
+            )
+        # A sign flip closes one run and opens the next on the very same sample.
+        start, run_sign = (index, sign) if active else (None, 0)
+    return intervals
+
+
+def interval_text(interval: SignalInterval) -> str:
+    """Render one interval as a qualitative Vietnamese sentence with no raw telemetry values."""
+    return (
+        f"trong khoảng {_format_interval_bound_s(interval.start_s)}s"
+        f"–{_format_interval_bound_s(interval.end_s)}s, {interval.description}"
+    )
+
+
+def interval_text_with_values(interval: SignalInterval) -> str:
+    """Same sentence plus the values moved through, for the verifier which may see telemetry."""
+    start = _format_signal_value(interval.signal, interval.start_value)
+    end = _format_signal_value(interval.signal, interval.end_value)
+    if start == end:
+        return interval_text(interval)
+    return f"{interval_text(interval)} từ {start} -> {end}"
+
+
+def _value_before(values: list[float | None], index: int, fallback: float) -> float:
+    previous = values[index - 1] if index > 0 else None
+    return fallback if previous is None else previous
+
+
+def _format_signal_value(signal: DynamicHintSignal, value: float) -> str:
+    # Controls are normalised to [0,1] or [-1,1]; acceleration is m/s2 and needs less precision.
+    return f"{value:.1f}" if signal == "acceleration" else f"{value:.2f}"
+
+
+def _signal_interval(
+    records: list[LogRecord],
+    observations: list[AdaptiveObservation],
+    episode: AdaptiveChange,
+    change: AdaptiveChange,
+    *,
+    signal: DynamicHintSignal,
+) -> SignalInterval:
+    start_index = _extended_start_index(observations, episode)
+    return SignalInterval(
+        signal=signal,
+        start_s=records[start_index].timestamp_s,
+        end_s=records[episode.end_index].timestamp_s,
+        peak_timestamp_s=records[change.peak_index].timestamp_s,
+        score=change.peak_z_score,
+        peak_value=change.value,
+        start_value=change.previous_value,
+        end_value=change.value,
+        direction=change.direction,
+        description=_interval_description(signal, change.direction),
+    )
+
+
+def _interval_description(signal: DynamicHintSignal, direction: Literal[-1, 1]) -> str:
+    if signal == "steer":
+        return f"góc đánh lái thay đổi bất thường sang {'phải' if direction > 0 else 'trái'}"
+    label = {"throttle": "ga", "brake": "phanh", "acceleration": "gia tốc"}[signal]
+    return f"{label} {'tăng' if direction > 0 else 'giảm'} bất thường"
+
+
+def _extended_start_index(observations: list[AdaptiveObservation], episode: AdaptiveChange) -> int:
+    """Walk back over the ramp-up shoulder that still holds the exit z-score in the same direction."""
+    positions = {observation.index: position for position, observation in enumerate(observations)}
+    position = positions.get(episode.start_index)
+    if position is None:
+        return episode.start_index
+    start_index = episode.start_index
+    for candidate in range(position - 1, -1, -1):
+        observation = observations[candidate]
+        if (
+            not observation.baseline_ready
+            or observation.direction != episode.direction
+            or observation.score < ADAPTIVE_EXIT_Z_SCORE
+        ):
+            break
+        start_index = observation.index
+    return start_index
+
+
+def _finalize_intervals(
+    intervals: list[SignalInterval],
+    *,
+    upper_bound_s: float,
+) -> list[SignalInterval]:
+    merged: list[SignalInterval] = []
+    for interval in sorted(intervals, key=lambda item: (item.signal, item.direction, item.start_s)):
+        previous = merged[-1] if merged else None
+        if (
+            previous is not None
+            and previous.signal == interval.signal
+            and previous.direction == interval.direction
+            and interval.start_s - previous.end_s < MERGE_GAP_S
+        ):
+            merged[-1] = _merge_intervals(previous, interval)
+            continue
+        merged.append(interval)
+    return sorted(
+        (_with_minimum_width(interval, upper_bound_s=upper_bound_s) for interval in merged),
+        key=lambda item: (item.start_s, item.signal),
+    )
+
+
+def _merge_intervals(previous: SignalInterval, interval: SignalInterval) -> SignalInterval:
+    strongest = interval if interval.score > previous.score else previous
+    earliest = previous if previous.start_s <= interval.start_s else interval
+    latest = interval if interval.end_s >= previous.end_s else previous
+    return replace(
+        strongest,
+        start_s=earliest.start_s,
+        end_s=latest.end_s,
+        start_value=earliest.start_value,
+        end_value=latest.end_value,
+    )
+
+
+def _with_minimum_width(interval: SignalInterval, *, upper_bound_s: float) -> SignalInterval:
+    """Widen a spike into a viewable window so the VLM never gets a single-frame hint."""
+    if interval.end_s - interval.start_s >= MIN_INTERVAL_S:
+        return interval
+    return replace(
+        interval,
+        start_s=max(0.0, interval.peak_timestamp_s - MIN_INTERVAL_PAD_S),
+        end_s=min(upper_bound_s, interval.peak_timestamp_s + MIN_INTERVAL_PAD_S),
+    )
+
+
+def _format_interval_bound_s(value: float) -> str:
+    return f"{value:.1f}"
+
+
+def _capitalize(text: str) -> str:
+    return f"{text[:1].upper()}{text[1:]}"
 
 
 def _adaptive_changes(
@@ -441,6 +753,18 @@ def _adaptive_changes(
     minimum_scale: float = ADAPTIVE_MIN_SCALE,
 ) -> list[AdaptiveChange]:
     """Detect sustained changes relative to each signal's rolling EMA baseline."""
+    return _adaptive_episodes(
+        _adaptive_observations(values, detect_delta=detect_delta, minimum_scale=minimum_scale)
+    )
+
+
+def _adaptive_observations(
+    values: list[float | None],
+    *,
+    detect_delta: bool,
+    minimum_scale: float = ADAPTIVE_MIN_SCALE,
+) -> list[AdaptiveObservation]:
+    """Score every usable sample against its rolling EMA baseline."""
     if minimum_scale <= 0:
         raise ValueError("minimum_scale must be positive")
     observations: list[tuple[int, float, float, float]] = []
@@ -461,8 +785,7 @@ def _adaptive_changes(
     history: deque[float] = deque(maxlen=ADAPTIVE_ROLLING_WINDOW)
     ema_mean = 0.0
     ema_variance = 0.0
-    active: AdaptiveChange | None = None
-    completed: list[AdaptiveChange] = []
+    scored: list[AdaptiveObservation] = []
     for position, (index, observation, previous_value, value) in enumerate(observations):
         if history:
             rolling_mean = sum(history) / len(history)
@@ -472,9 +795,42 @@ def _adaptive_changes(
             signed_z_score = (observation - baseline) / scale
         else:
             signed_z_score = 0.0
-        score = abs(signed_z_score)
         direction: Literal[-1, 1] = 1 if signed_z_score >= 0 else -1
-        baseline_ready = position >= ADAPTIVE_MIN_BASELINE_SAMPLES
+        scored.append(
+            AdaptiveObservation(
+                index=index,
+                score=abs(signed_z_score),
+                direction=direction,
+                previous_value=previous_value,
+                value=value,
+                baseline_ready=position >= ADAPTIVE_MIN_BASELINE_SAMPLES,
+            )
+        )
+
+        previous_ema_mean = ema_mean
+        if history:
+            ema_mean = (1 - ADAPTIVE_EMA_ALPHA) * ema_mean + ADAPTIVE_EMA_ALPHA * observation
+            ema_variance = (1 - ADAPTIVE_EMA_ALPHA) * (
+                ema_variance + ADAPTIVE_EMA_ALPHA * (observation - previous_ema_mean) ** 2
+            )
+        else:
+            ema_mean = observation
+            ema_variance = 0.0
+        history.append(observation)
+    return scored
+
+
+def _adaptive_episodes(observations: list[AdaptiveObservation]) -> list[AdaptiveChange]:
+    """Assemble scored samples into sustained, merged change episodes."""
+    active: AdaptiveChange | None = None
+    completed: list[AdaptiveChange] = []
+    for observation in observations:
+        index = observation.index
+        score = observation.score
+        direction = observation.direction
+        previous_value = observation.previous_value
+        value = observation.value
+        baseline_ready = observation.baseline_ready
 
         if active is None:
             if baseline_ready and score >= ADAPTIVE_ENTER_Z_SCORE:
@@ -519,17 +875,6 @@ def _adaptive_changes(
                     previous_value=previous_value,
                     value=value,
                 )
-
-        previous_ema_mean = ema_mean
-        if history:
-            ema_mean = (1 - ADAPTIVE_EMA_ALPHA) * ema_mean + ADAPTIVE_EMA_ALPHA * observation
-            ema_variance = (1 - ADAPTIVE_EMA_ALPHA) * (
-                ema_variance + ADAPTIVE_EMA_ALPHA * (observation - previous_ema_mean) ** 2
-            )
-        else:
-            ema_mean = observation
-            ema_variance = 0.0
-        history.append(observation)
     if active is not None:
         completed.append(active)
     return _merge_adaptive_changes(completed)
@@ -679,11 +1024,24 @@ def build_claim_verification_inputs(
         sample_radius=sample_radius,
         sample_from_full_records=True,
     )
+    intervals = detect_signal_intervals(records, video_duration_s=video_duration_s) if records else []
+    # sample_radius is a row count; the hint window needs it in seconds.
+    claim_radius_s = sample_radius * _sample_period_s(records)
     contexts = [
-        _claim_verification_context(records, claim, summary)
+        _claim_verification_context(records, claim, summary, intervals, claim_radius_s)
         for claim, summary in zip(claims, summaries, strict=True)
     ]
     return summaries, contexts
+
+
+def _sample_period_s(records: list[LogRecord]) -> float:
+    """Median gap between rows, so a few missing samples cannot distort the window."""
+    if len(records) < 2:
+        return 0.0
+    return _median(
+        records[index].timestamp_s - records[index - 1].timestamp_s
+        for index in range(1, len(records))
+    )
 
 
 def _claim_records(
@@ -847,6 +1205,8 @@ def _claim_verification_context(
     records: list[LogRecord],
     claim: Claim,
     summary: ClaimLogSummary,
+    intervals: list[SignalInterval],
+    claim_radius_s: float,
 ) -> ClaimVerificationContext:
     allowed_timestamps = {item.timestamp_s for item in summary.evidence}
     samples = [record for record in records if record.timestamp_s in allowed_timestamps]
@@ -883,8 +1243,55 @@ def _claim_verification_context(
         raw_telemetry=raw_telemetry,
         derived=_telemetry_derived(raw_telemetry),
         derived_dynamics=_derived_dynamics(samples),
+        dynamic_hints=_claim_dynamic_hints(intervals, claim.timestamp_s, claim_radius_s),
         allowed_evidence_ids=allowed_evidence_ids,
     )
+
+
+def _claim_dynamic_hints(
+    intervals: list[SignalInterval],
+    claim_timestamp_s: float | None,
+    claim_radius_s: float,
+) -> list[ClaimDynamicHint]:
+    """Attach the intervals that fall inside this claim's sampling window.
+
+    A claim timestamp is snapped to the nearest canonical frame, so requiring it to sit exactly
+    inside an interval drops hints that are plainly about the same moment. The claim therefore
+    carries the same window the verifier samples, and an interval joins it when most of the
+    interval lies in that window.
+    """
+    if claim_timestamp_s is None:
+        return []
+    window_start = claim_timestamp_s - claim_radius_s
+    window_end = claim_timestamp_s + claim_radius_s
+    return [
+        ClaimDynamicHint(
+            signal=interval.signal,
+            start_s=interval.start_s,
+            end_s=interval.end_s,
+            text=interval_text_with_values(interval),
+            value=interval.peak_value,
+        )
+        for interval in intervals
+        if _covers_claim(interval, claim_timestamp_s, window_start, window_end)
+    ]
+
+
+def _covers_claim(
+    interval: SignalInterval,
+    claim_timestamp_s: float,
+    window_start: float,
+    window_end: float,
+) -> bool:
+    if interval.start_s <= claim_timestamp_s <= interval.end_s:
+        return True
+    overlap = min(interval.end_s, window_end) - max(interval.start_s, window_start)
+    if overlap <= 0:
+        return False
+    duration = interval.end_s - interval.start_s
+    if duration <= 0:
+        return True
+    return overlap / duration > MIN_CLAIM_HINT_OVERLAP_RATIO
 
 
 def _telemetry_snapshot(record: LogRecord) -> ClaimTelemetrySnapshot:
@@ -937,27 +1344,37 @@ def _telemetry_derived(raw: ClaimRawTelemetry) -> ClaimTelemetryDerived:
 
 
 def _derived_dynamics(records: list[LogRecord]) -> ClaimDerivedDynamics:
-    max_deceleration = _positive_max_deceleration(records)
+    # Pick the phase the same way speed_trend does, so the two never disagree: a window whose
+    # speed ends higher than it started is an acceleration phase, and reporting its noise dips
+    # as "giảm tốc" would contradict speed_trend.
+    accelerating = _is_accelerating_window(records)
+    magnitude = (
+        _positive_max_acceleration(records) if accelerating else _positive_max_deceleration(records)
+    )
     steering_activity = _steering_activity(records)
     max_brake = max(
         (value for value in numeric_series(records, BRAKE_ALIASES) if value is not None),
         default=None,
     )
     decel_brake_mismatch = (
-        max_deceleration * (1 - max_brake)
-        if max_deceleration is not None and max_brake is not None
-        else None
+        magnitude * (1 - max_brake) if magnitude is not None and max_brake is not None else None
     )
     return ClaimDerivedDynamics(
         max_deceleration_mps2=_dynamics_metric(
-            max_deceleration,
+            magnitude,
             mild_threshold=3,
             strong_threshold=7,
             texts=(
-                "Không đủ dữ liệu tốc độ để tính giảm tốc.",
-                "Không ghi nhận giảm tốc đáng kể trong khoảng claim.",
-                "Xe có giảm tốc đáng chú ý trong khoảng claim.",
-                "Xe có giảm tốc rất mạnh trong khoảng claim.",
+                ("Không đủ dữ liệu tốc độ để tính tăng tốc.",
+                 "Không ghi nhận tăng tốc đáng kể trong khoảng claim.",
+                 "Xe có tăng tốc đáng chú ý trong khoảng claim.",
+                 "Xe có tăng tốc rất mạnh trong khoảng claim.")
+                if accelerating
+                else
+                ("Không đủ dữ liệu tốc độ để tính giảm tốc.",
+                 "Không ghi nhận giảm tốc đáng kể trong khoảng claim.",
+                 "Xe có giảm tốc đáng chú ý trong khoảng claim.",
+                 "Xe có giảm tốc rất mạnh trong khoảng claim.")
             ),
         ),
         steering_activity=_dynamics_metric(
@@ -976,22 +1393,43 @@ def _derived_dynamics(records: list[LogRecord]) -> ClaimDerivedDynamics:
             mild_threshold=3,
             strong_threshold=7,
             texts=(
-                "Không đủ dữ liệu tốc độ hoặc brake để đánh giá mức không tương xứng.",
-                "Giảm tốc và tín hiệu brake không có mismatch đáng kể.",
-                "Giảm tốc và tín hiệu brake có mismatch đáng chú ý.",
-                "Xe giảm tốc rất mạnh nhưng mức brake ghi nhận thấp; "
-                "diễn biến này có thể sảy ra tai nạn cần được chú ý.",
+                # Accelerating with little brake is simply normal driving, so that phase must not
+                # carry the accident wording; only decelerating without brake is anomalous.
+                ("Không đủ dữ liệu tốc độ hoặc brake để đánh giá mức không tương xứng.",
+                 "Xe đang tăng tốc; mức brake thấp là bình thường.",
+                 "Xe đang tăng tốc; mức brake thấp là bình thường.",
+                 "Xe tăng tốc rất mạnh.")
+                if accelerating
+                else
+                ("Không đủ dữ liệu tốc độ hoặc brake để đánh giá mức không tương xứng.",
+                 "Giảm tốc và tín hiệu brake không có mismatch đáng kể.",
+                 "Giảm tốc và tín hiệu brake có mismatch đáng chú ý.",
+                 "Xe giảm tốc rất mạnh nhưng mức brake ghi nhận thấp; "
+                 "diễn biến này có thể xảy ra tai nạn cần được chú ý.")
             ),
         ),
     )
 
 
+def _is_accelerating_window(records: list[LogRecord]) -> bool:
+    known = [value for value in numeric_series(records, SPEED_ALIASES) if value is not None]
+    return len(known) >= 2 and known[-1] > known[0]
+
+
+def _positive_max_acceleration(records: list[LogRecord]) -> float | None:
+    return _max_signed_rate(records, sign=1)
+
+
 def _positive_max_deceleration(records: list[LogRecord]) -> float | None:
+    return _max_signed_rate(records, sign=-1)
+
+
+def _max_signed_rate(records: list[LogRecord], *, sign: int) -> float | None:
     speed_values = numeric_series(records, SPEED_ALIASES)
     values = [
         max(
             0.0,
-            -((current - previous) / 3.6) / (records[index].timestamp_s - records[index - 1].timestamp_s),
+            sign * ((current - previous) / 3.6) / (records[index].timestamp_s - records[index - 1].timestamp_s),
         )
         for index, (previous, current) in enumerate(zip(speed_values, speed_values[1:]), start=1)
         if previous is not None

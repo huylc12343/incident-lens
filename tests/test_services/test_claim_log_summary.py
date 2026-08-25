@@ -563,3 +563,59 @@ def test_claim_dynamic_hints_require_most_of_the_interval_inside_the_window(tmp_
     assert hints_for(2) == []
     assert hints_for(3) == []
     assert hints_for(4) == ["steer"]
+
+
+def _dynamics_for(tmp_path, speeds: list[float]) -> dict[str, tuple[float | None, str]]:
+    log = tmp_path / f"phase-{speeds[0]}-{speeds[-1]}.csv"
+    rows = ["timestamp_s,speed_kmh,throttle,brake,steer"]
+    rows.extend(
+        f"{index / 10:.1f},{speed},0.5,0.0,0.0" for index, speed in enumerate(speeds)
+    )
+    log.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    _, contexts = build_claim_verification_inputs(
+        str(log),
+        [Claim(claim_id="c", text="Chuyển động của ego", timestamp_s=0.5)],
+        timestamp_tolerance_s=0.2,
+        sample_radius=20,
+    )
+    return {name: (metric.value, metric.text) for name, metric in contexts[0].derived_dynamics}
+
+
+def test_derived_dynamics_describe_acceleration_when_speed_rises(tmp_path) -> None:
+    dynamics = _dynamics_for(tmp_path, [0, 10, 20, 30, 40, 50, 60, 70, 80, 90])
+
+    magnitude, text = dynamics["max_deceleration_mps2"]
+    assert magnitude is not None
+    # speed_trend is "increase" here, so the wording must not claim the car decelerated.
+    assert "tăng tốc" in text
+    assert "giảm tốc" not in text
+    # Low brake while accelerating is normal driving and must not read as an accident signal.
+    mismatch_text = dynamics["decel_brake_mismatch"][1]
+    assert mismatch_text == "Xe tăng tốc rất mạnh."
+    assert "tai nạn" not in mismatch_text
+
+
+def test_derived_dynamics_keep_the_accident_wording_when_speed_drops(tmp_path) -> None:
+    dynamics = _dynamics_for(tmp_path, [90, 80, 70, 60, 50, 40, 30, 20, 10, 0])
+
+    assert "giảm tốc" in dynamics["max_deceleration_mps2"][1]
+    assert "tai nạn" in dynamics["decel_brake_mismatch"][1]
+
+
+def test_claim_dynamic_hint_text_carries_the_values_it_moved_through(tmp_path) -> None:
+    log = tmp_path / "throttle-steps.csv"
+    rows = ["timestamp_s,speed_kmh,throttle,brake,steer"]
+    rows.extend(f"{index / 10:.1f},40,0.38,0.0,0.0" for index in range(20))
+    rows.extend(f"{(20 + index) / 10:.1f},40,0.08,0.0,0.0" for index in range(5))
+    log.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+    _, contexts = build_claim_verification_inputs(
+        str(log),
+        [Claim(claim_id="lift", text="Xe nhả ga", timestamp_s=2.0)],
+        timestamp_tolerance_s=0.2,
+        sample_radius=20,
+    )
+
+    texts = [hint.text for hint in contexts[0].dynamic_hints if hint.signal == "throttle"]
+    assert texts
+    assert "ga giảm bất thường từ 0.38 -> 0.08" in texts[0]

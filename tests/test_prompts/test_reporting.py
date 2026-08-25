@@ -123,7 +123,11 @@ def test_report_prompt_merges_verification_into_claims_and_omits_raw_log_summary
         "has_accident",
         "timeline",
         "claims",
+        "log_metrics",
+        "log_events",
     }
+    # hypothesized_causes needs the telemetry numbers, but never the log's own prose or evidence IDs.
+    assert prompt.context["log_metrics"] == {"max_brake": 1}
     assert prompt.context["has_accident"] is True
     assert claim == {
         "claim_id": "claim-1",

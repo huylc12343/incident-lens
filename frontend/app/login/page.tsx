@@ -1,9 +1,15 @@
 "use client";
 
 import { FormEvent, type ReactNode, useEffect, useState } from "react";
+import Image from "next/image";
+import { Michroma } from "next/font/google";
 import { useRouter } from "next/navigation";
 import { demoAccount, readSession, saveDemoSession } from "../../lib/auth";
 import styles from "./login.module.css";
+
+const michroma = Michroma({ subsets: ["latin", "latin-ext"], weight: "400", variable: "--font-michroma" });
+
+const welcomeMessages = ["WELCOME TO", "Trợ Lí phân tích và viết báo cáo xe tự hành"];
 
 type IconName = "mail" | "lock" | "eye" | "eyeOff" | "arrow";
 
@@ -31,7 +37,9 @@ export default function LoginPage() {
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [credentialsError, setCredentialsError] = useState("");
+  const [welcomeMessageIndex, setWelcomeMessageIndex] = useState(0);
   const router = useRouter();
+  const welcomeMessage = welcomeMessages[welcomeMessageIndex];
 
   const emailError = submitted && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? "Vui lòng nhập email công việc hợp lệ." : "";
   const passwordError = submitted && !password ? "Vui lòng nhập mật khẩu." : "";
@@ -39,6 +47,14 @@ export default function LoginPage() {
   useEffect(() => {
     if (readSession()) router.replace("/");
   }, [router]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setWelcomeMessageIndex((current) => (current + 1) % welcomeMessages.length);
+    }, 10000);
+
+    return () => window.clearInterval(interval);
+  }, []);
 
   function useDemoAccount() {
     setEmail(demoAccount.email);
@@ -65,35 +81,37 @@ export default function LoginPage() {
 
   return (
     <main className={styles.page}>
-      <section className={styles.shell} aria-label="Đăng nhập Incident Lens">
-        <aside className={styles.showcase}>
-          <div className={styles.brand}><span className={styles.brandMark}>IL</span><span>Incident Lens</span></div>
-          <div className={styles.heroCopy}>
-            <p className={styles.kicker}>EVIDENCE INTELLIGENCE</p>
-            <h1>Review incidents with<br />evidence, not assumptions.</h1>
-            <p>Hệ thống AI tiên tiến giúp kỹ sư QA và AI phân tích sự cố từ video và dữ liệu telemetry xe một cách chính xác.</p>
-          </div>
-          <div className={styles.evidencePanel} aria-label="VLens incident detected" role="img" />
-          <div className={styles.signal}><span />AI-assisted evidence chain verified</div>
-        </aside>
-
+      <div className={`${styles.identityOverlay} ${welcomeMessageIndex === 1 ? styles.longMessageActive : ""} ${michroma.variable}`} aria-label="Welcome to VLens">
+        <div
+          key={welcomeMessage}
+          className={`${styles.welcomeText} ${welcomeMessageIndex === 1 ? styles.longWelcomeText : ""}`}
+          data-text={welcomeMessage}
+        >
+          {welcomeMessage}
+        </div>
+        <Image className={styles.vlensWordmark} src="/images/vlens.png" alt="VLENS" width={2172} height={724} priority />
+      </div>
+      <section className={`${styles.shell} ${michroma.variable}`} aria-label="Đăng nhập Incident Lens">
         <div className={styles.formSide}>
           <form className={styles.card} onSubmit={handleSubmit} noValidate>
-            <div className={styles.formIntro}><div className={styles.mobileMark}>IL</div><h2>Đăng nhập</h2><p>Truy cập không gian làm việc Incident Lens của bạn.</p></div>
-            <label htmlFor="email">Email công việc</label>
-            <div className={`${styles.inputWrap} ${emailError ? styles.invalid : ""}`}><Icon name="mail" /><input id="email" type="email" autoComplete="email" placeholder="ten.ho@congty.com" value={email} onChange={(e) => { setEmail(e.target.value); setCredentialsError(""); }} aria-invalid={!!emailError} /></div>
-            {emailError && <p className={styles.error}>{emailError}</p>}
-            <label htmlFor="password">Mật khẩu</label>
-            <div className={`${styles.inputWrap} ${passwordError ? styles.invalid : ""}`}><Icon name="lock" /><input id="password" type={showPassword ? "text" : "password"} autoComplete="current-password" placeholder="Nhập mật khẩu" value={password} onChange={(e) => { setPassword(e.target.value); setCredentialsError(""); }} aria-invalid={!!passwordError} /><button type="button" className={styles.eyeButton} onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}><Icon name={showPassword ? "eyeOff" : "eye"} /></button></div>
-            {passwordError && <p className={styles.error}>{passwordError}</p>}
-            <div className={styles.options}><label className={styles.remember}><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> <span>Ghi nhớ đăng nhập</span></label><a href="#quen-mat-khau">Quên mật khẩu?</a></div>
-            {credentialsError && <p className={styles.credentialsError} role="alert">{credentialsError}</p>}
-            <button className={styles.submit} type="submit" disabled={loading}>{loading ? <><span className={styles.spinner} />Đang đăng nhập...</> : <>Đăng nhập <Icon name="arrow" /></>}</button>
-            <button className={styles.demoButton} type="button" onClick={useDemoAccount}>Dùng tài khoản demo</button>
-            <p className={styles.demoHint}>Tài khoản thử nghiệm: user@incidentlens.demo</p>
-            <div className={styles.divider}><span>hoặc</span></div>
-            <button className={styles.google} type="button"><GoogleIcon />Tiếp tục với Google</button>
-            <p className={styles.footer}>Chưa có tài khoản? <a href="mailto:admin@example.com">Liên hệ quản trị viên</a></p>
+            <div className={styles.loginPrimary}>
+              <label htmlFor="email">Email công việc</label>
+              <div className={`${styles.inputWrap} ${emailError ? styles.invalid : ""}`}><Icon name="mail" /><input id="email" type="email" autoComplete="email" placeholder="ten.ho@congty.com" value={email} onChange={(e) => { setEmail(e.target.value); setCredentialsError(""); }} aria-invalid={!!emailError} /></div>
+              {emailError && <p className={styles.error}>{emailError}</p>}
+              <label htmlFor="password">Mật khẩu</label>
+              <div className={`${styles.inputWrap} ${passwordError ? styles.invalid : ""}`}><Icon name="lock" /><input id="password" type={showPassword ? "text" : "password"} autoComplete="current-password" placeholder="Nhập mật khẩu" value={password} onChange={(e) => { setPassword(e.target.value); setCredentialsError(""); }} aria-invalid={!!passwordError} /><button type="button" className={styles.eyeButton} onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}><Icon name={showPassword ? "eyeOff" : "eye"} /></button></div>
+              {passwordError && <p className={styles.error}>{passwordError}</p>}
+              <div className={styles.options}><label className={styles.remember}><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> <span>Ghi nhớ đăng nhập</span></label><a href="#quen-mat-khau">Quên mật khẩu?</a></div>
+              {credentialsError && <p className={styles.credentialsError} role="alert">{credentialsError}</p>}
+              <button className={styles.submit} type="submit" disabled={loading}>{loading ? <><span className={styles.spinner} />Đang đăng nhập...</> : <>Đăng nhập <Icon name="arrow" /></>}</button>
+              <button className={styles.demoButton} type="button" onClick={useDemoAccount}>Dùng tài khoản demo</button>
+            </div>
+            <div className={styles.loginSecondary}>
+              <p className={styles.demoHint}>Tài khoản thử nghiệm: user@incidentlens.demo</p>
+              <div className={styles.divider}><span>hoặc</span></div>
+              <button className={styles.google} type="button"><GoogleIcon />Tiếp tục với Google</button>
+              <p className={styles.footer}>Chưa có tài khoản? <a href="mailto:admin@example.com">Liên hệ quản trị viên</a></p>
+            </div>
           </form>
         </div>
       </section>

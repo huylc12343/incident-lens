@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from src.agents.nodes.incident import (
+    VLM_EMPTY_VIDEO_MEMORY_WARNING,
     _incident_sampling_fps,
     _representative_timestamp,
     align_and_verify_claims_node,
@@ -107,6 +108,58 @@ async def test_analyze_video_node_builds_frame_request(tmp_path: Path) -> None:
         "analyst_request": "Find the incident",
     }
     assert "INC_001" in result["artifact_uris"]["frames"]
+
+
+def _frame_manifest() -> VideoSequenceManifest:
+    frame = TimestampedFrame(
+        frame_id="frame-0",
+        sequence_index=0,
+        timestamp_s=0,
+        delta_from_previous_s=0,
+        image_uri="frame.jpg",
+    )
+    return VideoSequenceManifest(frames=[frame], source_video_uri="video.mp4", duration_s=2)
+
+
+async def _analyze_with_memory(tmp_path: Path, memory: VideoMemory) -> dict:
+    media = SimpleNamespace(sample_frames=AsyncMock(return_value=_frame_manifest()), normalize_video=AsyncMock())
+    workflow = VideoMemoryWorkflow(
+        vlm=_service(VLMInputMode.TIMESTAMPED_FRAMES, memory),
+        config=VideoMemoryWorkflowConfig(artifact_dir=str(tmp_path)),
+    )
+    return await analyze_video_node(
+        {
+            "incident_id": "INC 001",
+            "video_uri": "video.mp4",
+            "analysis_prompt": "Find the incident",
+        },
+        media=media,
+        workflow=workflow,
+    )
+
+
+@pytest.mark.asyncio
+async def test_analyze_video_node_warns_when_video_memory_has_no_content(tmp_path: Path) -> None:
+    """An empty timeline and claim list is schema-valid but leaves the report unusable."""
+    result = await _analyze_with_memory(tmp_path, _memory(AnalysisMode.SINGLE_REQUEST, 2))
+
+    assert result["status"] == "running"
+    assert VLM_EMPTY_VIDEO_MEMORY_WARNING in result["warnings"]
+
+
+@pytest.mark.asyncio
+async def test_analyze_video_node_does_not_warn_when_memory_describes_the_video(tmp_path: Path) -> None:
+    memory = _memory(AnalysisMode.SINGLE_REQUEST, 2).model_copy(
+        update={
+            "timeline": [TimelineEvent(timestamp_s=0, description="Xe đi thẳng, không có sự cố.")],
+            "claims": [Claim(claim_id="claim-1", text="Xe giữ nguyên làn.", timestamp_s=0)],
+        }
+    )
+
+    result = await _analyze_with_memory(tmp_path, memory)
+
+    assert result["status"] == "running"
+    assert VLM_EMPTY_VIDEO_MEMORY_WARNING not in result.get("warnings", [])
 
 
 @pytest.mark.asyncio

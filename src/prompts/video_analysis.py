@@ -101,7 +101,11 @@ def build_video_analysis_prompt(
             "hậu quả bất thường; không chọn frame muộn hơn chỉ vì hình ảnh rõ hơn.",
 
             "Nếu không có tai nạn, đặt incident_window.t_start=0, incident_window.t0=0 và "
-            "incident_window.t_end=video_duration.",
+            "incident_window.t_end=video_duration (bắt buộc lớn hơn 0). "
+            "Không có tai nạn KHÔNG có nghĩa là không có gì để mô tả: timeline và claims vẫn phải ghi nhận "
+            "các diễn biến quan trọng của video như trạng thái ban đầu, thay đổi tốc độ hoặc hướng, tình huống "
+            "giao thông đáng chú ý, near-miss và kết cục cuối. "
+            "Tuyệt đối không để trống timeline hoặc claims chỉ vì kết luận là không có tai nạn.",
 
             "Mọi timestamp_s phải nằm trong [0, video_duration]. Timeline và claims có thể nằm ngoài incident_window. "
             "Với cùng một sự kiện, timestamp và mô tả phải nhất quán giữa video_summary, timeline và claims. "

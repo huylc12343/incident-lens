@@ -72,6 +72,10 @@ def test_video_analysis_prompt_keeps_no_incident_window_schema_valid() -> None:
     assert "incident_window.t_start=0" in prompt.text
     assert "incident_window.t0=0" in prompt.text
     assert "incident_window.t_end=video_duration" in prompt.text
+    assert "bắt buộc lớn hơn 0" in prompt.text
+    # A no-incident verdict must still produce a describable report.
+    assert "Không có tai nạn KHÔNG có nghĩa là không có gì để mô tả" in prompt.text
+    assert "Tuyệt đối không để trống timeline hoặc claims" in prompt.text
 
 
 def test_video_analysis_prompt_treats_log_hint_as_attention_only() -> None:

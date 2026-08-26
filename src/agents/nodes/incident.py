@@ -61,6 +61,11 @@ from src.services.video_memory import (
     validate_video_memory,
 )
 
+VLM_EMPTY_VIDEO_MEMORY_WARNING = (
+    "VLM_EMPTY_VIDEO_MEMORY: video analysis returned no timeline events and no claims; "
+    "the report has no describable content even when no accident occurred"
+)
+
 
 class MediaWorkflowService(Protocol):
     async def redact_video(self, video_uri: str, output_uri: str) -> NormalizedVideoArtifact: ...
@@ -234,7 +239,7 @@ async def analyze_video_node(
         )
         request = request.model_copy(update={"prompt": prompt})
         memory = await workflow.analyze(request)
-        return {
+        output: dict[str, object] = {
             "status": "running",
             "video_uri": processed_video_uri,
             "video_memory": memory,
@@ -242,6 +247,13 @@ async def analyze_video_node(
             "remote_media_handles": memory.remote_media_handles,
             "artifact_uris": {**state.get("artifact_uris", {}), **artifact_uris},
         }
+        # An empty VideoMemory is a valid schema but an unusable report: downstream
+        # nodes accept it silently, so surface it instead of letting it pass unseen.
+        if not memory.claims and not memory.timeline:
+            output["warnings"] = list(
+                dict.fromkeys([*state.get("warnings", []), VLM_EMPTY_VIDEO_MEMORY_WARNING])
+            )
+        return output
     except Exception as exc:
         return {
             "status": "failed",

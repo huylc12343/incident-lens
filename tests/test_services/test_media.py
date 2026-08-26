@@ -1,3 +1,5 @@
+import asyncio
+import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -7,6 +9,44 @@ from src.models.incidents import IncidentWindow, NativeVideoMetadata
 from src.services.media import MediaService, MediaServiceError
 
 SAMPLE_VIDEO = Path("data_mock/data1/front_camera.mp4")
+
+
+@pytest.mark.asyncio
+async def test_run_command_does_not_require_event_loop_subprocess_support(monkeypatch) -> None:
+    service = MediaService(command_timeout_s=5)
+    received: list[tuple[str, ...]] = []
+
+    async def unsupported_event_loop_subprocess(*args, **kwargs):
+        raise AssertionError("event-loop subprocess transport must not be used")
+
+    def run_in_thread(command, **kwargs):
+        received.append(tuple(command))
+        assert kwargs["timeout"] == 5
+        return subprocess.CompletedProcess(command, 0, stdout=b"probe output", stderr=b"")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", unsupported_event_loop_subprocess)
+    monkeypatch.setattr(subprocess, "run", run_in_thread)
+
+    stdout, stderr = await service._run_command("ffmpeg", "-version")
+
+    assert received == [("ffmpeg", "-version")]
+    assert stdout == "probe output"
+    assert stderr == ""
+
+
+@pytest.mark.asyncio
+async def test_run_command_maps_threaded_subprocess_timeout(monkeypatch) -> None:
+    service = MediaService(command_timeout_s=0.1)
+
+    def time_out(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", time_out)
+
+    with pytest.raises(MediaServiceError) as exc_info:
+        await service._run_command("ffmpeg", "-version")
+
+    assert exc_info.value.code == "MEDIA_COMMAND_TIMEOUT"
 
 
 @pytest.mark.asyncio

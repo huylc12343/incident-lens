@@ -19,9 +19,7 @@ class AsyncWorker:
         loop = asyncio.get_running_loop()
         future = loop.create_future()
         self._queue.put((loop, future, function, args, kwargs))
-        while not future.done():
-            await asyncio.sleep(0.001)
-        return future.result()
+        return await future
 
     def close(self) -> None:
         self._queue.put(None)

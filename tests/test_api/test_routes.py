@@ -35,12 +35,12 @@ async def test_ready_checks_initialized_workflow_dependencies(client):
 
 
 @pytest.mark.asyncio
-async def test_chat_empty_message(client):
-    response = await client.post("/api/v1/chat", json={"message": ""})
-    assert response.status_code == 422  # Validation error
-
-
-@pytest.mark.asyncio
 async def test_agent_status(client):
     response = await client.get("/api/v1/status")
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_chat_endpoint_is_gone(client):
+    """The boilerplate agent leaked exception strings and needed no auth; it must stay removed."""
+    assert (await client.post("/api/v1/chat", json={"message": "hi"})).status_code == 404

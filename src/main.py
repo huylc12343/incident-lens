@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from src.api.routes import router
 from src.config import get_settings
@@ -59,6 +60,11 @@ app.add_middleware(
 )
 
 app.include_router(router, prefix="/api/v1")
+app.mount(
+    "/artifacts",
+    StaticFiles(directory=settings.artifact_dir, check_dir=False),
+    name="artifacts",
+)
 
 
 @app.get("/health")

@@ -27,6 +27,10 @@ def incident_http_error(exc: Exception) -> HTTPException:
     safe_message = {
         "INCIDENT_NOT_FOUND": "incident does not exist",
         "INCIDENT_ALREADY_EXISTS": "incident ID already exists",
+        "VIDEO_INPUT_INVALID": (
+            "video input could not be validated; verify the file is a supported video "
+            "and FFmpeg can run"
+        ),
         "INVALID_REVIEW_TRANSITION": "incident is not awaiting review",
         "REANALYSIS_TARGET_INVALID": "re-analysis target claim does not exist",
         "REPORT_ALREADY_STORED": "terminal outcome is already stored",

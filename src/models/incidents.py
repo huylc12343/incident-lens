@@ -31,6 +31,8 @@ class VerificationStatus(StrEnum):
 
 class AccidentType(StrEnum):
     VEHICLE_COLLISION = "vehicle_collision"
+    # Backward-compatible value used by structured edits and evaluation labels.
+    SIDE_COLLISION = "side_collision"
     CROSSING_COLLISION = "crossing_collision"
     PEDESTRIAN_COLLISION = "pedestrian_collision"
     ENVIRONMENT_COLLISION = "environment_collision"

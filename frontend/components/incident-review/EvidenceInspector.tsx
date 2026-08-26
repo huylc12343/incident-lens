@@ -23,7 +23,7 @@ export function EvidenceInspector({ snapshot, claim }: { snapshot: IncidentSnaps
   const directory = snapshot.artifact_uris.incident_frames;
   const representative = artifactUrl(snapshot.artifact_uris.representative_frame);
   const seen = new Set<string>();
-  const evidence = snapshot.claims.flatMap((sourceClaim) => sourceClaim.evidence.map((item) => ({ ...item, claimId: sourceClaim.claim_id, claimText: sourceClaim.text, verification: sourceClaim.verification_status }))).filter((item) => !seen.has(item.evidence_id) && Boolean(seen.add(item.evidence_id)));
+  const evidence = snapshot.claims.flatMap((sourceClaim) => sourceClaim.evidence.map((item) => ({ ...item, claimId: sourceClaim.claim_id, claimText: sourceClaim.text, verification: sourceClaim.verification_status }))).filter((item) => !seen.has(item.evidence_id) && Boolean(seen.add(item.evidence_id))).sort((left, right) => left.timestamp_s - right.timestamp_s || left.evidence_id.localeCompare(right.evidence_id));
   return (
     <section className="workspace-panel evidence-inspector all-evidence-inspector" aria-labelledby="evidence-grid-title">
       <div className="workspace-panel-heading"><div><p className="eyebrow">Visual evidence</p><h2 id="evidence-grid-title">Evidence frame gallery</h2></div><span>{evidence.length || (representative ? 1 : 0)} frame(s)</span></div>

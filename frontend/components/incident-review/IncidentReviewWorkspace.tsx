@@ -9,13 +9,15 @@ import { loadUploadedVideo } from "../../lib/uploadStorage";
 import type { Claim, IncidentSnapshot, ReviewPayload } from "../../types/incident";
 import { ProcessingPipeline } from "../ProcessingPipeline";
 import { DecisionModal } from "./DecisionModal";
-import { EvidenceInspector } from "./EvidenceInspector";
+import { ClaimReviewList } from "./ClaimReviewList";
 import { GroundTruthComparison } from "./GroundTruthComparison";
 import { IncidentHeader } from "./IncidentHeader";
 import { IncidentClipPlayer } from "./IncidentClipPlayer";
+import { IncidentTimeline } from "./IncidentTimeline";
 import { IncidentNavigationSidebar } from "./IncidentNavigationSidebar";
 import { ReviewSidebar } from "./ReviewSidebar";
-import { TelemetryPanel } from "./TelemetryPanel";
+import { TechnicalDetails } from "./TechnicalDetails";
+import { TelemetryPanel, telemetryChartArtifacts } from "./TelemetryPanel";
 
 export function IncidentReviewWorkspace() {
   const router = useRouter();
@@ -46,12 +48,12 @@ export function IncidentReviewWorkspace() {
         setSnapshot(next);
         sessionStorage.setItem(INCIDENT_KEYS.snapshot, JSON.stringify(next));
         setSelectedClaimId((current) => current || next.claims[0]?.claim_id || "");
-        if (["queued", "running"].includes(next.status)) timer = setTimeout(refresh, 1500);
+        if (["queued", "running"].includes(next.status)) timer = setTimeout(refresh, 3000);
       } catch (cause) {
         if (active) {
           failures += 1;
           setError(cause instanceof Error ? cause.message : "Could not load incident.");
-          if (failures < 5) timer = setTimeout(refresh, 3000);
+          if (failures < 5) timer = setTimeout(refresh, 5000);
         }
       }
     };
@@ -64,7 +66,7 @@ export function IncidentReviewWorkspace() {
     setSelectedClaimId(claim.claim_id);
     const activeReport = snapshot?.final_report ?? snapshot?.draft_report;
     const clipStart = activeReport?.incident_window?.t_start ?? 0;
-    if (videoRef.current) videoRef.current.currentTime = Math.max(0, claim.timestamp_s - clipStart);
+    if (videoRef.current && typeof claim.timestamp_s === "number") videoRef.current.currentTime = Math.max(0, claim.timestamp_s - clipStart);
   };
   const submitReview = async (payload: ReviewPayload) => {
     if (!snapshot) return;
@@ -87,7 +89,8 @@ export function IncidentReviewWorkspace() {
   const evaluationMismatches = snapshot ? getEvaluationMismatches(snapshot) : [];
   const hasCriticalEvaluationMismatch = evaluationMismatches.some((mismatch) => mismatch.critical);
   const clip = artifactUrl(snapshot?.artifact_uris.incident_clip);
-  const telemetryCharts = snapshot ? Object.entries(snapshot.artifact_uris).filter(([key, uri]) => key.startsWith("chart_") && Boolean(uri)).sort(([left], [right]) => left.localeCompare(right)).map(([id, uri]) => ({ id, uri })) : [];
+  const telemetryCharts = snapshot ? telemetryChartArtifacts(snapshot.artifact_uris) : [];
+  const verificationResults = report?.alignment?.verification?.results ?? [];
 
   useEffect(() => {
     if (!aiFoundNoIncident || clip) {
@@ -123,20 +126,21 @@ export function IncidentReviewWorkspace() {
           <>
             {evaluationMismatches.length > 0 && <section className={`ground-truth-alert ${hasCriticalEvaluationMismatch ? "critical" : "warning"}`} role="alert" aria-labelledby="ground-truth-alert-title"><div><span className="ground-truth-alert-icon" aria-hidden="true">!</span><div><strong id="ground-truth-alert-title">Cần rà soát: Kết luận AI chưa khớp Ground Truth</strong><p>{evaluationMismatches[0].description}{evaluationMismatches.length > 1 ? ` Có thêm ${evaluationMismatches.length - 1} sai lệch cần kiểm tra.` : ""}</p><small>{evaluationMismatches.map((mismatch) => mismatch.label).join(" · ")}</small></div></div><a href="#ground-truth-comparison">Xem đối chiếu</a></section>}
               <div className="review-command-bar">
-              <div><span className="command-status-dot" /><strong>{snapshot.status === "awaiting_review" ? "Ready for engineer review" : `Workflow: ${snapshot.status}`}</strong><small>{snapshot.claims.length} AI observation(s) · {snapshot.has_log ? "Video + telemetry" : "Video only"}</small></div>
-              <div><a className="command-secondary" href="#selected-evidence">Inspect evidence</a><button type="button" className="command-decision" disabled={snapshot.status !== "awaiting_review" || busy} onClick={() => setDecisionOpen(true)}><span aria-hidden="true">☷</span> Make decision</button></div>
+              <div><span className="command-status-dot" /><strong>{snapshot.status === "awaiting_review" ? "Ready for engineer review" : `Workflow: ${snapshot.status}`}</strong><small>{snapshot.claims.length} nhận định AI · {snapshot.has_log ? "Video + telemetry" : "Video only"}</small></div>
+              <div><a className="command-secondary" href="#claims">Xem claims</a><button type="button" className="command-decision" disabled={snapshot.status !== "awaiting_review" || busy} onClick={() => setDecisionOpen(true)}><span aria-hidden="true">☷</span> Make decision</button></div>
               </div>
               {snapshot.status === "failed" && <section className="workspace-panel workspace-state error-state" role="alert"><div><strong>Phân tích không hoàn tất</strong><p>{snapshot.error_message || "Workflow đã dừng trước khi tạo kết quả review."}</p><button type="button" className="command-secondary" onClick={() => router.push("/")}>Quay lại tải lên và thử lại</button></div></section>}
-              <div className="incident-review-workspace" id="engineer-review">
+              <div className="incident-review-workspace review-flow-vertical" id="engineer-review">
               <main className="incident-evidence-column">
-                <IncidentClipPlayer clipUrl={clip || originalVideoUrl} isOriginalVideo={aiFoundNoIncident && !clip} noIncident={aiFoundNoIncident} start={report?.incident_window?.t_start} focus={report?.incident_window?.t0} end={report?.incident_window?.t_end} claims={snapshot.claims} selectedId={selectedClaimId} onSelect={selectClaim} videoRef={videoRef} />
-                <TelemetryPanel summaries={snapshot.claim_log_summaries} selectedClaimId={selectedClaim?.claim_id ?? ""} hasLog={snapshot.has_log} chartUris={telemetryCharts} comparison={<GroundTruthComparison snapshot={snapshot} />} />
-                <div className="evidence-presentation-stack" id="selected-evidence"><EvidenceInspector snapshot={snapshot} claim={selectedClaim} /></div>
-              </main>
-              <div className="incident-decision-column">
+                <section className="workspace-panel incident-overview-section" id="overview"><div className="workspace-panel-heading"><div><p className="eyebrow">Incident Overview</p><h2>Tổng quan sự cố</h2></div><span>{snapshot.incident_id}</span></div><dl><div><dt>Trạng thái</dt><dd>{snapshot.status}</dd></div><div><dt>Khoảng phân tích</dt><dd>{report?.incident_window ? `${report.incident_window.t_start.toFixed(2)}s → ${report.incident_window.t_end.toFixed(2)}s` : "—"}</dd></div><div><dt>Sự kiện chính</dt><dd>{typeof report?.incident_window?.t0 === "number" ? `${report.incident_window.t0.toFixed(2)}s` : "—"}</dd></div><div><dt>Nguồn dữ liệu</dt><dd>{snapshot.has_log ? "Video + telemetry" : "Video"}</dd></div></dl></section>
                 {["queued", "running"].includes(snapshot.status) && <div id="processing-status"><ProcessingPipeline snapshot={snapshot} /></div>}
+                <IncidentClipPlayer clipUrl={clip || originalVideoUrl} isOriginalVideo={aiFoundNoIncident && !clip} noIncident={aiFoundNoIncident} start={report?.incident_window?.t_start} focus={report?.incident_window?.t0} end={report?.incident_window?.t_end} claims={snapshot.claims} selectedId={selectedClaimId} onSelect={selectClaim} videoRef={videoRef} />
+                <IncidentTimeline report={report} claims={snapshot.claims} onSelect={selectClaim} />
+                <TelemetryPanel hasLog={snapshot.has_log} charts={telemetryCharts} />
+                <ClaimReviewList claims={snapshot.claims} summaries={snapshot.claim_log_summaries} verificationResults={verificationResults} hasLog={snapshot.has_log} selectedClaimId={selectedClaim?.claim_id} onSelect={selectClaim} />
                 <ReviewSidebar snapshot={snapshot} selectedClaim={selectedClaim} busy={busy} error={error} onSelectClaim={selectClaim} onReview={submitReview} />
-              </div>
+                <TechnicalDetails snapshot={snapshot} comparison={<GroundTruthComparison snapshot={snapshot} />} />
+              </main>
             </div>
             <DecisionModal open={decisionOpen} snapshot={snapshot} selectedClaim={selectedClaim} busy={busy} onClose={() => setDecisionOpen(false)} onReview={submitReview} />
           </>

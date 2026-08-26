@@ -6,7 +6,7 @@ import asyncio
 import json
 import re
 import shutil
-from contextlib import suppress
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -297,27 +297,33 @@ class MediaService:
         return VideoSequenceManifest(frames=frames, source_video_uri=str(source), duration_s=probe.duration_s)
 
     async def _run_command(self, *command: str) -> tuple[str, str]:
+        """Run FFmpeg without depending on event-loop subprocess support.
+
+        Windows ASGI servers may install a SelectorEventLoop, whose subprocess
+        transport raises ``NotImplementedError``. ``subprocess.run`` owns the
+        child process and its timeout independently, while ``asyncio.to_thread``
+        keeps the request event loop responsive on every supported platform.
+        """
         try:
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            completed = await asyncio.to_thread(
+                subprocess.run,
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=self._command_timeout_s,
+                check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=self._command_timeout_s)
-        except TimeoutError as exc:
-            if "process" in locals():
-                if process.returncode is None:
-                    with suppress(ProcessLookupError):
-                        process.kill()
-                with suppress(ProcessLookupError):
-                    await process.communicate()
+        except subprocess.TimeoutExpired as exc:
             raise MediaServiceError("MEDIA_COMMAND_TIMEOUT", "media command timed out") from exc
         except OSError as exc:
             raise MediaServiceError("MEDIA_COMMAND_FAILED", str(exc)) from exc
-        if process.returncode != 0:
-            detail = stderr.decode("utf-8", errors="replace").strip()
+        stdout = completed.stdout.decode("utf-8", errors="replace")
+        stderr = completed.stderr.decode("utf-8", errors="replace")
+        if completed.returncode != 0:
+            detail = stderr.strip()
             raise MediaServiceError("MEDIA_COMMAND_FAILED", detail or "media command failed")
-        return stdout.decode("utf-8"), stderr.decode("utf-8", errors="replace")
+        return stdout, stderr
 
 
 def _existing_file(uri: str) -> Path:

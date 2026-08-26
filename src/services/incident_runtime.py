@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import shutil
 import sqlite3
@@ -29,6 +30,8 @@ from src.services.verification import OpenAIVerificationService
 from src.services.video_memory import VideoMemoryLimits, VideoMemoryWorkflow, VideoMemoryWorkflowConfig
 from src.services.vlm import QwenNativeVideoVLMService
 from src.services.workflow import WorkflowError, WorkflowService
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -86,6 +89,7 @@ class ConfiguredIncidentInputValidator:
         try:
             metadata = await self._media.probe_video(str(video))
         except Exception as exc:
+            logger.exception("Video validation failed for an accepted incident upload")
             raise WorkflowError("VIDEO_INPUT_INVALID", "video input could not be validated") from exc
         if metadata.duration_s > self._settings.incident_max_duration_s:
             raise WorkflowError("VIDEO_DURATION_EXCEEDED", "video duration exceeds 60 seconds")

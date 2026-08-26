@@ -31,6 +31,6 @@ export function EvaluationContent() {
       <article><span>Engineer decisions</span><strong>{snapshot.review_audit.length}</strong><small>{metrics.engineerEditCount} direct edits</small></article>
       <article><span>AI revision cycles</span><strong>{snapshot.manual_reanalysis_count}</strong><small>{totalTokens.toLocaleString()} model tokens</small></article>
     </section>
-    <section className="evaluation-details"><div><h3>Workflow evidence</h3><p>{snapshot.final_report?.summary ?? snapshot.draft_report?.summary ?? snapshot.video_summary}</p></div><div className="evaluation-actions"><Link className="secondary-action" href="/processing#engineer-review">← Return to review</Link><Link className="approve-action" href="/report">Open reviewed report →</Link></div></section>
+    <section className="evaluation-details"><div><h3>Workflow evidence</h3><p>{snapshot.final_report?.summary ?? snapshot.draft_report?.summary ?? snapshot.draft_report?.video_observations?.narrative ?? "The workflow has not produced a report narrative yet."}</p></div><div className="evaluation-actions"><Link className="secondary-action" href="/processing#engineer-review">← Return to review</Link><Link className="approve-action" href="/report">Open reviewed report →</Link></div></section>
   </>;
 }

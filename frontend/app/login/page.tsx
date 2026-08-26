@@ -2,12 +2,13 @@
 
 import { FormEvent, type ReactNode, useEffect, useState } from "react";
 import Image from "next/image";
-import { Michroma } from "next/font/google";
+import { Manrope, Michroma } from "next/font/google";
 import { useRouter } from "next/navigation";
 import { demoAccount, readSession, saveDemoSession } from "../../lib/auth";
 import styles from "./login.module.css";
 
 const michroma = Michroma({ subsets: ["latin", "latin-ext"], weight: "400", variable: "--font-michroma" });
+const manrope = Manrope({ subsets: ["latin", "latin-ext"], variable: "--font-login" });
 
 const welcomeMessages = ["WELCOME TO", "Trợ Lí phân tích và viết báo cáo xe tự hành"];
 
@@ -81,7 +82,7 @@ export default function LoginPage() {
 
   return (
     <main className={styles.page}>
-      <div className={`${styles.identityOverlay} ${welcomeMessageIndex === 1 ? styles.longMessageActive : ""} ${michroma.variable}`} aria-label="Welcome to VLens">
+      <div className={`${styles.identityOverlay} ${welcomeMessageIndex === 1 ? styles.longMessageActive : ""} ${michroma.variable} ${manrope.variable}`} aria-label="Welcome to VLens">
         <div
           key={welcomeMessage}
           className={`${styles.welcomeText} ${welcomeMessageIndex === 1 ? styles.longWelcomeText : ""}`}
@@ -91,7 +92,7 @@ export default function LoginPage() {
         </div>
         <Image className={styles.vlensWordmark} src="/images/vlens.png" alt="VLENS" width={2172} height={724} priority />
       </div>
-      <section className={`${styles.shell} ${michroma.variable}`} aria-label="Đăng nhập Incident Lens">
+      <section className={`${styles.shell} ${manrope.variable}`} aria-label="Đăng nhập Incident Lens">
         <div className={styles.formSide}>
           <form className={styles.card} onSubmit={handleSubmit} noValidate>
             <div className={styles.loginPrimary}>

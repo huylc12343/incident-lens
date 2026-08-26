@@ -100,7 +100,7 @@ export default function Home() {
           {!heroCollapsed && <div className="hero-content">
             <h1 id="page-title">{text("Review driving evidence with confidence.", "Rà soát bằng chứng hành trình một cách tin cậy.")}</h1>
             <p className="hero-copy">
-              {text("Analyze synchronized video and telemetry, inspect every AI observation, and keep the engineer in control of the final decision.", "Phân tích video và dữ liệu telemetry đồng bộ, kiểm tra từng quan sát AI và đảm bảo kỹ sư kiểm soát quyết định cuối cùng.")}
+              {text("Analyze synchronized video and telemetry, inspect every AI claim, and keep the engineer in control of the final decision.", "Phân tích video và dữ liệu telemetry đồng bộ, kiểm tra từng nhận định AI và đảm bảo kỹ sư kiểm soát quyết định cuối cùng.")}
             </p>
             <div className="hero-ai-status" aria-label="AI đang sẵn sàng lắng nghe">
               <div className="hero-ai-mascot-wrap">

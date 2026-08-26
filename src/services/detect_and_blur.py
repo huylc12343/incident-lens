@@ -97,6 +97,13 @@ def adaptive_kernel_size(width, height, ratio, min_kernel, max_kernel):
     return kernel
 
 
+def redaction_detection_interval(source_fps: float, target_detection_fps: float) -> int:
+    """Return the frame stride that best caps detector inference frequency."""
+    if source_fps <= 0 or target_detection_fps <= 0:
+        raise ValueError("source and target detection FPS must be positive")
+    return max(1, int(round(source_fps / target_detection_fps)))
+
+
 def _box_iou(left, right):
     """Small NumPy-free IoU helper used by the lightweight local tracker."""
     lx1, ly1, lx2, ly2 = left

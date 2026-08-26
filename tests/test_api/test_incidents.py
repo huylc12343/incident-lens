@@ -20,7 +20,7 @@ def _snapshot(status: str = "awaiting_review") -> IncidentSnapshot:
 @pytest.mark.asyncio
 async def test_incident_api_create_get_and_approve(client) -> None:
     service = SimpleNamespace(
-        enqueue=AsyncMock(return_value=_snapshot("queued")),
+        create=AsyncMock(return_value=_snapshot()),
         get=AsyncMock(return_value=_snapshot()),
         review=AsyncMock(return_value=_snapshot("approved")),
     )
@@ -43,7 +43,6 @@ async def test_incident_api_create_get_and_approve(client) -> None:
         del app.state.incident_workflow_service
 
     assert created.status_code == 202
-    service.enqueue.assert_awaited_once()
     assert fetched.status_code == 200
     assert approved.status_code == 200
     assert approved.json()["status"] == "approved"
@@ -103,7 +102,7 @@ async def test_incident_api_maps_safe_domain_errors(client) -> None:
 @pytest.mark.asyncio
 async def test_incident_api_maps_duplicate_create_to_conflict(client) -> None:
     service = SimpleNamespace(
-        enqueue=AsyncMock(side_effect=WorkflowError("INCIDENT_ALREADY_EXISTS", "duplicate")),
+        create=AsyncMock(side_effect=WorkflowError("INCIDENT_ALREADY_EXISTS", "duplicate")),
         get=AsyncMock(),
         review=AsyncMock(),
     )

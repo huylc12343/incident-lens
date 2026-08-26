@@ -24,6 +24,8 @@ from pydantic import BaseModel, ValidationError
 
 from src.models.incidents import (
     AnalysisMode,
+    AutomaticReanalysisOutput,
+    Claim,
     IncidentWindow,
     NativeVideoAnalysisRequest,
     ReanalysisRequest,
@@ -147,20 +149,21 @@ class QwenNativeVideoVLMService:
                 else (request.incident_window.t_start, request.incident_window.t_end)
             )
         )
-        patch = await self._generate(
+        output = await self._generate(
             incident_id=request.incident_id,
             operation="claim_reanalysis",
             description="Phân tích lại các claim được chọn bằng Qwen3-VL-Flash.",
             video_uri=request.normalized_video_uri,
             system_prompt=request.prompt.text,
             user_prompt=_prompt_context_text(request.prompt.context),
-            output_model=VideoMemoryPatch,
-            model_defaults={
-                "target_claim_ids": request.target_claim_ids,
-                "base_revision": request.current_memory.revision,
-            },
+            output_model=AutomaticReanalysisOutput,
             timestamp_bounds=timestamp_bounds,
             input_video_start_s=request.input_video_start_s,
+        )
+        patch = VideoMemoryPatch(
+            target_claim_ids=request.target_claim_ids,
+            claims=[Claim.model_validate(item.model_dump()) for item in output.claims],
+            base_revision=request.current_memory.revision,
         )
         _validate_patch_targets(patch, request.target_claim_ids)
         return patch
@@ -505,6 +508,8 @@ def _validate_qwen_timestamp_bounds(result: BaseModel, minimum_s: float, maximum
             for claim_index, claim in enumerate(result.claims)
             for evidence_index, evidence in enumerate(claim.evidence)
         )
+    elif isinstance(result, AutomaticReanalysisOutput):
+        timestamps.extend((f"claims.{index}.timestamp_s", item.timestamp_s) for index, item in enumerate(result.claims))
     errors = [
         {
             "location": location,
@@ -559,6 +564,16 @@ def _stabilize_qwen_timestamps(
             for claim in result.claims
         ]
         return result.model_copy(update={"claims": claims})
+
+    if isinstance(result, AutomaticReanalysisOutput):
+        return result.model_copy(
+            update={
+                "claims": [
+                    claim.model_copy(update={"timestamp_s": normalize(claim.timestamp_s)})
+                    for claim in result.claims
+                ]
+            }
+        )
 
     if not isinstance(result, VideoMemory):
         return result

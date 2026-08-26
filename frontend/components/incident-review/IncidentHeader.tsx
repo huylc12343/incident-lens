@@ -16,7 +16,7 @@ export function IncidentHeader({ snapshot }: { snapshot: IncidentSnapshot | null
       </div>
       <div className={`workspace-status ${ready ? "ready" : ""}`}>
         <strong>{ready ? text("Processing complete · Ready for review", "Xử lý hoàn tất · Sẵn sàng rà soát") : snapshot?.status ?? text("Initializing", "Đang khởi tạo")}</strong>
-        <small>{snapshot?.claims.length ?? 0} {text("grounded observation(s)", "quan sát có bằng chứng")}</small>
+        <small>{snapshot?.claims.length ?? 0} {text("grounded claim(s)", "nhận định có bằng chứng")}</small>
       </div>
     </section>
   );

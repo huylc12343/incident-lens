@@ -61,9 +61,6 @@ async def human_review_interrupt_node(state: IncidentState) -> dict[str, object]
             "video_memory": edited_memory,
             "last_review_action": decision.action,
             "review_audit": audit,
-            "warnings": decision.edits.warnings
-            if decision.edits and decision.edits.warnings is not None
-            else state.get("warnings", []),
         }
     return {
         "status": "running",
@@ -76,14 +73,34 @@ async def human_review_interrupt_node(state: IncidentState) -> dict[str, object]
 
 def apply_report_edits(
     report: DraftReport,
-    memory: VideoMemory | None,
-    edits: ReportEdits | None,
-) -> tuple[DraftReport, VideoMemory | None]:
+    memory_or_edits: VideoMemory | ReportEdits | None,
+    edits: ReportEdits | None = None,
+) -> DraftReport | tuple[DraftReport, VideoMemory | None]:
+    """Apply allowlisted reviewer corrections without invoking a model.
+
+    The two-argument form remains compatible with older callers and returns
+    only the report. The structured three-argument form also synchronizes the
+    canonical VideoMemory used by subsequent review/re-analysis steps.
+    """
+    legacy_call = edits is None
+    if legacy_call:
+        memory = None
+        edits = ReportEdits.model_validate(memory_or_edits)
+    else:
+        memory = memory_or_edits if isinstance(memory_or_edits, VideoMemory) else None
     if edits is None:
         raise ValueError("report edits are required")
+
     updates: dict[str, object] = {"review_status": "edited"}
     if edits.type_of_accident is not None:
         updates["type_of_accident"] = edits.type_of_accident
+
+    if any(value is not None for value in (edits.t_start, edits.t0, edits.t_end)):
+        updates["incident_window"] = IncidentWindow(
+            t_start=report.incident_window.t_start if edits.t_start is None else edits.t_start,
+            t0=report.incident_window.t0 if edits.t0 is None else edits.t0,
+            t_end=report.incident_window.t_end if edits.t_end is None else edits.t_end,
+        )
     if edits.summary is not None:
         updates["summary"] = edits.summary
     if edits.hypothesized_causes is not None:
@@ -95,60 +112,48 @@ def apply_report_edits(
             update={"narrative": edits.video_observations}
         )
     if edits.log_findings is not None:
-        updates["log_findings"] = report.log_findings.model_copy(update={"narrative": edits.log_findings})
+        updates["log_findings"] = report.log_findings.model_copy(
+            update={"narrative": edits.log_findings}
+        )
     if edits.alignment is not None:
         updates["alignment"] = report.alignment.model_copy(update={"narrative": edits.alignment})
     if edits.warnings is not None:
-        updates["evidence_and_warnings"] = report.evidence_and_warnings.model_copy(update={"warnings": edits.warnings})
+        updates["evidence_and_warnings"] = report.evidence_and_warnings.model_copy(
+            update={"warnings": edits.warnings}
+        )
 
-    current_window = report.incident_window
-    incident_window = IncidentWindow(
-        t_start=edits.t_start if edits.t_start is not None else current_window.t_start,
-        t0=edits.t0 if edits.t0 is not None else current_window.t0,
-        t_end=edits.t_end if edits.t_end is not None else current_window.t_end,
-    )
-    if {"t_start", "t0", "t_end"} & edits.model_fields_set:
-        updates["incident_window"] = incident_window
+    edited_report = report.model_copy(update=updates)
+    edited_memory = _apply_memory_edits(memory, edited_report, edits)
+    if legacy_call:
+        return edited_report
+    return edited_report, edited_memory
 
-    edited_memory = memory
-    if memory is not None:
-        memory_updates: dict[str, object] = {}
-        if edits.summary is not None:
-            memory_updates["video_summary"] = edits.summary
-        if {"t_start", "t0", "t_end"} & edits.model_fields_set:
-            memory_updates["incident_window"] = incident_window
-        if edits.claims is not None:
-            claim_edits = {claim.claim_id: claim for claim in edits.claims}
-            edited_claims = []
-            for claim in memory.claims:
-                claim_edit = claim_edits.get(claim.claim_id)
-                if claim_edit is None:
-                    edited_claims.append(claim)
-                    continue
-                claim_timestamp = claim_edit.timestamp_s
-                existing_evidence = {item.evidence_id: item for item in claim.evidence}
-                evidence = claim.evidence
-                if claim_edit.evidence_ids is not None:
-                    evidence = [
-                        existing_evidence.get(evidence_id)
-                        or EvidenceReference(
-                            evidence_id=evidence_id,
-                            timestamp_s=claim_timestamp if claim_timestamp is not None else claim.timestamp_s or 0,
-                        )
-                        for evidence_id in claim_edit.evidence_ids
-                    ]
-                edited_claims.append(
-                    claim.model_copy(
-                        update={
-                            "text": claim_edit.text,
-                            "timestamp_s": claim_timestamp,
-                            "verification_status": claim_edit.verification_status or claim.verification_status,
-                            "evidence": evidence,
-                        }
-                    )
-                )
-            memory_updates["claims"] = edited_claims
-        if memory_updates:
-            edited_memory = memory.model_copy(update=memory_updates)
 
-    return report.model_copy(update=updates), edited_memory
+def _apply_memory_edits(
+    memory: VideoMemory | None,
+    report: DraftReport,
+    edits: ReportEdits,
+) -> VideoMemory | None:
+    if memory is None:
+        return None
+    memory_updates: dict[str, object] = {"incident_window": report.incident_window}
+    if edits.summary is not None:
+        memory_updates["video_summary"] = edits.summary
+    if edits.claims is not None:
+        claims_by_id = {claim.claim_id: claim for claim in memory.claims}
+        for edit in edits.claims:
+            claim = claims_by_id.get(edit.claim_id)
+            if claim is None:
+                raise ValueError(f"claim does not exist: {edit.claim_id}")
+            claim_updates = edit.model_dump(exclude={"claim_id", "evidence_ids"}, exclude_none=True)
+            timestamp_s = claim_updates.get("timestamp_s", claim.timestamp_s)
+            if edit.evidence_ids is not None:
+                if timestamp_s is None:
+                    raise ValueError("claim evidence requires a timestamp")
+                claim_updates["evidence"] = [
+                    EvidenceReference(evidence_id=evidence_id, timestamp_s=timestamp_s)
+                    for evidence_id in edit.evidence_ids
+                ]
+            claims_by_id[edit.claim_id] = claim.model_copy(update=claim_updates)
+        memory_updates["claims"] = [claims_by_id[claim.claim_id] for claim in memory.claims]
+    return memory.model_copy(update=memory_updates)

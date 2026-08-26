@@ -27,18 +27,13 @@ def incident_http_error(exc: Exception) -> HTTPException:
     safe_message = {
         "INCIDENT_NOT_FOUND": "incident does not exist",
         "INCIDENT_ALREADY_EXISTS": "incident ID already exists",
+        "VIDEO_INPUT_INVALID": (
+            "video input could not be validated; verify the file is a supported video "
+            "and FFmpeg can run"
+        ),
         "INVALID_REVIEW_TRANSITION": "incident is not awaiting review",
         "REANALYSIS_TARGET_INVALID": "re-analysis target claim does not exist",
         "REPORT_ALREADY_STORED": "terminal outcome is already stored",
         "INCIDENT_DELETE_ACTIVE": "running incident cannot be deleted",
-        "ANALYSIS_PROMPT_TOO_LONG": "analysis prompt is too long",
-        "VIDEO_INPUT_INVALID": "video could not be read; use a valid MP4, MOV, AVI, MKV, or WebM file",
-        "VIDEO_DURATION_EXCEEDED": "video must be 60 seconds or shorter",
-        "INCIDENT_INPUT_OUTSIDE_ROOT": "uploaded file is outside the configured storage directory",
-        "INCIDENT_INPUT_NOT_FOUND": "uploaded file could not be found",
-        "INCIDENT_INPUT_TOO_LARGE": "uploaded file exceeds the size limit",
-        "UPLOAD_FILE_TYPE_INVALID": "unsupported file type; upload a video and a CSV telemetry file",
-        "UPLOAD_FILE_TOO_LARGE": "uploaded file exceeds the size limit",
-        "UPLOAD_FILE_EMPTY": "uploaded file is empty",
     }.get(code, "incident input is invalid" if code in input_errors else "incident workflow failed")
     return HTTPException(status_code=status_code, detail={"code": code, "message": safe_message})

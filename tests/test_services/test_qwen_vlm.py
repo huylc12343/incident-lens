@@ -95,7 +95,24 @@ async def test_qwen_reanalysis_injects_backend_owned_patch_fields() -> None:
             completions=SimpleNamespace(
                 create=AsyncMock(
                     return_value=SimpleNamespace(
-                        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"claims": []})))],
+                        choices=[
+                            SimpleNamespace(
+                                message=SimpleNamespace(
+                                    content=json.dumps(
+                                        {
+                                            "claims": [
+                                                {
+                                                    "claim_id": "claim-01",
+                                                    "text": "Xe ego tiếp tục di chuyển.",
+                                                    "timestamp_s": 1,
+                                                    "verification_status": "unverified",
+                                                }
+                                            ]
+                                        }
+                                    )
+                                )
+                            )
+                        ],
                     )
                 )
             )
@@ -115,6 +132,9 @@ async def test_qwen_reanalysis_injects_backend_owned_patch_fields() -> None:
 
     assert result.target_claim_ids == ["claim-01"]
     assert result.base_revision == 3
+    structured_prompt = client.chat.completions.create.await_args.kwargs["messages"][0]["content"]
+    assert '"target_claim_ids"' not in structured_prompt
+    assert '"base_revision"' not in structured_prompt
 
 
 @pytest.mark.asyncio
@@ -385,7 +405,7 @@ async def test_qwen_forces_video_claims_to_unverified_before_schema_validation(m
 
 
 @pytest.mark.asyncio
-async def test_qwen_forces_reanalysis_claims_to_unverified_before_schema_validation() -> None:
+async def test_qwen_reanalysis_requires_unverified_claim_status() -> None:
     memory = VideoMemory(
         global_scene="Đường giao thông.",
         incident_window=IncidentWindow(t_start=0, t0=1, t_end=2),
@@ -398,8 +418,7 @@ async def test_qwen_forces_reanalysis_claims_to_unverified_before_schema_validat
                 "claim_id": "claim-01",
                 "text": "Xe ego dừng lại.",
                 "timestamp_s": 1,
-                "evidence": [],
-                "verification_status": "verified_by_video",
+                "verification_status": "unverified",
             }
         ]
     }
@@ -433,15 +452,14 @@ async def test_qwen_reanalysis_allows_target_claim_outside_incident_window() -> 
         analysis_mode=AnalysisMode.NATIVE_VIDEO,
     )
     payload = {
-        "target_claim_ids": ["claim-early"],
         "claims": [
             {
                 "claim_id": "claim-early",
                 "text": "Xe bắt đầu di chuyển ở đầu video",
                 "timestamp_s": 0,
+                "verification_status": "unverified",
             }
         ],
-        "base_revision": 1,
     }
     response = SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
@@ -794,6 +812,7 @@ async def test_qwen_reanalysis_short_clip_requires_global_source_timestamps() ->
                 "claim_id": "claim-1",
                 "text": "Xe bắt đầu rẽ phải.",
                 "timestamp_s": 26.5,
+                "verification_status": "unverified",
             }
         ]
     }
@@ -809,9 +828,8 @@ async def test_qwen_reanalysis_short_clip_requires_global_source_timestamps() ->
         prompt=PromptEnvelope(
             text="Chỉ phân tích lại claim mục tiêu.",
             context={
-                "target_claims": [{"claim_id": "claim-1", "text": "Xe bắt đầu rẽ phải.", "timestamp_s": 26.5}],
+                "target_claim": {"claim_id": "claim-1", "text": "Xe bắt đầu rẽ phải.", "timestamp_s": 26.5},
                 "verification_reasons": {"claim-1": "Telemetry contradicts the turn claim."},
-                "reanalysis_window": [24.5, 28.5],
             },
         ),
         target_claim_ids=["claim-1"],
@@ -829,7 +847,7 @@ async def test_qwen_reanalysis_short_clip_requires_global_source_timestamps() ->
     structured_prompt = call["messages"][0]["content"]
     assert call["messages"][1]["content"][0]["video_url"]["url"] == request.normalized_video_uri
     assert call["messages"][1]["content"][1]["text"] == (
-        '<context>{"reanalysis_window":[24.5,28.5],"target_claims":[{"claim_id":"claim-1","text":"Xe bắt đầu rẽ phải.","timestamp_s":26.5}],"verification_reasons":{"claim-1":"Telemetry contradicts the turn claim."}}</context>'
+        '<context>{"target_claim":{"claim_id":"claim-1","text":"Xe bắt đầu rẽ phải.","timestamp_s":26.5},"verification_reasons":{"claim-1":"Telemetry contradicts the turn claim."}}</context>'
     )
     assert "mốc 0s của clip này tương ứng với 24.5s của video gốc" in structured_prompt
     assert "Clip phủ vùng 24.5s đến 28.5s của video gốc" in structured_prompt

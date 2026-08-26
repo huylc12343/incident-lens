@@ -30,15 +30,26 @@ class VerificationStatus(StrEnum):
 
 
 class AccidentType(StrEnum):
-    REAR_END_COLLISION = "rear_end_collision"
-    CROSSING_COLLISION = "crossing_collision"
+    VEHICLE_COLLISION = "vehicle_collision"
+    # Backward-compatible value used by structured edits and evaluation labels.
     SIDE_COLLISION = "side_collision"
-    HEAD_ON_COLLISION = "head_on_collision"
+    CROSSING_COLLISION = "crossing_collision"
     PEDESTRIAN_COLLISION = "pedestrian_collision"
-    STATIC_OBJECT_COLLISION = "static_object_collision"
-    ROADSIDE_COLLISION = "roadside_collision"
+    ENVIRONMENT_COLLISION = "environment_collision"
     NO_INCIDENT = "no_incident"
     OTHER_UNKNOWN = "other_unknown"
+
+    @classmethod
+    def _missing_(cls, value: object) -> AccidentType | None:
+        """Map stored reports created with the previous, more granular taxonomy."""
+        legacy_values = {
+            "rear_end_collision": cls.VEHICLE_COLLISION,
+            "side_collision": cls.VEHICLE_COLLISION,
+            "head_on_collision": cls.VEHICLE_COLLISION,
+            "static_object_collision": cls.ENVIRONMENT_COLLISION,
+            "roadside_collision": cls.ENVIRONMENT_COLLISION,
+        }
+        return legacy_values.get(value) if isinstance(value, str) else None
 
 
 class PromptSource(StrEnum):
@@ -182,6 +193,19 @@ class VideoMemoryPatch(ContractModel):
         if not returned_ids.issubset(target_ids):
             raise ValueError("memory patch cannot modify claims outside target_claim_ids")
         return self
+
+
+class AutomaticReanalysisClaim(ContractModel):
+    claim_id: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+    timestamp_s: float = Field(ge=0)
+    verification_status: Literal[VerificationStatus.UNVERIFIED]
+
+
+class AutomaticReanalysisOutput(ContractModel):
+    """The minimal Qwen response for one automatically re-analyzed claim."""
+
+    claims: list[AutomaticReanalysisClaim] = Field(min_length=1, max_length=1)
 
 
 class TimestampedFramesAnalysisRequest(ContractModel):
@@ -336,12 +360,32 @@ class ClaimDerivedDynamics(ContractModel):
     )
 
 
+DynamicHintSignal = Literal["throttle", "brake", "steer", "acceleration"]
+
+
+class ClaimDynamicHint(ContractModel):
+    """One anomalous telemetry interval overlapping a claim timestamp, with its peak value."""
+
+    signal: DynamicHintSignal
+    start_s: float = Field(ge=0)
+    end_s: float = Field(ge=0)
+    text: str = Field(min_length=1)
+    value: float
+
+    @model_validator(mode="after")
+    def validate_window(self) -> ClaimDynamicHint:
+        if self.end_s < self.start_s:
+            raise ValueError("dynamic hint must satisfy start_s <= end_s")
+        return self
+
+
 class ClaimVerificationContext(ContractModel):
     claim_id: str = Field(min_length=1)
     available_signals: list[TelemetrySignalName] = Field(default_factory=list)
     raw_telemetry: ClaimRawTelemetry
     derived: ClaimTelemetryDerived
     derived_dynamics: ClaimDerivedDynamics = Field(default_factory=ClaimDerivedDynamics)
+    dynamic_hints: list[ClaimDynamicHint] = Field(default_factory=list)
     allowed_evidence_ids: list[str] = Field(default_factory=list, max_length=5)
 
 
@@ -366,6 +410,12 @@ class ClaimVerification(ContractModel):
 
 class VerificationResult(ContractModel):
     has_accident: bool | None = None
+    results: list[ClaimVerification]
+
+
+class ReverificationResult(ContractModel):
+    """Claim-level results produced after automatic re-analysis only."""
+
     results: list[ClaimVerification]
 
 
@@ -481,6 +531,8 @@ class MemoryReanalysisService(Protocol):
 @runtime_checkable
 class VerificationService(Protocol):
     async def verify(self, request: VerificationRequest) -> VerificationResult: ...
+
+    async def reverify(self, request: VerificationRequest) -> ReverificationResult: ...
 
 
 @runtime_checkable

@@ -25,7 +25,7 @@ export function RecentReviewsTable() {
     sessionStorage.setItem(INCIDENT_KEYS.snapshot, JSON.stringify(snapshot));
     const report = snapshot.final_report ?? snapshot.draft_report;
     const timestamp = report?.incident_window?.t0 ?? snapshot.claims[0]?.timestamp_s;
-    if (timestamp !== undefined) sessionStorage.setItem(INCIDENT_KEYS.timestamp, secondsToTimestamp(timestamp));
+    if (typeof timestamp === "number") sessionStorage.setItem(INCIDENT_KEYS.timestamp, secondsToTimestamp(timestamp));
     router.push(snapshot.status === "awaiting_review" ? "/processing#engineer-review" : snapshot.status === "running" || snapshot.status === "queued" ? "/processing" : "/report");
   };
 

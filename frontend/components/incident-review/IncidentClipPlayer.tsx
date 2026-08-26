@@ -39,8 +39,8 @@ export function IncidentClipPlayer({ clipUrl, isOriginalVideo = false, noInciden
   const progress = timelineDuration > 0 ? Math.min(100, (currentTime / timelineDuration) * 100) : 0;
 
   const markers = useMemo(() => claims
-    .filter((claim) => claim.timestamp_s >= clipStart && (!end || claim.timestamp_s <= end))
-    .map((claim) => ({ claim, clipTime: Math.max(0, claim.timestamp_s - clipStart) })), [claims, clipStart, end]);
+    .filter((claim) => typeof claim.timestamp_s === "number" && claim.timestamp_s >= clipStart && (!end || claim.timestamp_s <= end))
+    .map((claim) => ({ claim, clipTime: Math.max(0, (claim.timestamp_s ?? 0) - clipStart) })), [claims, clipStart, end]);
   const eventClipTime = focus !== undefined ? Math.max(0, focus - clipStart) : undefined;
   const position = (time: number) => timelineDuration > 0 ? Math.max(0, Math.min(100, (time / timelineDuration) * 100)) : 0;
 
@@ -124,7 +124,7 @@ export function IncidentClipPlayer({ clipUrl, isOriginalVideo = false, noInciden
         <div className="refined-clip-controls">
           <div className="clip-progress-track" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); seekFromTrack(event); }} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) seekFromTrack(event); }} onPointerUp={(event) => { seekFromTrack(event); event.currentTarget.releasePointerCapture(event.pointerId); }} onKeyDown={(event) => { if (event.key === "ArrowLeft") seek(currentTime - .25); if (event.key === "ArrowRight") seek(currentTime + .25); }} role="slider" tabIndex={0} aria-label={text("Video timeline", "Dòng thời gian video")} aria-valuemin={0} aria-valuemax={timelineDuration} aria-valuenow={currentTime}>
             <span ref={progressFillRef} className="clip-progress-fill" style={{ width: `${progress}%` }} />
-            {markers.map(({ claim, clipTime }) => <button key={claim.claim_id} type="button" className={`clip-evidence-marker ${claim.claim_id === selectedId ? "selected" : ""}`} style={{ left: `${position(clipTime)}%` }} onClick={(event) => { event.stopPropagation(); onSelect(claim); seek(clipTime); }} aria-label={`Seek to ${claim.claim_id} at ${secondsToTimestamp(claim.timestamp_s)}`} title={`${claim.claim_id} · ${secondsToTimestamp(claim.timestamp_s)}`} />)}
+            {markers.map(({ claim, clipTime }) => <button key={claim.claim_id} type="button" className={`clip-evidence-marker ${claim.claim_id === selectedId ? "selected" : ""}`} style={{ left: `${position(clipTime)}%` }} onClick={(event) => { event.stopPropagation(); onSelect(claim); seek(clipTime); }} aria-label={`Seek to ${claim.claim_id} at ${secondsToTimestamp(claim.timestamp_s ?? 0)}`} title={`${claim.claim_id} · ${secondsToTimestamp(claim.timestamp_s ?? 0)}`} />)}
             {eventClipTime !== undefined && <button type="button" className="clip-main-event-marker" style={{ left: `${position(eventClipTime)}%` }} onClick={(event) => { event.stopPropagation(); seek(eventClipTime); }} aria-label={`Seek to detected event at ${secondsToTimestamp(focus ?? 0)}`} title={`Detected event · ${secondsToTimestamp(focus ?? 0)}`} />}
             <i ref={playheadRef} className="clip-playhead" style={{ left: `${progress}%` }} />
           </div>

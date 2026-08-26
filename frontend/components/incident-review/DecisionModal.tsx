@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { secondsToTimestamp } from "../../lib/incidentSession";
 import type { Claim, IncidentSnapshot, ReviewPayload } from "../../types/incident";
 import { StructuredReportEditor } from "./StructuredReportEditor";
 
@@ -10,7 +11,7 @@ const decisions: Array<{ id: Decision; title: string; description: string; symbo
   { id: "approve", title: "Accept & approve", description: "Finalize the reviewed report and close the incident.", symbol: "✓" },
   { id: "edit", title: "Edit report", description: "Correct all content shown in the AI-assisted evidence review.", symbol: "✎" },
   { id: "not_incident", title: "Not an incident", description: "Close the case because the evidence does not support an incident.", symbol: "×" },
-  { id: "reanalyze", title: "Request re-analysis", description: "Send focused feedback to the agent for the selected observation.", symbol: "↻" },
+  { id: "reanalyze", title: "Request re-analysis", description: "Send focused feedback to the agent for the selected claim.", symbol: "↻" },
 ];
 
 export function DecisionModal({ open, snapshot, selectedClaim, busy, onClose, onReview }: {
@@ -25,6 +26,11 @@ export function DecisionModal({ open, snapshot, selectedClaim, busy, onClose, on
   const [reviewer, setReviewer] = useState("engineer@example.com");
   const [reason, setReason] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [targetClaimIds, setTargetClaimIds] = useState<string[]>(() => selectedClaim ? [selectedClaim.claim_id] : []);
+  const defaultTargetClaimId = selectedClaim?.claim_id ?? snapshot.claims[0]?.claim_id ?? "";
+  useEffect(() => {
+    if (open) setTargetClaimIds(defaultTargetClaimId ? [defaultTargetClaimId] : []);
+  }, [defaultTargetClaimId, open]);
   useEffect(() => {
     if (!open) return;
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape" && !busy) onClose(); };
@@ -34,18 +40,18 @@ export function DecisionModal({ open, snapshot, selectedClaim, busy, onClose, on
   if (!open) return null;
 
   const report = snapshot.final_report ?? snapshot.draft_report;
-  const valid = reviewer.trim() && (decision === "approve" || (decision === "edit" && report) || (decision === "not_incident" && reason.trim()) || (decision === "reanalyze" && feedback.trim() && selectedClaim));
+  const valid = reviewer.trim() && (decision === "approve" || (decision === "edit" && report) || (decision === "not_incident" && reason.trim()) || (decision === "reanalyze" && feedback.trim() && targetClaimIds.length > 0));
   const confirm = async () => {
     if (!valid || busy) return;
     if (decision === "approve") await onReview({ action: "approve", reviewer });
     if (decision === "not_incident") await onReview({ action: "not_incident", reviewer, reason });
-    if (decision === "reanalyze" && selectedClaim) await onReview({ action: "reanalyze", reviewer, feedback, target_claim_ids: [selectedClaim.claim_id] });
+    if (decision === "reanalyze" && targetClaimIds.length) await onReview({ action: "reanalyze", reviewer: reviewer.trim(), feedback: feedback.trim(), target_claim_ids: targetClaimIds });
     onClose();
   };
 
   return (
     <div className="decision-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
-      <section className={`decision-modal ${decision === "edit" ? "wide-edit-modal" : ""}`} role="dialog" aria-modal="true" aria-labelledby="decision-title">
+      <section className={`decision-modal ${decision === "edit" ? "wide-edit-modal" : decision === "reanalyze" ? "wide-reanalysis-modal" : ""}`} role="dialog" aria-modal="true" aria-labelledby="decision-title">
         <header><div><span>Human-in-the-loop</span><h2 id="decision-title">Make review decision</h2></div><button type="button" onClick={onClose} disabled={busy} aria-label="Close decision dialog">×</button></header>
         <div className="decision-modal-body">
           <p className="decision-incident-line">Incident <strong>{snapshot.incident_id}</strong> · Select the outcome supported by the evidence.</p>
@@ -55,9 +61,13 @@ export function DecisionModal({ open, snapshot, selectedClaim, busy, onClose, on
           <div className="decision-inputs">
             <label>Reviewer<input value={reviewer} onChange={(event) => setReviewer(event.target.value)} /></label>
             {decision === "not_incident" && <label>Reason for closing<textarea autoFocus rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Explain why this is not an incident…" /></label>}
-            {decision === "reanalyze" && <label>Focused feedback for {selectedClaim?.claim_id ?? "selected observation"}<textarea autoFocus rows={3} value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="Describe exactly what the agent should verify again…" /></label>}
+            {decision === "reanalyze" && <div className="decision-claim-targets"><div className="decision-target-heading"><div><strong>Chọn claim cần phân tích lại</strong><small>Có thể chọn một hoặc nhiều claim</small></div><span>{targetClaimIds.length} đã chọn</span></div><div className="decision-claim-grid" role="group" aria-label="Claims cần phân tích lại">{snapshot.claims.map((claim, index) => {
+              const selected = targetClaimIds.includes(claim.claim_id);
+              return <button type="button" role="checkbox" aria-checked={selected} className={selected ? "selected" : ""} key={claim.claim_id} onClick={() => setTargetClaimIds((current) => selected ? current.filter((claimId) => claimId !== claim.claim_id) : [...current, claim.claim_id])}><span className="decision-claim-check" aria-hidden="true">{selected ? "✓" : index + 1}</span><div><header><strong>{claim.claim_id}</strong><time>{typeof claim.timestamp_s === "number" ? secondsToTimestamp(claim.timestamp_s) : "Không có timestamp"}</time></header><p>{claim.text}</p></div></button>;
+            })}</div>{!snapshot.claims.length && <p className="form-error">Incident chưa có claim để phân tích lại.</p>}</div>}
+            {decision === "reanalyze" && <label>Yêu cầu agent xác minh lại<textarea autoFocus rows={4} value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="Mô tả rõ nội dung cần kiểm tra lại cho các claim đã chọn…" /></label>}
           </div>
-          {decision === "edit" && report && <StructuredReportEditor snapshot={snapshot} report={report} reviewer={reviewer} busy={busy} onCancel={() => setDecision("approve")} onReview={async (payload) => { await onReview(payload); onClose(); }} />}
+          {decision === "edit" && report && <StructuredReportEditor report={report} reviewer={reviewer} busy={busy} onCancel={() => setDecision("approve")} onReview={async (payload) => { await onReview(payload); onClose(); }} />}
           {decision === "edit" && !report && <p className="form-error" role="alert">This incident does not have a report to edit yet.</p>}
           {decision !== "edit" && <footer><button type="button" className="decision-cancel" onClick={onClose} disabled={busy}>Cancel</button><button type="button" className={`decision-confirm ${decision}`} disabled={!valid || busy} onClick={() => void confirm()}>{busy ? "Submitting…" : "Confirm decision"}</button></footer>}
         </div>

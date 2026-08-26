@@ -1,113 +1,94 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
+import { artifactUrl } from "../../lib/incidentApi";
 import { secondsToTimestamp } from "../../lib/incidentSession";
 import type { Claim, IncidentSnapshot, ReviewPayload } from "../../types/incident";
-import { uiText as text } from "../../lib/ui-copy";
-import { classifyIncidentForDisplay } from "../../lib/incidentClassification";
-import { formatEvidenceWarning } from "../../lib/evidenceWarnings";
 import { StructuredReportEditor } from "./StructuredReportEditor";
-import { incidentStatusLabel } from "../../lib/incidentStatus";
 
-type Props = {
+function EvidenceImage({ src, fallback, alt }: { src: string; fallback: string; alt: string }) {
+  const [fallbackActive, setFallbackActive] = useState(false);
+  const activeSrc = fallbackActive ? fallback : src;
+  if (!activeSrc) return null;
+  return <Image
+    unoptimized
+    width={640}
+    height={360}
+    src={activeSrc}
+    alt={alt}
+    onError={() => { if (!fallbackActive && fallback) setFallbackActive(true); }}
+  />;
+}
+
+function ClaimEvidenceGallery({ snapshot, claim }: { snapshot: IncidentSnapshot; claim: Claim }) {
+  const directory = snapshot.artifact_uris.incident_frames?.replace(/[\\/]+$/, "") ?? "";
+  const representative = artifactUrl(snapshot.artifact_uris.representative_frame);
+  const evidence = [...claim.evidence].sort((left, right) => left.timestamp_s - right.timestamp_s || left.evidence_id.localeCompare(right.evidence_id)).map((item) => {
+    const filename = /\.[a-z0-9]+$/i.test(item.evidence_id) ? item.evidence_id : `${item.evidence_id}.jpg`;
+    return { ...item, imageUrl: directory ? artifactUrl(`${directory}/${filename}`) : representative };
+  });
+
+  if (!evidence.length && !representative) return <div className="focused-evidence-empty"><strong>Không có ảnh bằng chứng</strong><p>Backend chưa trả frame liên kết hoặc ảnh đại diện cho claim này.</p></div>;
+  return <div className="focused-evidence-gallery" aria-label={`Ảnh bằng chứng của ${claim.claim_id}`}>
+    {evidence.map((item, index) => <figure key={item.evidence_id}>
+      <div><EvidenceImage src={item.imageUrl} fallback={representative} alt={`Bằng chứng ${index + 1} của ${claim.claim_id}`} /><time>{secondsToTimestamp(item.timestamp_s)}</time></div>
+      <figcaption>Bằng chứng {index + 1}</figcaption>
+    </figure>)}
+    {!evidence.length && representative && <figure>
+      <div><EvidenceImage src={representative} fallback="" alt={`Ảnh đại diện của sự cố ${snapshot.incident_id}`} /></div>
+      <figcaption>Ảnh đại diện <small>Claim chưa có frame liên kết</small></figcaption>
+    </figure>}
+  </div>;
+}
+
+export function ReviewSidebar({ snapshot, selectedClaim, busy, error, onSelectClaim, onReview }: {
   snapshot: IncidentSnapshot;
   selectedClaim?: Claim;
   busy: boolean;
   error: string;
   onSelectClaim: (claim: Claim) => void;
   onReview: (payload: ReviewPayload) => Promise<void>;
-};
-
-export function ReviewSidebar({ snapshot, selectedClaim, busy, error, onSelectClaim, onReview }: Props) {
+}) {
   const report = snapshot.final_report ?? snapshot.draft_report;
-  const window = report?.incident_window;
   const [reviewer, setReviewer] = useState("engineer@example.com");
   const [reason, setReason] = useState("Insufficient evidence");
-  const [editingReport, setEditingReport] = useState(false);
   const [feedback, setFeedback] = useState("");
-
-  const counts = snapshot.claims.reduce<Record<string, number>>((result, claim) => {
-    result[claim.verification_status] = (result[claim.verification_status] ?? 0) + 1;
-    return result;
-  }, {});
+  const [editingReport, setEditingReport] = useState(false);
   const canReview = snapshot.status === "awaiting_review" && !busy;
-  const warnings = [...new Set([...snapshot.warnings, ...(report?.evidence_and_warnings?.warnings ?? [])])];
-  const classification = classifyIncidentForDisplay(snapshot);
 
-  return (
-    <aside className="incident-review-sidebar expanded-ai-review report-style-review">
-      <header className="ai-review-report-header">
-        <h2>{text("AI-assisted evidence review", "Rà soát bằng chứng với AI")}</h2>
-        <span className={`status ${snapshot.status}`}>{incidentStatusLabel(snapshot.status)}</span>
-      </header>
+  return <section className="workspace-panel review-report-panel" id="report" aria-labelledby="report-title">
+    <div className="workspace-panel-heading"><div><p className="eyebrow">Report</p><h2 id="report-title">Báo cáo rà soát</h2></div>{report && <button type="button" className="report-text-action" disabled={!canReview} onClick={() => setEditingReport((current) => !current)}>{editingReport ? "Cancel" : "Edit report"}</button>}</div>
+    {editingReport && report ? <StructuredReportEditor report={report} reviewer={reviewer} busy={busy} onCancel={() => setEditingReport(false)} onReview={onReview} /> : <div className="vertical-report-sections">
+      <section><h3>Nhận định tổng quát</h3><p>{report?.video_observations?.narrative || "Backend chưa cung cấp nhận định từ video."}</p></section>
+      <section><h3>Kết luận báo cáo</h3><p>{report?.summary || "Báo cáo chưa sẵn sàng."}</p></section>
+      <section><h3>Nguyên nhân giả thuyết</h3><p>{report?.hypothesized_causes || "Chưa ghi nhận nguyên nhân giả thuyết."}</p></section>
+    </div>}
 
-      <section className="ai-report-section incident-report-information">
-        <h3>{text("Incident information", "Thông tin sự cố")}</h3>
-        <dl className="incident-report-details">
-          <div><dt>{text("Incident ID", "Mã sự cố")}</dt><dd className="mono-value">{snapshot.incident_id}</dd></div>
-          <div><dt>{text("Analysis window", "Khoảng phân tích")}</dt><dd className="mono-value">{secondsToTimestamp(window?.t_start ?? 0)} → {secondsToTimestamp(window?.t_end ?? 0)}</dd></div>
-          <div><dt>{text("Detected event", "Sự kiện phát hiện")}</dt><dd className="mono-value">{secondsToTimestamp(window?.t0 ?? 0)}</dd></div>
-          <div><dt>{text("Incident type", "Loại sự cố")}</dt><dd>{classification.type}</dd></div>
-          <div><dt>{text("Evidence sources", "Nguồn bằng chứng")}</dt><dd>{snapshot.has_log ? "Video + telemetry" : text("Video only", "Chỉ video")}</dd></div>
-          <div><dt>{text("AI observations", "Quan sát AI")}</dt><dd>{snapshot.claims.length} {text("grounded claim(s)", "nhận định có bằng chứng")}</dd></div>
-          <div><dt>{text("Review status", "Trạng thái rà soát")}</dt><dd>{incidentStatusLabel(snapshot.status)}</dd></div>
-        </dl>
-      </section>
+    <section className="review-action-section focused-reanalysis-card" aria-labelledby="focused-reanalysis-title">
+      <header className="focused-reanalysis-heading"><div><span className="focused-reanalysis-icon" aria-hidden="true">↻</span><div><p className="eyebrow">Agent verification</p><h3 id="focused-reanalysis-title">Phân tích lại có trọng tâm</h3></div></div><small>Chỉ claim được chọn sẽ được gửi lại cho agent</small></header>
 
-      <section className="ai-report-section all-ai-observations">
-        <div className="ai-report-section-heading"><h3>{text("AI observations", "Quan sát AI")}</h3><span>{snapshot.claims.length}</span></div>
-        <p className="section-help">{text("Select an observation to seek the incident clip and highlight synchronized evidence.", "Chọn một quan sát để tua video sự cố và làm nổi bật bằng chứng đồng bộ.")}</p>
-        <div className="ai-observation-list">
-          {snapshot.claims.map((item, index) => (
-            <button type="button" className={item.claim_id === selectedClaim?.claim_id ? "selected" : ""} key={item.claim_id} onClick={() => onSelectClaim(item)} aria-pressed={item.claim_id === selectedClaim?.claim_id}>
-              <header><span>{String(index + 1).padStart(2, "0")}</span><strong>{item.claim_id}</strong><time>{secondsToTimestamp(item.timestamp_s)}</time></header>
-              <p>{item.text}</p>
-              <footer><span className={`finding-status ${item.verification_status}`}>{item.verification_status.replaceAll("_", " ")}</span><small>{item.evidence.map((evidence) => evidence.evidence_id).join(", ") || "Không có frame tham chiếu"}</small></footer>
-            </button>
-          ))}
-          {!snapshot.claims.length && <p className="report-empty-copy">{text("No AI observations have been published yet.", "Chưa có quan sát AI nào được công bố.")}</p>}
-        </div>
-      </section>
+      <div className="focused-claim-picker" role="radiogroup" aria-label="Chọn claim cần phân tích lại">
+        {snapshot.claims.map((claim, index) => <button type="button" role="radio" aria-checked={selectedClaim?.claim_id === claim.claim_id} className={selectedClaim?.claim_id === claim.claim_id ? "selected" : ""} key={claim.claim_id} onClick={() => onSelectClaim(claim)}>
+          <span>{index + 1}</span><div><strong>{claim.claim_id}</strong><small>{typeof claim.timestamp_s === "number" ? secondsToTimestamp(claim.timestamp_s) : "Không có timestamp"}</small></div><p>{claim.text}</p>
+        </button>)}
+      </div>
 
-      <section className="ai-report-section verification-summary">
-        <h3>{text("Evidence verification", "Xác minh bằng chứng")}</h3>
-        <div className="verification-counts">
-          {["supported", "contradicted", "unverified", "video_only"].map((status) => <div className={status} key={status}><span>{status.replaceAll("_", " ")}</span><strong>{counts[status] ?? 0}</strong></div>)}
-        </div>
-      </section>
+      {selectedClaim ? <div className="focused-selected-claim">
+        <header><div><span>Claim đang chọn</span><strong>{selectedClaim.claim_id}</strong></div>{typeof selectedClaim.timestamp_s === "number" && <time>{secondsToTimestamp(selectedClaim.timestamp_s)}</time>}</header>
+        <p>{selectedClaim.text}</p>
+        <ClaimEvidenceGallery snapshot={snapshot} claim={selectedClaim} />
+      </div> : <p className="focused-claim-required">Chọn một claim để xem bằng chứng và yêu cầu agent xác minh lại.</p>}
 
-      <section className="ai-report-section structured-summary">
-        <div className="ai-report-section-heading"><h3>{text("Structured report", "Báo cáo có cấu trúc")}</h3><button type="button" className="report-text-action" disabled={!canReview || busy || !report} onClick={() => setEditingReport((current) => !current)}>{editingReport ? text("Cancel", "Hủy") : text("Edit report", "Chỉnh sửa báo cáo")}</button></div>
-        {editingReport && report ? <StructuredReportEditor snapshot={snapshot} report={report} reviewer={reviewer} busy={busy} onCancel={() => setEditingReport(false)} onReview={onReview} /> : <p>{report?.summary ?? snapshot.video_summary}</p>}
-      </section>
+      <label className="focused-feedback-field"><span>Nội dung cần xác minh lại</span><textarea aria-label="Phản hồi để phân tích lại" value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="Ví dụ: Kiểm tra lại thời điểm bắt đầu phanh và đối chiếu với tốc độ trong telemetry…" /></label>
+      <button type="button" className="report-secondary-action focused-reanalysis-submit" disabled={!canReview || !selectedClaim || !feedback.trim() || !reviewer.trim()} onClick={() => void onReview({ action: "reanalyze", reviewer: reviewer.trim(), feedback: feedback.trim(), target_claim_ids: selectedClaim ? [selectedClaim.claim_id] : [] }).then(() => setFeedback(""))}>{busy ? "Đang gửi yêu cầu…" : `Phân tích lại ${selectedClaim?.claim_id ?? "claim đã chọn"}`}</button>
+    </section>
 
-      <ReportNarrative title={text("Timeline assessment", "Đánh giá dòng thời gian")} content={report?.timeline?.narrative || text("No additional timeline narrative.", "Không có mô tả dòng thời gian bổ sung.")} />
-      <ReportNarrative title={text("Video assessment", "Đánh giá video")} content={report?.video_observations?.narrative || snapshot.video_summary} />
-      <ReportNarrative title={text("Log assessment", "Đánh giá log")} content={report?.log_findings?.narrative || (snapshot.has_log ? text("Log findings are listed with each aligned event.", "Kết quả log được liệt kê theo từng sự kiện đã căn chỉnh.") : text("No telemetry log was supplied.", "Không có log telemetry."))} />
-      <ReportNarrative title={text("Evidence alignment", "Đối chiếu bằng chứng")} content={report?.alignment?.narrative || text("No additional alignment narrative.", "Không có mô tả đối chiếu bổ sung.")} />
-      <ReportNarrative title={text("Hypothesized causes", "Nguyên nhân giả định")} content={report?.hypothesized_causes || text("No cause hypothesis was recorded.", "Chưa ghi nhận giả thuyết nguyên nhân.")} />
-
-      {warnings.length > 0 && <section className="ai-report-section evidence-limitations" role="note"><h3><span aria-hidden="true">!</span> {text("Evidence warnings", "Cảnh báo bằng chứng")}</h3><ul>{warnings.map((warning) => <li key={warning}>{formatEvidenceWarning(warning)}</li>)}</ul></section>}
-
-      <section className="ai-report-section interactive-reanalysis">
-        <div className="ai-report-section-heading"><h3>{text("Focused re-analysis", "Phân tích lại có trọng tâm")}</h3><span>{selectedClaim?.claim_id ?? text("Select a claim", "Chọn một nhận định")}</span></div>
-        <textarea aria-label="Phản hồi để phân tích lại" value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="Mô tả nội dung agent cần xác minh lại..." />
-        <button type="button" className="report-secondary-action" disabled={!canReview || !selectedClaim || !feedback.trim() || busy} onClick={() => void onReview({ action: "reanalyze", reviewer, feedback, target_claim_ids: selectedClaim ? [selectedClaim.claim_id] : [] }).then(() => setFeedback(""))}>{busy ? "Đang phân tích lại..." : "Phân tích lại quan sát đã chọn"}</button>
-      </section>
-
-      <section className="ai-report-section engineer-review-section">
-        <h3>{text("Engineer review", "Rà soát của kỹ sư")}</h3>
-        <div className="engineer-review-fields">
-          <label>{text("Reviewer", "Người rà soát")}<input value={reviewer} onChange={(event) => setReviewer(event.target.value)} /></label>
-          <label>{text("Reject reason", "Lý do từ chối")}<input value={reason} onChange={(event) => setReason(event.target.value)} /></label>
-        </div>
-        {error && <p className="form-error" role="alert">{error}</p>}
-        <div className="engineer-review-actions"><button type="button" className="reject-action" disabled={!canReview || !reason.trim()} onClick={() => void onReview({ action: "not_incident", reviewer, reason })}>{busy ? text("Submitting...", "Đang gửi...") : text("Reject", "Từ chối")}</button><button type="button" className="approve-action" disabled={!canReview} onClick={() => void onReview({ action: "approve", reviewer })}>{busy ? text("Submitting...", "Đang gửi...") : text("Approve", "Phê duyệt")}</button></div>
-      </section>
-    </aside>
-  );
-}
-
-function ReportNarrative({ title, content }: { title: string; content: string }) {
-  return <section className="ai-report-section report-narrative-section"><h3>{title}</h3><p>{content}</p></section>;
+    <section className="review-action-section">
+      <h3>Review actions</h3>
+      <div className="engineer-review-fields"><label>Người rà soát<input value={reviewer} onChange={(event) => setReviewer(event.target.value)} /></label><label>Lý do Not incident<input value={reason} onChange={(event) => setReason(event.target.value)} /></label></div>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <div className="engineer-review-actions"><button type="button" className="reject-action" disabled={!canReview || !reason.trim() || !reviewer.trim()} onClick={() => void onReview({ action: "not_incident", reviewer, reason })}>{busy ? "Đang gửi…" : "Not incident"}</button><button type="button" className="approve-action" disabled={!canReview || !reviewer.trim()} onClick={() => void onReview({ action: "approve", reviewer })}>{busy ? "Đang gửi…" : "Approve"}</button></div>
+    </section>
+  </section>;
 }

@@ -6,7 +6,7 @@ export type Evidence = { evidence_id: string; timestamp_s: number };
 export type Claim = {
   claim_id: string;
   text: string;
-  timestamp_s: number;
+  timestamp_s: number | null;
   evidence: Evidence[];
   verification_status: string;
 };
@@ -36,11 +36,31 @@ export type ClaimLogSummary = {
   claim_id: string;
   claim_timestamp_s?: number | null;
   nearest_timestamp_s?: number | null;
+  timestamp_distance_s?: number | null;
   within_tolerance: boolean;
+  sample_start_s?: number | null;
+  sample_end_s?: number | null;
   sample_count: number;
   available_signals: string[];
   metrics: Record<string, Record<string, string | number | boolean | null>>;
+  evidence?: Array<{ evidence_id: string; timestamp_s: number; camera_frame?: string | number | null }>;
+  allowed_evidence_ids?: string[];
   summary: string;
+};
+export type ClaimVerification = {
+  claim_id: string;
+  status: string;
+  reason: string;
+  evidence_ids: string[];
+};
+export type VerificationResult = { has_accident?: boolean | null; results: ClaimVerification[] };
+export type LogEvidenceSummary = {
+  summary: string;
+  metrics: Record<string, string | number | boolean | null>;
+  events: Array<Record<string, unknown>>;
+  evidence_ids: string[];
+  warnings: string[];
+  errors: string[];
 };
 export type DraftReport = {
   general_information?: { incident_id: string; video_uri: string; has_log: boolean; log_uri?: string | null };
@@ -49,8 +69,8 @@ export type DraftReport = {
   summary: string;
   timeline?: { narrative?: string; events?: Array<{ timestamp_s: number; description: string; evidence_ids: string[] }> };
   video_observations?: { narrative?: string; observations?: Array<{ observation_id?: string; timestamp_s?: number; description?: string; evidence_ids?: string[] }> };
-  log_findings?: { narrative?: string; claim_summaries?: ClaimLogSummary[]; summary?: unknown };
-  alignment?: { narrative?: string };
+  log_findings?: { narrative?: string; claim_summaries?: ClaimLogSummary[]; summary?: LogEvidenceSummary | null };
+  alignment?: { narrative?: string; verification?: VerificationResult | null };
   hypothesized_causes?: string;
   evidence_and_warnings?: { warnings?: string[]; evidence?: Array<{ evidence_id?: string; timestamp_s?: number; description?: string }>; artifact_uris?: Record<string, string> };
   review_status?: string;
@@ -107,17 +127,11 @@ export type ReviewPayload = {
   feedback?: string;
   target_claim_ids?: string[];
   edits?: {
-    type_of_accident?: string;
-    t_start?: number;
-    t0?: number;
-    t_end?: number;
-    claims?: Array<{ claim_id: string; text: string; timestamp_s: number | null; verification_status?: string; evidence_ids?: string[] }>;
     summary?: string;
     timeline?: string;
     video_observations?: string;
     log_findings?: string;
     alignment?: string;
     hypothesized_causes?: string;
-    warnings?: string[];
   };
 };

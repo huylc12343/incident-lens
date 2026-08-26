@@ -62,10 +62,10 @@ class VideoMemoryWorkflowConfig:
     frame_max_batches: int = 8
     incident_frame_fps: float = 4.0
     incident_max_frames: int = 60
+    auto_reanalysis_clip_radius_s: float = 2.0
     incident_clip_min_duration_s: float = 5.0
     incident_clip_pre_roll_s: float = 1.0
     incident_clip_post_roll_s: float = 2.0
-    incident_clip_display_fps: float = 24.0
     video_target_width: int = 1280
     video_target_height: int = 720
     video_target_fps: float = 15.0
@@ -88,8 +88,8 @@ class VideoMemoryWorkflowConfig:
             self.frame_max_batches,
             self.incident_frame_fps,
             self.incident_max_frames,
+            self.auto_reanalysis_clip_radius_s,
             self.incident_clip_min_duration_s,
-            self.incident_clip_display_fps,
             self.video_target_width,
             self.video_target_height,
             self.video_target_fps,
@@ -476,7 +476,11 @@ def merge_memory_only_patch(
     current_claims = {claim.claim_id: claim for claim in memory.claims}
     if not set(requested_target_claim_ids).issubset(current_claims):
         raise VideoMemoryError("VLM_PATCH_TARGET_MISSING", "patch targets claims not present in current memory")
-    existing_evidence = {evidence.evidence_id: evidence for claim in memory.claims for evidence in claim.evidence}
+    existing_evidence = {
+        evidence.evidence_id: evidence
+        for claim in memory.claims
+        for evidence in claim.evidence
+    }
     patch_claims = {claim.claim_id: claim for claim in patch.claims}
     if len(patch_claims) != len(patch.claims):
         raise VideoMemoryError("VLM_PATCH_CLAIM_DUPLICATE", "memory-only patch contains duplicate claim IDs")
@@ -505,7 +509,9 @@ def merge_memory_only_patch(
         current_claims[claim_id] = normalized_claim.model_copy(
             update={
                 "verification_status": (
-                    VerificationStatus.UNVERIFIED if content_changed else previous_claim.verification_status
+                    VerificationStatus.UNVERIFIED
+                    if content_changed
+                    else previous_claim.verification_status
                 )
             }
         )
@@ -690,7 +696,9 @@ def _reconcile_frame_evidence(memory: VideoMemory, frames: list[TimestampedFrame
         frame = nearest_frame(claim.timestamp_s)
         claims.append(
             claim.model_copy(
-                update={"evidence": [EvidenceReference(evidence_id=frame.frame_id, timestamp_s=frame.timestamp_s)]}
+                update={
+                    "evidence": [EvidenceReference(evidence_id=frame.frame_id, timestamp_s=frame.timestamp_s)]
+                }
             )
         )
 
@@ -712,7 +720,7 @@ def _batch_prompt(
     )
     return base.model_copy(
         update={
-            "text": f"{base.text}\nAnalyze sequential batch {index + 1}/{total}. Context: {suffix}",
+            "text": f"{base.text}\nPhân tích batch tuần tự {index + 1}/{total}. Context: {suffix}",
             "context": {**base.context, "rolling_batch_index": index, "rolling_batch_count": total},
         }
     )
@@ -724,9 +732,9 @@ def _synthesis_prompt(base: PromptEnvelope, memories: list[VideoMemory]) -> Prom
     return base.model_copy(
         update={
             "text": (
-                f"{base.text}\nSynthesize one final VideoMemory for the complete video from these batch memories "
-                f"in chronological order. Merge duplicate overlap events without inventing facts. All "
-                f"nội dung mô tả phải được viết bằng tiếng Việt rõ ràng, chuyên nghiệp; có thể giữ thuật ngữ kỹ thuật bằng English: {suffix}"
+                f"{base.text}\nTổng hợp một VideoMemory cuối cùng cho toàn bộ video từ các batch memory theo "
+                f"thứ tự thời gian này. Hợp nhất sự kiện trùng ở vùng overlap mà không bịa thêm sự thật. Toàn bộ "
+                f"nội dung mô tả phải bằng tiếng Việt: {suffix}"
             ),
             "context": {**base.context, "synthesis_batch_count": len(memories)},
         }

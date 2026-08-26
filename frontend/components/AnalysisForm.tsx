@@ -17,26 +17,30 @@ type DemoSample = {
   videoName: string;
   telemetryPath?: string;
   telemetryName?: string;
+  groundTruthPath?: string;
+  groundTruthName?: string;
 };
 
 const demoSamples: DemoSample[] = [
   {
     id: "with-log",
-    title: "Video có Vehicle State",
-    description: "Video tình huống giao thông kèm dữ liệu ga, phanh và góc lái của xe.",
-    detail: "Gửi video + inference_vehicle_state.csv",
+    title: "Sample 1 · Cut-in có telemetry",
+    description: "Tình huống xe cắt ngang CARLA, kèm Vehicle State và Ground Truth đồng bộ.",
+    detail: "CARLA_INC_CUT_IN_000010 · Video + telemetry + ground truth",
     videoPath: "/demo-samples/with-ground-truth/cut-in-ground-truth.mp4",
-    videoName: "cut-in-ground-truth.mp4",
+    videoName: "CARLA_INC_CUT_IN_000010_video.mp4",
     telemetryPath: "/demo-samples/with-ground-truth/telemetry.csv",
     telemetryName: "inference_vehicle_state.csv",
+    groundTruthPath: "/demo-samples/with-ground-truth/ground_truth.json",
+    groundTruthName: "ground_truth.json",
   },
   {
     id: "video-only",
-    title: "Video không có Vehicle State",
-    description: "Video lái xe không kèm log hoặc dữ liệu trạng thái phương tiện.",
-    detail: "Chỉ gửi video hành trình",
+    title: "Sample 2 · Pedestrian chỉ video",
+    description: "Tình huống liên quan người đi bộ, chủ động không gửi log Vehicle State.",
+    detail: "CARLA_INC_PED_000019 · Chỉ gửi video, không có log",
     videoPath: "/demo-samples/video-only/normal-driving-video-only.mp4",
-    videoName: "normal-driving-video-only.mp4",
+    videoName: "CARLA_INC_PED_000019_video.mp4",
   },
 ];
 
@@ -60,6 +64,7 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
   const router = useRouter();
   const [video, setVideo] = useState<File | null>(null);
   const [telemetry, setTelemetry] = useState<File[]>([]);
+  const [groundTruth, setGroundTruth] = useState<File | null>(null);
   const [toast, setToast] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitProgress, setSubmitProgress] = useState(0);
@@ -82,14 +87,18 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
     setLoadingDemo(sample.id);
     setError("");
     try {
-      const [demoVideo, demoTelemetry] = await Promise.all([
+      const [demoVideo, demoTelemetry, demoGroundTruth] = await Promise.all([
         loadDemoFile(sample.videoPath, sample.videoName, "video/mp4"),
         sample.telemetryPath && sample.telemetryName
           ? loadDemoFile(sample.telemetryPath, sample.telemetryName, "text/csv")
           : Promise.resolve(null),
+        sample.groundTruthPath && sample.groundTruthName
+          ? loadDemoFile(sample.groundTruthPath, sample.groundTruthName, "application/json")
+          : Promise.resolve(null),
       ]);
       setVideo(demoVideo);
       setTelemetry(demoTelemetry ? [demoTelemetry] : []);
+      setGroundTruth(demoGroundTruth);
       setSelectedDemo(sample.id);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load the demo sample.");
@@ -114,7 +123,7 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
     sessionStorage.setItem("vlens:video-name", video.name);
     const incidentId = createIncidentId();
     try {
-      const uploaded = await uploadIncident(video, telemetry[0]);
+      const uploaded = await uploadIncident(video, telemetry[0], groundTruth ?? undefined);
       const snapshot = await createIncident({
         incident_id: incidentId,
         video_uri: uploaded.video_uri,
@@ -125,6 +134,7 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
         metadata: {
           timestamp_detection: "automatic",
           telemetry_files: telemetry.map((file) => file.name),
+          ground_truth_file: groundTruth?.name ?? null,
         },
       });
       setSubmitProgress(100);
@@ -155,6 +165,7 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
             files={video ? [video] : []}
             onChange={(files) => {
               setVideo(files[0] ?? null);
+              setGroundTruth(null);
               setSelectedDemo(null);
             }}
           />
@@ -163,6 +174,7 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
             files={telemetry}
             onChange={(files) => {
               setTelemetry(files);
+              setGroundTruth(null);
               setSelectedDemo(null);
             }}
           />

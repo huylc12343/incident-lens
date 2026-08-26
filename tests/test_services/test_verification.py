@@ -13,6 +13,7 @@ from src.models.incidents import (
     ClaimTelemetrySnapshot,
     ClaimVerification,
     ClaimVerificationContext,
+    ReverificationResult,
     VerificationRequest,
     VerificationResult,
     VerificationStatus,
@@ -87,6 +88,30 @@ async def test_openai_verification_uses_structured_output() -> None:
 
 
 @pytest.mark.asyncio
+async def test_openai_reverification_uses_claim_only_output_schema() -> None:
+    reverification = ReverificationResult(
+        results=[
+            ClaimVerification(
+                claim_id="claim-1",
+                status=VerificationStatus.SUPPORTED,
+                reason="Brake rise matches the revised claim timestamp.",
+                evidence_ids=["log-row:7.5"],
+            )
+        ]
+    )
+    client = SimpleNamespace(
+        responses=SimpleNamespace(parse=AsyncMock(return_value=SimpleNamespace(output_parsed=reverification)))
+    )
+
+    result = await OpenAIVerificationService(model="gpt-test", client=client).reverify(_request())
+
+    assert result == reverification
+    call = client.responses.parse.await_args.kwargs
+    assert call["text_format"] is ReverificationResult
+    assert "has_accident" not in call["input"][0]["content"]
+
+
+@pytest.mark.asyncio
 async def test_gpt5_verification_omits_unsupported_temperature() -> None:
     verification = VerificationResult(
         results=[
@@ -120,7 +145,7 @@ async def test_verification_marks_missing_claim_result_unverified() -> None:
     assert [item.claim_id for item in result.results] == ["claim-1"]
     assert result.results[0].status == VerificationStatus.UNVERIFIED
     assert result.results[0].evidence_ids == []
-    assert "không trả về đúng một kết quả hợp lệ" in result.results[0].reason
+    assert "không trả về duy nhất một kết quả" in result.results[0].reason
 
 
 @pytest.mark.asyncio

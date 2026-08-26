@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
-import math
 import re
-import shutil
 from pathlib import Path
 from typing import Protocol
 
@@ -43,7 +40,7 @@ from src.models.incidents import (
     VideoSequenceManifest,
     VLMInputMode,
 )
-from src.prompts.auto_reanalysis import build_auto_reanalysis_prompt_for_conflicts
+from src.prompts.auto_reanalysis import build_auto_reanalysis_prompt
 from src.prompts.reanalysis import build_human_reanalysis_prompt
 from src.prompts.video_analysis import build_video_analysis_prompt
 from src.services.log_analysis import (
@@ -64,9 +61,10 @@ from src.services.video_memory import (
     validate_video_memory,
 )
 
-# Product requirement: each contradicted claim receives at most two seconds of
-# visual context on either side unless its short windows overlap another claim.
-REANALYSIS_CLIP_RADIUS_S = 2.0
+VLM_EMPTY_VIDEO_MEMORY_WARNING = (
+    "VLM_EMPTY_VIDEO_MEMORY: video analysis returned no timeline events and no claims; "
+    "the report has no describable content even when no accident occurred"
+)
 
 
 class MediaWorkflowService(Protocol):
@@ -83,7 +81,6 @@ class MediaWorkflowService(Protocol):
         min_duration_s: float,
         pre_roll_s: float,
         post_roll_s: float,
-        output_fps: float | None = None,
     ) -> NormalizedVideoArtifact: ...
 
     async def sample_frames(
@@ -242,15 +239,21 @@ async def analyze_video_node(
         )
         request = request.model_copy(update={"prompt": prompt})
         memory = await workflow.analyze(request)
-        return {
+        output: dict[str, object] = {
             "status": "running",
             "video_uri": processed_video_uri,
-            "review_video_uri": state.get("review_video_uri") or video_uri,
             "video_memory": memory,
             "video_duration_s": video_duration_s,
             "remote_media_handles": memory.remote_media_handles,
             "artifact_uris": {**state.get("artifact_uris", {}), **artifact_uris},
         }
+        # An empty VideoMemory is a valid schema but an unusable report: downstream
+        # nodes accept it silently, so surface it instead of letting it pass unseen.
+        if not memory.claims and not memory.timeline:
+            output["warnings"] = list(
+                dict.fromkeys([*state.get("warnings", []), VLM_EMPTY_VIDEO_MEMORY_WARNING])
+            )
+        return output
     except Exception as exc:
         return {
             "status": "failed",
@@ -279,54 +282,16 @@ async def cut_incident_video_node(
     artifact_root = Path(config.artifact_dir).resolve() / _safe_incident_id(incident_id)
     frame_dir = artifact_root / "incident_frames"
     try:
-        review_video_uri = state.get("review_video_uri", "").strip()
-        review_source_uri = review_video_uri or video_uri
-        clip_options = {
-            "codec": config.video_codec,
-            "pixel_format": config.video_pixel_format,
-            "min_duration_s": config.incident_clip_min_duration_s,
-            "pre_roll_s": config.incident_clip_pre_roll_s,
-            "post_roll_s": config.incident_clip_post_roll_s,
-        }
-        final_clip_uri = str(artifact_root / "incident_clip.mp4")
-        if review_video_uri and config.video_redaction_enabled:
-            raw_clip_path = artifact_root / "incident_clip_source.mp4"
-            redacted_clip_path = artifact_root / "incident_clip_redacted.mp4"
-            try:
-                raw_clip = await media.cut_incident_clip(
-                    review_source_uri,
-                    str(raw_clip_path),
-                    window=memory.incident_window,
-                    **clip_options,
-                )
-                redacted_clip = await media.redact_video(raw_clip.uri, str(redacted_clip_path))
-                redacted_duration = redacted_clip.metadata.duration_s
-                clip = await media.cut_incident_clip(
-                    redacted_clip.uri,
-                    final_clip_uri,
-                    window=IncidentWindow(
-                        t_start=0,
-                        t0=redacted_duration / 2,
-                        t_end=redacted_duration,
-                    ),
-                    codec=config.video_codec,
-                    pixel_format=config.video_pixel_format,
-                    min_duration_s=redacted_duration,
-                    pre_roll_s=0,
-                    post_roll_s=0,
-                    output_fps=config.incident_clip_display_fps,
-                )
-            finally:
-                raw_clip_path.unlink(missing_ok=True)
-                redacted_clip_path.unlink(missing_ok=True)
-        else:
-            clip = await media.cut_incident_clip(
-                review_source_uri,
-                final_clip_uri,
-                window=memory.incident_window,
-                output_fps=config.incident_clip_display_fps,
-                **clip_options,
-            )
+        clip = await media.cut_incident_clip(
+            video_uri,
+            str(artifact_root / "incident_clip.mp4"),
+            window=memory.incident_window,
+            codec=config.video_codec,
+            pixel_format=config.video_pixel_format,
+            min_duration_s=config.incident_clip_min_duration_s,
+            pre_roll_s=config.incident_clip_pre_roll_s,
+            post_roll_s=config.incident_clip_post_roll_s,
+        )
         # Canonical evidence is mapped before log verification.  The late cut is
         # intentionally only a review artifact built from the final report window.
         # Keep the legacy semantic sampling fallback for direct callers that have
@@ -359,7 +324,10 @@ async def cut_incident_video_node(
                 "INCIDENT_REVIEW_FRAMES_MISSING",
                 "review artifacts require at least one sampled incident frame",
             )
-        if workflow.vlm.capabilities.input_mode == VLMInputMode.NATIVE_VIDEO and not canonical_evidence_mapped:
+        if (
+            workflow.vlm.capabilities.input_mode == VLMInputMode.NATIVE_VIDEO
+            and not canonical_evidence_mapped
+        ):
             memory = reconcile_native_video_evidence(memory, frames.frames)
             memory = _restore_claim_verification_statuses(memory, state.get("video_memory"))
             validate_video_memory(
@@ -374,11 +342,6 @@ async def cut_incident_video_node(
             "incident_clip": clip.uri,
             "incident_frames": str(frame_dir),
         }
-        await _materialize_canonical_evidence_frames(
-            memory,
-            canonical_frame_dir=state.get("artifact_uris", {}).get("canonical_evidence_frames"),
-            incident_frame_dir=frame_dir,
-        )
         target_timestamp_s = _representative_timestamp(memory)
         representative = min(frames.frames, key=lambda frame: abs(frame.timestamp_s - target_timestamp_s))
         artifact_uris["representative_frame"] = representative.image_uri
@@ -436,17 +399,6 @@ async def map_canonical_evidence_node(
     artifact_root = Path(config.artifact_dir).resolve() / _safe_incident_id(incident_id)
     frame_dir = artifact_root / "canonical_evidence_frames"
     sample_start_s, sample_end_s = _semantic_sampling_bounds(memory)
-    # Native analysis may intentionally use a low-FPS normalized video. Pad by
-    # one real source frame so an event on the exclusive FFmpeg end boundary is
-    # still available for canonical evidence mapping.
-    source_fps = config.video_target_fps
-    source_frame_interval_s = 1.0 / source_fps
-    duration_s = _video_duration_s(state, memory)
-    sample_start_s = max(0.0, math.floor(sample_start_s * source_fps) / source_fps)
-    sample_end_s = min(
-        duration_s,
-        math.ceil(sample_end_s * source_fps) / source_fps + source_frame_interval_s,
-    )
     try:
         frames = await media.sample_frames(
             video_uri,
@@ -487,31 +439,6 @@ async def map_canonical_evidence_node(
         return _failure(getattr(exc, "code", "CANONICAL_EVIDENCE_MAPPING_FAILED"), str(exc))
 
 
-async def _materialize_canonical_evidence_frames(
-    memory: VideoMemory,
-    *,
-    canonical_frame_dir: str | None,
-    incident_frame_dir: Path,
-) -> None:
-    """Copy canonical evidence under stable IDs into the review-frame directory."""
-    if not canonical_frame_dir:
-        return
-    source_dir = Path(canonical_frame_dir)
-    if not source_dir.is_dir():
-        return
-    evidence_ids = {evidence.evidence_id for claim in memory.claims for evidence in claim.evidence} | {
-        evidence_id for event in memory.timeline for evidence_id in event.evidence_ids
-    }
-    for evidence_id in evidence_ids:
-        for extension in (".jpg", ".png"):
-            source = source_dir / f"{evidence_id}{extension}"
-            if source.is_file():
-                destination = incident_frame_dir / source.name
-                if source.resolve() != destination.resolve():
-                    await asyncio.to_thread(shutil.copy2, source, destination)
-                break
-
-
 def _restore_claim_verification_statuses(
     mapped: VideoMemory,
     original: VideoMemory | object | None,
@@ -519,7 +446,9 @@ def _restore_claim_verification_statuses(
     """Reconciliation changes evidence only; it must not invalidate verification."""
     if not isinstance(original, VideoMemory):
         return mapped
-    status_by_claim_id = {claim.claim_id: claim.verification_status for claim in original.claims}
+    status_by_claim_id = {
+        claim.claim_id: claim.verification_status for claim in original.claims
+    }
     return mapped.model_copy(
         update={
             "claims": [
@@ -663,14 +592,17 @@ async def align_and_verify_claims_node(
                 sample_radius=sample_radius,
                 video_duration_s=telemetry_duration_s,
             )
-            result = await verification.verify(
-                VerificationRequest(
-                    incident_id=incident_id,
-                    claims=claims_to_verify,
-                    claim_log_summaries=claim_log_summaries,
-                    claim_verification_contexts=claim_verification_contexts,
-                    timestamp_tolerance_s=timestamp_tolerance_s,
-                )
+            request = VerificationRequest(
+                incident_id=incident_id,
+                claims=claims_to_verify,
+                claim_log_summaries=claim_log_summaries,
+                claim_verification_contexts=claim_verification_contexts,
+                timestamp_tolerance_s=timestamp_tolerance_s,
+            )
+            result = (
+                await verification.reverify(request)
+                if _is_automatic_reverification(state, changed_ids)
+                else await verification.verify(request)
             )
         else:
             claim_log_summaries = []
@@ -679,7 +611,8 @@ async def align_and_verify_claims_node(
             result, claim_log_summaries = _merge_selective_verification(
                 memory,
                 previous_verification=state.get("verification"),
-                next_verification=result,
+                next_results=result.results,
+                next_has_accident=getattr(result, "has_accident", None),
                 previous_summaries=state.get("claim_log_summaries", []),
                 next_summaries=claim_log_summaries,
                 changed_claim_ids=set(changed_ids),
@@ -703,10 +636,8 @@ async def align_and_verify_claims_node(
             changed_id_set = set(changed_ids)
             previous = state.get("verification")
             preserved = [
-                item
-                for item in (previous.results if previous is not None else [])
-                if item.claim_id not in changed_id_set
-                and any(claim.claim_id == item.claim_id for claim in memory.claims)
+                item for item in (previous.results if previous is not None else [])
+                if item.claim_id not in changed_id_set and any(claim.claim_id == item.claim_id for claim in memory.claims)
             ]
             preserved.extend(
                 ClaimVerification(
@@ -718,7 +649,10 @@ async def align_and_verify_claims_node(
                 for claim in memory.claims
                 if claim.claim_id in changed_id_set
             )
-            fallback_verification = VerificationResult(results=preserved)
+            fallback_verification = VerificationResult(
+                has_accident=previous.has_accident if previous is not None else None,
+                results=preserved,
+            )
             return {
                 "status": "running",
                 "verification": fallback_verification,
@@ -753,46 +687,41 @@ async def auto_reanalyze_node(
     if any(conflict.claim_id not in claims for conflict in conflicts):
         return _failure("AUTO_REANALYSIS_CLAIM_MISSING", "contradicted claim is absent from video memory")
     try:
-        target_ids = [conflict.claim_id for conflict in conflicts]
-        reasons = {conflict.claim_id: conflict.reason for conflict in conflicts}
         duration_s = _video_duration_s(state, memory)
-        groups = _reanalysis_claim_groups(memory, target_ids, duration_s=duration_s)
         merged = memory
         artifact_uris = dict(state.get("artifact_uris", {}))
-        changed_claim_ids: list[str] = []
-        for group_ids, reanalysis_window in groups:
+        reverified_claim_ids: list[str] = []
+        for conflict in conflicts:
             current_claims = {claim.claim_id: claim for claim in merged.claims}
-            target_claims = [current_claims[claim_id] for claim_id in group_ids]
-            prompt = build_auto_reanalysis_prompt_for_conflicts(
-                conflict_claims=target_claims,
-                verification_reasons={claim_id: reasons[claim_id] for claim_id in group_ids},
-                reanalysis_window=reanalysis_window,
+            target_claim = current_claims[conflict.claim_id]
+            reanalysis_window = _reanalysis_window(
+                target_claim,
+                duration_s=duration_s,
+                radius_s=workflow.config.auto_reanalysis_clip_radius_s,
+            )
+            prompt = build_auto_reanalysis_prompt(
+                conflict_claim=target_claim,
+                verification_reason=conflict.reason,
                 version=prompt_version,
             )
-            before = {claim_id: current_claims[claim_id] for claim_id in group_ids}
             merged, artifact_uris = await _reanalyze(
                 state,
                 media=media,
                 workflow=workflow,
                 prompt=prompt,
-                target_claim_ids=group_ids,
+                target_claim_ids=[target_claim.claim_id],
                 memory=merged,
                 artifact_uris=artifact_uris,
                 reanalysis_window=reanalysis_window,
             )
-            after = {claim.claim_id: claim for claim in merged.claims}
-            changed_claim_ids.extend(
-                claim_id
-                for claim_id, previous_claim in before.items()
-                if claim_id not in after or _claim_content_changed(previous_claim, after[claim_id])
-            )
+            reverified_claim_ids.append(target_claim.claim_id)
         return {
             "status": "running",
             "video_memory": merged,
             "remote_media_handles": merged.remote_media_handles,
             "artifact_uris": artifact_uris,
             "auto_reanalysis_count": state.get("auto_reanalysis_count", 0) + 1,
-            "auto_reanalysis_changed_claim_ids": list(dict.fromkeys(changed_claim_ids)),
+            "auto_reanalysis_changed_claim_ids": list(dict.fromkeys(reverified_claim_ids)),
         }
     except Exception as exc:
         return _failure(getattr(exc, "code", "AUTO_REANALYSIS_FAILED"), str(exc))
@@ -861,11 +790,20 @@ def _reanalysis_changed_claim_ids(state: IncidentState) -> list[str] | None:
     return None
 
 
+def _is_automatic_reverification(state: IncidentState, changed_ids: list[str] | None) -> bool:
+    return (
+        changed_ids is not None
+        and state.get("last_review_action") != "reanalyze"
+        and "auto_reanalysis_changed_claim_ids" in state
+    )
+
+
 def _merge_selective_verification(
     memory: VideoMemory,
     *,
     previous_verification: VerificationResult | None,
-    next_verification: VerificationResult,
+    next_results: list[ClaimVerification],
+    next_has_accident: bool | None,
     previous_summaries: list,
     next_summaries: list,
     changed_claim_ids: set[str],
@@ -877,14 +815,18 @@ def _merge_selective_verification(
         for item in (previous_verification.results if previous_verification is not None else [])
         if item.claim_id not in changed_claim_ids and item.claim_id in active_claim_ids
     }
-    result_by_claim_id.update({item.claim_id: item for item in next_verification.results})
+    result_by_claim_id.update({item.claim_id: item for item in next_results})
     merged_result = VerificationResult(
         has_accident=(
             previous_verification.has_accident
             if previous_verification is not None and previous_verification.has_accident is not None
-            else next_verification.has_accident
+            else next_has_accident
         ),
-        results=[result_by_claim_id[claim.claim_id] for claim in memory.claims if claim.claim_id in result_by_claim_id],
+        results=[
+            result_by_claim_id[claim.claim_id]
+            for claim in memory.claims
+            if claim.claim_id in result_by_claim_id
+        ]
     )
     summary_by_claim_id = {
         summary.claim_id: summary
@@ -894,7 +836,11 @@ def _merge_selective_verification(
     summary_by_claim_id.update({summary.claim_id: summary for summary in next_summaries})
     return (
         merged_result,
-        [summary_by_claim_id[claim.claim_id] for claim in memory.claims if claim.claim_id in summary_by_claim_id],
+        [
+            summary_by_claim_id[claim.claim_id]
+            for claim in memory.claims
+            if claim.claim_id in summary_by_claim_id
+        ],
     )
 
 
@@ -1153,18 +1099,25 @@ async def _reanalyze(
         )
     )
     if any(
-        claim.timestamp_s is None or not reanalysis_window.t_start <= claim.timestamp_s <= reanalysis_window.t_end
+        claim.timestamp_s is None
+        or not reanalysis_window.t_start <= claim.timestamp_s <= reanalysis_window.t_end
         for claim in patch.claims
     ):
         raise ValueError("reanalysis claims must use a timestamp inside the submitted clip window")
     original_timestamp_by_claim_id = {
-        claim.claim_id: claim.timestamp_s for claim in memory.claims if claim.claim_id in set(target_claim_ids)
+        claim.claim_id: claim.timestamp_s
+        for claim in memory.claims
+        if claim.claim_id in set(target_claim_ids)
     }
     if any(
-        abs(claim.timestamp_s - original_timestamp_by_claim_id[claim.claim_id]) > REANALYSIS_CLIP_RADIUS_S
+        abs(claim.timestamp_s - original_timestamp_by_claim_id[claim.claim_id])
+        > config.auto_reanalysis_clip_radius_s
         for claim in patch.claims
     ):
-        raise ValueError("reanalysis claim timestamp cannot move more than two seconds from its original claim")
+        raise ValueError("reanalysis claim timestamp cannot move outside its configured radius from the original claim")
+    # Focused re-analysis only owns the requested claims. The prompt has no
+    # full-timeline context, so preserve the workflow's canonical timeline.
+    patch = patch.model_copy(update={"video_summary": None, "timeline": None})
     patch = reconcile_video_memory_patch_evidence(
         patch,
         frame_manifest.frames,
@@ -1208,45 +1161,14 @@ def _semantic_sampling_bounds(memory: VideoMemory) -> tuple[float, float]:
     return min(timestamps), max(timestamps)
 
 
-def _reanalysis_claim_groups(
-    memory: VideoMemory,
-    target_claim_ids: list[str],
-    *,
-    duration_s: float,
-) -> list[tuple[list[str], IncidentWindow]]:
-    """Group only overlapping ±2s claim clips, preserving short visual input by default."""
-    claims = {claim.claim_id: claim for claim in memory.claims}
-    windows: list[tuple[str, float, float]] = []
-    for claim_id in target_claim_ids:
-        claim = claims[claim_id]
-        if claim.timestamp_s is None:
-            raise ValueError(f"claim {claim_id} must have timestamp_s for automatic re-analysis")
-        windows.append(
-            (
-                claim_id,
-                max(0.0, claim.timestamp_s - REANALYSIS_CLIP_RADIUS_S),
-                min(duration_s, claim.timestamp_s + REANALYSIS_CLIP_RADIUS_S),
-            )
-        )
-    windows.sort(key=lambda item: (item[1], item[2], item[0]))
-    groups: list[tuple[list[str], float, float]] = []
-    for claim_id, start_s, end_s in windows:
-        if groups and start_s < groups[-1][2]:
-            group_ids, group_start_s, group_end_s = groups[-1]
-            groups[-1] = (group_ids + [claim_id], group_start_s, max(group_end_s, end_s))
-        else:
-            groups.append(([claim_id], start_s, end_s))
-    return [
-        (
-            group_ids,
-            IncidentWindow(
-                t_start=start_s,
-                t0=(start_s + end_s) / 2,
-                t_end=end_s,
-            ),
-        )
-        for group_ids, start_s, end_s in groups
-    ]
+def _reanalysis_window(claim: Claim, *, duration_s: float, radius_s: float) -> IncidentWindow:
+    if claim.timestamp_s is None:
+        raise ValueError(f"claim {claim.claim_id} must have timestamp_s for automatic re-analysis")
+    return IncidentWindow(
+        t_start=max(0.0, claim.timestamp_s - radius_s),
+        t0=claim.timestamp_s,
+        t_end=min(duration_s, claim.timestamp_s + radius_s),
+    )
 
 
 def _video_duration_s(state: IncidentState, memory: VideoMemory) -> float:
@@ -1344,19 +1266,14 @@ def _fallback_accident_type(memory: VideoMemory) -> AccidentType:
     if any(term in text for term in ("người đi bộ", "pedestrian")):
         return AccidentType.PEDESTRIAN_COLLISION
     if any(
-        term in text for term in ("lan can", "guardrail", "hàng rào", "tường", "cây", "cột", "rời đường", "roadside")
+        term in text
+        for term in ("lan can", "guardrail", "hàng rào", "tường", "cây", "cột", "rời đường", "roadside")
     ):
-        return AccidentType.ROADSIDE_COLLISION
+        return AccidentType.ENVIRONMENT_COLLISION
     if any(term in text for term in ("barrier", "vật cản", "static object")):
-        return AccidentType.STATIC_OBJECT_COLLISION
-    if any(term in text for term in ("đối đầu", "ngược chiều", "head-on", "head on")):
-        return AccidentType.HEAD_ON_COLLISION
-    if any(term in text for term in ("nhập làn", "đổi làn", "cùng hướng", "bên hông", "cut-in", "cut in")):
-        return AccidentType.SIDE_COLLISION
-    if any(term in text for term in ("đâm đuôi", "phía sau", "rear-end", "rear end")):
-        return AccidentType.REAR_END_COLLISION
+        return AccidentType.ENVIRONMENT_COLLISION
     if any(term in text for term in ("xe", "phương tiện", "vehicle", "car", "truck", "motorcycle")):
-        return AccidentType.OTHER_UNKNOWN
+        return AccidentType.VEHICLE_COLLISION
     return AccidentType.OTHER_UNKNOWN
 
 

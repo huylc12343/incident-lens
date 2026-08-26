@@ -1,4 +1,3 @@
-import asyncio
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -9,15 +8,19 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 import src.main as main_module
+from src.agents.nodes.incident import VLM_EMPTY_VIDEO_MEMORY_WARNING
 from src.config import Settings
 from src.models.api import IncidentCreateRequest, ReviewDecision
 from src.models.incidents import (
     AccidentType,
     AnalysisMode,
+    AutomaticReanalysisClaim,
+    AutomaticReanalysisOutput,
     Claim,
     ClaimVerification,
     IncidentWindow,
     ReportModelOutput,
+    ReverificationResult,
     VerificationResult,
     VerificationStatus,
     VideoMemory,
@@ -41,9 +44,9 @@ def _qwen_client(*outputs: object) -> SimpleNamespace:
     return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(side_effect=responses))))
 
 
-def _narrative(label: str = "Initial", accident_type: AccidentType = AccidentType.OTHER_UNKNOWN) -> ReportModelOutput:
+def _narrative(label: str = "Initial") -> ReportModelOutput:
     return ReportModelOutput(
-        type_of_accident=accident_type,
+        type_of_accident=AccidentType.OTHER_UNKNOWN,
         incident_window=IncidentWindow(t_start=6, t0=7, t_end=9),
         representative_timestamp_s=7,
         timeline=f"{label} timeline",
@@ -62,8 +65,6 @@ def _settings(tmp_path: Path) -> Settings:
         incident_checkpoint_path=str(tmp_path / "checkpoints.sqlite3"),
         vlm_reanalysis_frame_fps=1,
         vlm_reanalysis_max_frames=10,
-        # Human-review orchestration is covered here; CV redaction has separate coverage.
-        video_redaction_enabled=False,
     )
 
 
@@ -156,10 +157,16 @@ async def test_real_graph_log_conflict_reanalyzes_once_and_reports_warning(tmp_p
     settings = _settings(tmp_path)
     vlm_client = _qwen_client(
         _video_memory(),
-        VideoMemoryPatch(
-            target_claim_ids=["claim-1"],
-            claims=[Claim(claim_id="claim-1", text="Vehicle brakes", timestamp_s=7.1)],
-            base_revision=1,
+        # Auto-reanalysis asks Qwen for one minimal claim, not a full memory patch.
+        AutomaticReanalysisOutput(
+            claims=[
+                AutomaticReanalysisClaim(
+                    claim_id="claim-1",
+                    text="Vehicle brakes",
+                    timestamp_s=7.1,
+                    verification_status=VerificationStatus.UNVERIFIED,
+                )
+            ]
         ),
     )
     contradicted = VerificationResult(
@@ -176,7 +183,7 @@ async def test_real_graph_log_conflict_reanalyzes_once_and_reports_warning(tmp_p
         qwen=vlm_client,
         openai_verification=_client(
             SimpleNamespace(output_parsed=contradicted),
-            SimpleNamespace(output_parsed=contradicted),
+            SimpleNamespace(output_parsed=ReverificationResult(results=contradicted.results)),
         ),
         openai_report=_client(SimpleNamespace(output_parsed=_narrative())),
     )
@@ -205,7 +212,7 @@ async def test_fastapi_lifespan_bootstraps_configured_workflow(monkeypatch, tmp_
     clients = ProviderClients(
         qwen=_qwen_client(_video_memory(with_claim=False)),
         openai_verification=_client(),
-        openai_report=_client(SimpleNamespace(output_parsed=_narrative(accident_type=AccidentType.NO_INCIDENT))),
+        openai_report=_client(SimpleNamespace(output_parsed=_narrative())),
     )
 
     @asynccontextmanager
@@ -229,16 +236,6 @@ async def test_fastapi_lifespan_bootstraps_configured_workflow(monkeypatch, tmp_
                     "analysis_prompt": "Analyze",
                 },
             )
-            assert created.status_code == 202
-            assert created.json()["status"] == "queued"
-            completed = None
-            for _ in range(600):
-                current = await client.get("/api/v1/incidents/INC-BOOTSTRAP")
-                if current.json()["status"] == "awaiting_review":
-                    completed = current
-                    break
-                await asyncio.sleep(0.1)
-            assert completed is not None
             closed = await client.post(
                 "/api/v1/incidents/INC-BOOTSTRAP/review",
                 json={
@@ -249,8 +246,12 @@ async def test_fastapi_lifespan_bootstraps_configured_workflow(monkeypatch, tmp_
             )
 
     assert health.status_code == 200
-    assert completed.json()["draft_report"]["type_of_accident"] == "no_incident"
-    activities = completed.json()["model_activities"]
+    assert created.status_code == 202
+    assert created.json()["status"] == "awaiting_review"
+    # This scenario returns a VideoMemory with no claims and no timeline; the warning
+    # must reach the API response rather than the report silently coming back empty.
+    assert VLM_EMPTY_VIDEO_MEMORY_WARNING in created.json()["warnings"]
+    activities = created.json()["model_activities"]
     assert [(item["step"], item["status"]) for item in activities] == [
         ("vlm", "completed"),
         ("report", "completed"),

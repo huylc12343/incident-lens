@@ -495,7 +495,7 @@ Các bước deploy lên Render:
 ```
 OPENAI_API_KEY=sk-proj-xxxxx
 DATABASE_URL=postgresql://user:pass@host:5432/db
-LANGSMITH_API_KEY=lsv2_pt_xxxxx
+LANGSMITH_API_KEY=<your-langsmith-api-key>
 LANGSMITH_PROJECT=ai20k-agent-production
 ENVIRONMENT=production
 LOG_LEVEL=INFO
@@ -651,7 +651,7 @@ LangSmith là công cụ monitoring chuyên biệt cho ứng dụng LLM/LangChai
 Cấu hình LangSmith chỉ cần 3 environment variables:
 
 ```bash
-export LANGSMITH_API_KEY="lsv2_pt_xxxxx"
+export LANGSMITH_API_KEY="<your-langsmith-api-key>"
 export LANGSMITH_PROJECT="ai20k-agent"
 export LANGCHAIN_TRACING_V2="true"
 ```

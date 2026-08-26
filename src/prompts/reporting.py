@@ -60,6 +60,17 @@ def build_report_prompt(
             for claim in video_memory.claims
         ],
     }
+    if log_evidence_summary is not None:
+        # hypothesized_causes needs the actual control values, not just the claim narrative.
+        context["log_metrics"] = {
+            name: value
+            for name, value in log_evidence_summary.metrics.items()
+            if value is not None
+        }
+        context["log_events"] = [
+            {"event_type": event.get("event_type"), "timestamp_s": event.get("timestamp_s")}
+            for event in log_evidence_summary.events
+        ]
     text = "\n".join(
         [
             "Chỉ trả đúng sáu field: type_of_accident, incident_window, representative_timestamp_s, timeline, "
@@ -102,14 +113,12 @@ def build_report_prompt(
             "has_accident quyết định tai nạn có xảy ra hay không; type_of_accident chỉ xác định cơ chế chính của tai nạn. "
             "Khi has_accident=true, không yêu cầu phải quan sát rõ điểm tiếp xúc hoặc có claim trực tiếp nói 'va chạm'. "
             "Hãy phân loại dựa trên quỹ đạo, quan hệ giữa các tác nhân và diễn biến ngay trước hoặc tại t0.",
-            "- rear_end_collision: phương tiện phía trước cùng hướng là đối tượng chính và ego tiến vào phía sau nó.",
+            "- vehicle_collision: Ego va chạm với một phương tiện khác. Bao gồm xe cùng hướng, ngược hướng, đâm phía sau, nhập làn, đổi làn hoặc va chạm bên hông.",
+            " Dùng khi phương tiện khác là đối tượng chính của tai nạn và không thuộc crossing_collision.",
             "- crossing_collision: Phương tiện khác đi từ bên trái, bên phải hoặc từ một hướng khác và cắt ngang qua quỹ đạo của ego."
             " Dùng khi hai quỹ đạo giao nhau rõ ràng, ví dụ xe từ đường nhánh hoặc ngã tư lao ngang qua đường ego.",
-            "- side_collision: hai xe chủ yếu đi cùng hoặc gần cùng hướng và xảy ra xung đột bên hông do nhập làn, đổi làn hoặc di chuyển song song.",
-            "- head_on_collision: phương tiện ngược chiều là đối tượng chính và hai quỹ đạo đối đầu.",
             "- pedestrian_collision: người đi bộ là đối tượng chính nằm trên hoặc đi vào quỹ đạo của ego và liên quan trực tiếp đến tai nạn.",
-            "- static_object_collision: vật thể tĩnh trong khu vực lưu thông là đối tượng chính của tai nạn.",
-            "- roadside_collision: ego rời phần đường hoặc sự cố chính liên quan đến môi trường ven đường.",
+            "- environment_collision: ego va chạm với vật thể không phải phương tiện/người đi bộ hoặc rời khỏi phần đường và va vào môi trường xung quanh. Bao gồm guardrail, tường, cây, cột, hàng rào, vật cản tĩnh, lề đường hoặc địa hình ven đường",
             "- no_incident: chỉ dùng khi has_accident=false.",
             "- other_unknown: chỉ dùng khi has_accident=true nhưng ngay cả cơ chế hoặc quỹ đạo chính quanh t0 cũng không thể "
             "xác định từ context.",
@@ -130,14 +139,22 @@ def build_report_prompt(
             "đã có trong context, không tạo timestamp mới và không đưa metrics số vào timeline. Dùng phiên bản thông tin cuối "
             "sau khi đã áp dụng hierarchy và verification ở trên; không nhắc lại các phiên bản đã bị loại.",
 
-            "video_observations: là nhận định cuối cùng, không phải bản tóm tắt video_summary. Câu đầu phải nêu rõ ego có hay "
-            "không có tai nạn và type_of_accident đã chọn; sau đó mô tả ngắn cơ chế chính và kết cục. Chỉ viết một narrative "
-            "cuối nhất quán.",
+            "log_metrics và log_events (nếu có) là telemetry của ego: tốc độ, brake, throttle, steering và mốc thời gian "
+            "các bất thường. Được phép trích dẫn các con số này kèm đơn vị trong video_observations và hypothesized_causes.",
 
-            "hypothesized_causes: tối đa 3 yếu tố/cơ chế có thể góp phần. Chỉ dùng evidence xuất hiện trước hoặc tại t0 và "
-            "không dùng chi tiết đã bị verification contradicted. Không đồng nhất tương quan với nguyên nhân: speed, brake, "
-            "throttle hoặc steering đơn lẻ không tự chứng minh nguyên nhân tai nạn; hiện tượng chỉ xuất hiện sau t0 thường là "
-            "hậu quả chứ không phải root cause. Nếu bằng chứng chưa đủ, dùng cách diễn đạt thận trọng.",
+            "video_observations: là nhận định cuối cùng, không phải bản tóm tắt video_summary. Câu đầu nêu rõ ego có hay "
+            "không có tai nạn và type_of_accident đã chọn. Sau đó mô tả diễn biến đủ chi tiết theo thứ tự trước t0 -> tại t0 "
+            "-> sau t0: bối cảnh đường và các đối tượng liên quan, hành vi của ego, cơ chế chính và kết cục. Viết 4-8 câu, "
+            "một narrative liền mạch, ưu tiên mô tả cụ thể thay vì diễn đạt chung chung.",
+
+            "hypothesized_causes: tối đa 3 yếu tố/cơ chế có thể góp phần, mỗi yếu tố 2-4 câu. Với mỗi yếu tố: nêu cơ chế, "
+            "dẫn bằng chứng cụ thể kèm timestamp, và nói cơ chế đó dẫn tới sự cố như thế nào. Bắt buộc soi telemetry quanh "
+            "t0 khi có: mức throttle, mức brake, có hay không đạp phanh, góc/biên độ đánh lái, tốc độ và mức giảm tốc; nêu "
+            "rõ các dấu hiệu bất thường như giảm tốc mạnh mà brake thấp, đánh lái gấp, hoặc mất tốc độ đột ngột. Chỉ dùng "
+            "evidence trước hoặc tại t0 và không dùng chi tiết đã bị verification contradicted; hiện tượng chỉ xuất hiện sau "
+            "t0 là hậu quả, không phải root cause. Không kết luận nguyên nhân chỉ từ một chỉ số đơn lẻ. Báo cáo sẽ được "
+            "người review nên hãy đưa ra giả thuyết có căn cứ thay vì né tránh; khi bằng chứng chưa chắc chắn thì nêu giả "
+            "thuyết kèm mức độ tin cậy và lý do còn nghi ngờ.",
 
             "Nếu type_of_accident=no_incident, hypothesized_causes phải nói rõ không áp dụng phân tích nguyên nhân tai nạn "
             "của ego. Nếu có tai nạn, nguyên nhân phải giải thích cơ chế có thể dẫn tới sự cố đã xảy ra, không chuyển thành "

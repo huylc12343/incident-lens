@@ -60,7 +60,11 @@ app.add_middleware(
 )
 
 app.include_router(router, prefix="/api/v1")
-app.mount("/artifacts", StaticFiles(directory=settings.artifact_dir, check_dir=False), name="artifacts")
+app.mount(
+    "/artifacts",
+    StaticFiles(directory=settings.artifact_dir, check_dir=False),
+    name="artifacts",
+)
 
 
 @app.get("/health")

@@ -1,26 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
-from src.agents.graph import agent
 from src.api.incidents import router as incident_router
-from src.api.settings import router as settings_router
-from src.models.schemas import ChatRequest, ChatResponse
 
 router = APIRouter()
 router.include_router(incident_router)
-router.include_router(settings_router)
-
-
-@router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
-    """Chat với AI agent."""
-    try:
-        result = await agent.ainvoke({"query": request.message})
-        return ChatResponse(
-            response=result.get("response", ""),
-            analysis=result.get("analysis", ""),
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/status")

@@ -184,7 +184,8 @@ def test_claim_log_summary_formats_rule_derived_states_for_verification(tmp_path
     assert "Gia tốc tại 17.0s: -26.8981 m/s²" in summary.summary
     assert "Đã loại" not in summary.summary
     assert "Yaw thay đổi: 0.05°" in summary.summary
-    assert "Steering tại 17.0s: 0.02 => xe có xu hướng rẽ phải." in summary.summary
+    # 0.02 sits inside the ±0.1 straight-ahead deadband.
+    assert "Steering tại 17.0s: 0.02 => steering gần trung tâm." in summary.summary
     assert "| 17.0s | 0.65 |" in summary.summary
 
 
@@ -228,7 +229,7 @@ def test_claim_log_summary_formats_per_second_series_and_claim_acceleration(tmp_
     assert "Số mẫu log trong cửa sổ: 13" in summary.summary
     assert "Số dòng log model được phép dùng: 13" in summary.summary
     assert "brake [0, 1]: 0 là không phanh, 1 là đạp phanh hết cỡ;" in summary.summary
-    assert "steering <= -0.02 rẽ trái" in summary.summary
+    assert "steering <= -0.1 rẽ trái" in summary.summary
     assert "| Timestamp | Speed (km/h) |" in summary.summary
     for timestamp_s, speed, _, brake, _ in rows:
         assert f"| {timestamp_s:.1f}s | {speed:g} |" in summary.summary
@@ -246,11 +247,11 @@ def test_claim_log_summary_formats_per_second_series_and_claim_acceleration(tmp_
 @pytest.mark.parametrize(
     ("steer", "expected_direction"),
     [
-        (-0.02, "left"),
-        (-0.019, "straight"),
+        (-0.1, "left"),
+        (-0.099, "straight"),
         (0.0, "straight"),
-        (0.019, "straight"),
-        (0.02, "right"),
+        (0.099, "straight"),
+        (0.1, "right"),
     ],
 )
 def test_claim_verification_uses_steering_deadband(tmp_path, steer: float, expected_direction: str) -> None:
@@ -478,3 +479,144 @@ def test_extreme_acceleration_is_preserved_in_claim_summary(tmp_path) -> None:
     assert speed["max_deceleration"] == pytest.approx(-27.777778)
     assert "-27.777" in summary.summary
     assert "Đã loại" not in summary.summary
+
+
+def _write_dynamic_log(path) -> None:
+    """A calm run, then a hard right steering jump held from 2.0s to 2.4s."""
+    rows = ["timestamp_s,speed_kmh,throttle,brake,steer"]
+    rows.extend(f"{index / 10:.1f},40,0.5,0.0,0.0" for index in range(20))
+    rows.extend(f"{(20 + index) / 10:.1f},40,0.5,0.0,0.38" for index in range(5))
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+
+def test_claim_dynamic_hints_carry_numeric_values_for_the_covering_claim(tmp_path) -> None:
+    log = tmp_path / "dynamic.csv"
+    _write_dynamic_log(log)
+
+    _, contexts = build_claim_verification_inputs(
+        str(log),
+        [Claim(claim_id="turn", text="Xe đánh lái sang phải", timestamp_s=2.0)],
+        timestamp_tolerance_s=0.2,
+    )
+
+    hints = contexts[0].dynamic_hints
+    assert [hint.signal for hint in hints] == ["steer"]
+    hint = hints[0]
+    assert hint.start_s <= 2.0 <= hint.end_s
+    # Unlike the VLM hint, the verification hint exposes the peak telemetry value.
+    assert hint.value == pytest.approx(0.38)
+    assert "trong khoảng " in hint.text
+    assert "góc đánh lái thay đổi bất thường sang phải" in hint.text
+
+
+def test_claim_dynamic_hints_skip_claims_outside_the_interval(tmp_path) -> None:
+    log = tmp_path / "dynamic.csv"
+    _write_dynamic_log(log)
+
+    _, contexts = build_claim_verification_inputs(
+        str(log),
+        [
+            Claim(claim_id="early", text="Xe đi thẳng", timestamp_s=0.5),
+            Claim(claim_id="turn", text="Xe đánh lái sang phải", timestamp_s=2.0),
+        ],
+        timestamp_tolerance_s=0.2,
+    )
+
+    # Only the claim whose timestamp the interval covers receives the hint.
+    assert contexts[0].dynamic_hints == []
+    assert [hint.signal for hint in contexts[1].dynamic_hints] == ["steer"]
+
+
+def test_claim_dynamic_hints_use_the_claim_sampling_window_not_strict_containment(tmp_path) -> None:
+    log = tmp_path / "dynamic.csv"
+    _write_dynamic_log(log)
+
+    # sample_radius is a row count; at 0.1s per row a radius of 30 spans +/- 3.0s.
+    _, contexts = build_claim_verification_inputs(
+        str(log),
+        [Claim(claim_id="turn", text="Xe đánh lái sang phải", timestamp_s=1.2)],
+        timestamp_tolerance_s=0.2,
+        sample_radius=30,
+    )
+
+    # The claim timestamp sits outside the steering interval, but the whole interval sits inside
+    # the claim window, so the hint still belongs to this claim.
+    hints = contexts[0].dynamic_hints
+    assert [hint.signal for hint in hints] == ["steer"]
+    assert not hints[0].start_s <= 1.2 <= hints[0].end_s
+
+
+def test_claim_dynamic_hints_require_most_of_the_interval_inside_the_window(tmp_path) -> None:
+    log = tmp_path / "dynamic.csv"
+    _write_dynamic_log(log)
+
+    def hints_for(sample_radius: int) -> list[str]:
+        _, contexts = build_claim_verification_inputs(
+            str(log),
+            [Claim(claim_id="before", text="Xe đi thẳng", timestamp_s=1.7)],
+            timestamp_tolerance_s=0.2,
+            sample_radius=sample_radius,
+        )
+        return [hint.signal for hint in contexts[0].dynamic_hints]
+
+    # The interval spans 1.85-2.15s. A +/-0.2s window overlaps a sixth of it and a +/-0.3s window
+    # exactly half, neither of which clears the "more than half" rule; +/-0.4s overlaps five sixths.
+    assert hints_for(2) == []
+    assert hints_for(3) == []
+    assert hints_for(4) == ["steer"]
+
+
+def _dynamics_for(tmp_path, speeds: list[float]) -> dict[str, tuple[float | None, str]]:
+    log = tmp_path / f"phase-{speeds[0]}-{speeds[-1]}.csv"
+    rows = ["timestamp_s,speed_kmh,throttle,brake,steer"]
+    rows.extend(
+        f"{index / 10:.1f},{speed},0.5,0.0,0.0" for index, speed in enumerate(speeds)
+    )
+    log.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    _, contexts = build_claim_verification_inputs(
+        str(log),
+        [Claim(claim_id="c", text="Chuyển động của ego", timestamp_s=0.5)],
+        timestamp_tolerance_s=0.2,
+        sample_radius=20,
+    )
+    return {name: (metric.value, metric.text) for name, metric in contexts[0].derived_dynamics}
+
+
+def test_derived_dynamics_describe_acceleration_when_speed_rises(tmp_path) -> None:
+    dynamics = _dynamics_for(tmp_path, [0, 10, 20, 30, 40, 50, 60, 70, 80, 90])
+
+    magnitude, text = dynamics["max_deceleration_mps2"]
+    assert magnitude is not None
+    # speed_trend is "increase" here, so the wording must not claim the car decelerated.
+    assert "tăng tốc" in text
+    assert "giảm tốc" not in text
+    # Low brake while accelerating is normal driving and must not read as an accident signal.
+    mismatch_text = dynamics["decel_brake_mismatch"][1]
+    assert mismatch_text == "Xe tăng tốc rất mạnh."
+    assert "tai nạn" not in mismatch_text
+
+
+def test_derived_dynamics_keep_the_accident_wording_when_speed_drops(tmp_path) -> None:
+    dynamics = _dynamics_for(tmp_path, [90, 80, 70, 60, 50, 40, 30, 20, 10, 0])
+
+    assert "giảm tốc" in dynamics["max_deceleration_mps2"][1]
+    assert "tai nạn" in dynamics["decel_brake_mismatch"][1]
+
+
+def test_claim_dynamic_hint_text_carries_the_values_it_moved_through(tmp_path) -> None:
+    log = tmp_path / "throttle-steps.csv"
+    rows = ["timestamp_s,speed_kmh,throttle,brake,steer"]
+    rows.extend(f"{index / 10:.1f},40,0.38,0.0,0.0" for index in range(20))
+    rows.extend(f"{(20 + index) / 10:.1f},40,0.08,0.0,0.0" for index in range(5))
+    log.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+    _, contexts = build_claim_verification_inputs(
+        str(log),
+        [Claim(claim_id="lift", text="Xe nhả ga", timestamp_s=2.0)],
+        timestamp_tolerance_s=0.2,
+        sample_radius=20,
+    )
+
+    texts = [hint.text for hint in contexts[0].dynamic_hints if hint.signal == "throttle"]
+    assert texts
+    assert "ga giảm bất thường từ 0.38 -> 0.08" in texts[0]

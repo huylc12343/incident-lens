@@ -116,6 +116,9 @@ def test_enabled_tracing_builds_sanitizing_client() -> None:
     settings = Settings(
         _env_file=None,
         app_env="production",
+        # Unrelated to tracing, but a production Settings refuses to build without them.
+        openai_api_key="sk-test",
+        dashscope_api_key="sk-test",
         langsmith_tracing=True,
         langsmith_api_key="lsv2_test",
         langsmith_project="incident-production",

@@ -12,7 +12,6 @@ from src.models.api import IncidentUploadResponse
 
 VIDEO_EXTENSIONS = {".avi", ".mkv", ".mov", ".mp4", ".webm"}
 LOG_EXTENSIONS = {".csv"}
-GROUND_TRUTH_EXTENSIONS = {".json"}
 CHUNK_SIZE = 1024 * 1024
 
 
@@ -30,12 +29,7 @@ class IncidentUploadService:
         self._upload_dir.mkdir(parents=True, exist_ok=True)
         self._max_log_bytes = max_log_bytes
 
-    async def save(
-        self,
-        video: UploadFile,
-        log: UploadFile | None = None,
-        ground_truth: UploadFile | None = None,
-    ) -> IncidentUploadResponse:
+    async def save(self, video: UploadFile, log: UploadFile | None = None) -> IncidentUploadResponse:
         saved: list[Path] = []
         try:
             video_path = await self._save_file(video, "video", VIDEO_EXTENSIONS)
@@ -44,19 +38,9 @@ class IncidentUploadService:
             if log is not None:
                 log_path = await self._save_file(log, "log", LOG_EXTENSIONS, self._max_log_bytes)
                 saved.append(log_path)
-            ground_truth_path = None
-            if ground_truth is not None:
-                ground_truth_path = await self._save_file(
-                    ground_truth,
-                    "ground_truth",
-                    GROUND_TRUTH_EXTENSIONS,
-                    self._max_log_bytes,
-                )
-                saved.append(ground_truth_path)
             return IncidentUploadResponse(
                 video_uri=str(video_path),
                 log_uri=str(log_path) if log_path is not None else None,
-                ground_truth_uri=str(ground_truth_path) if ground_truth_path is not None else None,
             )
         except Exception:
             for path in saved:
@@ -66,8 +50,6 @@ class IncidentUploadService:
             await video.close()
             if log is not None:
                 await log.close()
-            if ground_truth is not None:
-                await ground_truth.close()
 
     async def _save_file(
         self,

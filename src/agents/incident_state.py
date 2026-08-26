@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypedDict
 
-from src.models.api import AiGroundTruthEvaluation, GroundTruth, ModelActivity, ReviewAuditEntry
+from src.models.api import ModelActivity, ReviewAuditEntry
 from src.models.incidents import (
     ClaimLogSummary,
     DraftReport,
@@ -21,7 +21,6 @@ from src.models.incidents import (
 class IncidentState(TypedDict, total=False):
     incident_id: str
     video_uri: str
-    review_video_uri: str
     log_uri: str | None
     analysis_prompt: str
     video_duration_s: float
@@ -56,8 +55,6 @@ class IncidentState(TypedDict, total=False):
     last_review_action: Literal["approve", "edit", "reanalyze", "not_incident"]
     review_audit: list[ReviewAuditEntry]
     model_activities: list[ModelActivity]
-    ground_truth: GroundTruth
-    ai_evaluation: AiGroundTruthEvaluation
     artifact_uris: dict[str, str]
     warnings: list[str]
     error_code: str

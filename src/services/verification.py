@@ -17,8 +17,14 @@ from openai import (
 )
 from pydantic import ValidationError
 
-from src.models.incidents import ClaimVerification, VerificationRequest, VerificationResult, VerificationStatus
-from src.prompts.verification import build_verification_prompt
+from src.models.incidents import (
+    ClaimVerification,
+    ReverificationResult,
+    VerificationRequest,
+    VerificationResult,
+    VerificationStatus,
+)
+from src.prompts.verification import build_reverification_prompt, build_verification_prompt
 from src.services.langsmith_tracing import LangSmithTracing
 from src.services.model_observability import ModelActivityRegistry
 
@@ -67,7 +73,24 @@ class OpenAIVerificationService:
         self._observability = observability
 
     async def verify(self, request: VerificationRequest) -> VerificationResult:
-        prompt = build_verification_prompt(
+        result = await self._run(request, is_reverification=False)
+        assert isinstance(result, VerificationResult)
+        return result
+
+    async def reverify(self, request: VerificationRequest) -> ReverificationResult:
+        result = await self._run(request, is_reverification=True)
+        assert isinstance(result, ReverificationResult)
+        return result
+
+    async def _run(
+        self,
+        request: VerificationRequest,
+        *,
+        is_reverification: bool,
+    ) -> VerificationResult | ReverificationResult:
+        prompt_builder = build_reverification_prompt if is_reverification else build_verification_prompt
+        result_model = ReverificationResult if is_reverification else VerificationResult
+        prompt = prompt_builder(
             claims=request.claims,
             claim_log_summaries=request.claim_log_summaries,
             claim_verification_contexts=request.claim_verification_contexts,
@@ -79,9 +102,13 @@ class OpenAIVerificationService:
         if self._observability is not None:
             activity_id = self._observability.start(
                 incident_id=request.incident_id,
-                step="verification",
-                operation="claim_verification",
-                description="Compare video claims with log evidence.",
+                step="reverification" if is_reverification else "verification",
+                operation="claim_reverification" if is_reverification else "claim_verification",
+                description=(
+                    "Xác thực lại các claim đã thay đổi sau automatic re-analysis."
+                    if is_reverification
+                    else "Đối chiếu các claim từ video với bằng chứng log."
+                ),
                 provider="openai",
                 model=self._model,
                 metadata={"claim_count": len(request.claims)},
@@ -93,7 +120,7 @@ class OpenAIVerificationService:
                     {"role": "system", "content": prompt.text},
                     {"role": "user", "content": _prompt_context_text(prompt.context)},
                 ],
-                "text_format": VerificationResult,
+                "text_format": result_model,
                 "timeout": self._timeout_s,
             }
             if not self._model.startswith("gpt-5"):
@@ -102,7 +129,7 @@ class OpenAIVerificationService:
             parsed = getattr(response, "output_parsed", None)
             if parsed is None:
                 parsed = json.loads(getattr(response, "output_text", ""))
-            result = VerificationResult.model_validate(parsed)
+            result = result_model.model_validate(parsed)
         except (ValidationError, ValueError, TypeError, json.JSONDecodeError) as exc:
             if activity_id is not None:
                 self._observability.fail(activity_id, "VERIFICATION_STRUCTURED_OUTPUT_INVALID", response)
@@ -161,7 +188,7 @@ class OpenAIVerificationService:
                 retryable=True,
             ) from exc
         try:
-            result = _validate_verification_result(request, result)
+            result = result.model_copy(update={"results": _validate_claim_results(request, result.results)})
         except VerificationServiceError as exc:
             if activity_id is not None:
                 self._observability.fail(activity_id, exc.code, response)
@@ -171,7 +198,10 @@ class OpenAIVerificationService:
         return result
 
 
-def _validate_verification_result(request: VerificationRequest, result: VerificationResult) -> VerificationResult:
+def _validate_claim_results(
+    request: VerificationRequest,
+    results: list[ClaimVerification],
+) -> list[ClaimVerification]:
     expected_ids = [claim.claim_id for claim in request.claims]
     summaries = {summary.claim_id: summary for summary in request.claim_log_summaries}
     compact_contexts = {
@@ -184,7 +214,7 @@ def _validate_verification_result(request: VerificationRequest, result: Verifica
         )
 
     returned_by_id: dict[str, list[ClaimVerification]] = {}
-    for item in result.results:
+    for item in results:
         returned_by_id.setdefault(item.claim_id, []).append(item)
     ordered_results = []
     for claim_id in expected_ids:
@@ -196,7 +226,7 @@ def _validate_verification_result(request: VerificationRequest, result: Verifica
                 ClaimVerification(
                     claim_id=claim_id,
                     status=VerificationStatus.UNVERIFIED,
-                    reason="Bộ xác minh không trả về đúng một kết quả hợp lệ cho claim này.",
+                    reason="Verifier không trả về duy nhất một kết quả hợp lệ cho claim này.",
                     evidence_ids=[],
                 )
             )
@@ -209,7 +239,7 @@ def _validate_verification_result(request: VerificationRequest, result: Verifica
                 item.model_copy(
                     update={
                         "status": VerificationStatus.UNVERIFIED,
-                        "reason": "Không có bằng chứng log nào đủ gần timestamp của claim.",
+                        "reason": "Không có evidence log đủ gần timestamp của claim.",
                         "evidence_ids": [],
                     }
                 )
@@ -229,7 +259,7 @@ def _validate_verification_result(request: VerificationRequest, result: Verifica
                         "reason": (
                             item.reason
                             if item.status == VerificationStatus.UNVERIFIED
-                            else "Không có bằng chứng log trực tiếp hợp lệ để ủng hộ hoặc phản bác claim."
+                            else "Không có evidence log trực tiếp hợp lệ để xác nhận hoặc bác bỏ claim."
                         ),
                         "evidence_ids": [],
                     }
@@ -239,7 +269,7 @@ def _validate_verification_result(request: VerificationRequest, result: Verifica
         normalized_results.append(
             item.model_copy(update={"evidence_ids": evidence_ids})
         )
-    return result.model_copy(update={"results": normalized_results})
+    return normalized_results
 
 
 def _prompt_context_text(context: dict[str, Any]) -> str:

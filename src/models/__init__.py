@@ -1,6 +1,7 @@
 from src.models.api import IncidentCreateRequest, IncidentSnapshot, IncidentUploadResponse, ReviewDecision, StoredReport
 from src.models.incidents import (
     AnalysisMode,
+    AutomaticReanalysisOutput,
     Claim,
     ClaimLogSummary,
     ClaimVerification,
@@ -22,6 +23,7 @@ from src.models.incidents import (
     ReportService,
     ReportTimelineSection,
     ReportVideoObservationsSection,
+    ReverificationResult,
     TimestampedFramesAnalysisRequest,
     VerificationRequest,
     VerificationResult,
@@ -36,6 +38,7 @@ from src.models.incidents import (
 
 __all__ = [
     "AnalysisMode",
+    "AutomaticReanalysisOutput",
     "Claim",
     "ClaimLogSummary",
     "ClaimVerification",
@@ -49,6 +52,7 @@ __all__ = [
     "LogEvidenceSummary",
     "NativeVideoAnalysisRequest",
     "ReanalysisRequest",
+    "ReverificationResult",
     "RemoteMediaHandle",
     "ReportNarrative",
     "ReportEvidenceAndWarnings",

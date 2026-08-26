@@ -1,9 +1,6 @@
 """Deterministic prompt builders for incident analysis services."""
 
-from src.prompts.auto_reanalysis import (
-    build_auto_reanalysis_prompt,
-    build_auto_reanalysis_prompt_for_conflicts,
-)
+from src.prompts.auto_reanalysis import build_auto_reanalysis_prompt
 from src.prompts.reanalysis import (
     build_human_reanalysis_prompt,
 )
@@ -17,7 +14,6 @@ from src.prompts.video_analysis import (
 
 __all__ = [
     "build_auto_reanalysis_prompt",
-    "build_auto_reanalysis_prompt_for_conflicts",
     "build_frame_sequence_instruction",
     "build_human_reanalysis_prompt",
     "build_native_video_instruction",

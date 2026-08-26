@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from src.models.incidents import AccidentType, Claim, ClaimLogSummary, DraftReport, VerificationStatus
+from src.models.incidents import Claim, ClaimLogSummary, DraftReport
 
 IncidentStatus = Literal[
     "queued",
@@ -19,6 +19,14 @@ IncidentStatus = Literal[
     "cancelled",
 ]
 ReviewAction = Literal["approve", "edit", "reanalyze", "not_incident"]
+EDITABLE_REPORT_FIELDS = {
+    "summary",
+    "timeline",
+    "video_observations",
+    "log_findings",
+    "alignment",
+    "hypothesized_causes",
+}
 
 
 class APIModel(BaseModel):
@@ -54,86 +62,6 @@ class IncidentCreateRequest(APIModel):
 class IncidentUploadResponse(APIModel):
     video_uri: str
     log_uri: str | None = None
-    ground_truth_uri: str | None = None
-
-
-class ClaimEdit(APIModel):
-    claim_id: str = Field(min_length=1)
-    text: str = Field(min_length=1)
-    timestamp_s: float | None = Field(default=None, ge=0)
-    verification_status: VerificationStatus | None = None
-    evidence_ids: list[str] | None = None
-
-    @field_validator("claim_id", "text")
-    @classmethod
-    def strip_claim_text(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("claim edit text must not be blank")
-        return value
-
-    @field_validator("evidence_ids")
-    @classmethod
-    def validate_evidence_ids(cls, value: list[str] | None) -> list[str] | None:
-        if value is None:
-            return None
-        normalized = [item.strip() for item in value]
-        if any(not item for item in normalized):
-            raise ValueError("evidence IDs must not be blank")
-        if len(normalized) != len(set(normalized)):
-            raise ValueError("evidence IDs must be unique")
-        return normalized
-
-
-class ReportEdits(APIModel):
-    type_of_accident: AccidentType | None = None
-    t_start: float | None = Field(default=None, ge=0)
-    t0: float | None = Field(default=None, ge=0)
-    t_end: float | None = Field(default=None, gt=0)
-    claims: list[ClaimEdit] | None = None
-    summary: str | None = None
-    timeline: str | None = None
-    video_observations: str | None = None
-    log_findings: str | None = None
-    alignment: str | None = None
-    hypothesized_causes: str | None = None
-    warnings: list[str] | None = None
-
-    @field_validator(
-        "summary",
-        "timeline",
-        "video_observations",
-        "log_findings",
-        "alignment",
-        "hypothesized_causes",
-    )
-    @classmethod
-    def strip_optional_narrative(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        value = value.strip()
-        if not value:
-            raise ValueError("edited report text must not be blank")
-        return value
-
-    @field_validator("warnings")
-    @classmethod
-    def normalize_warnings(cls, value: list[str] | None) -> list[str] | None:
-        if value is None:
-            return None
-        normalized = [item.strip() for item in value]
-        if any(not item for item in normalized):
-            raise ValueError("warnings must not contain blank values")
-        return list(dict.fromkeys(normalized))
-
-    @model_validator(mode="after")
-    def validate_edit_payload(self) -> ReportEdits:
-        if not self.model_fields_set:
-            raise ValueError("at least one report edit is required")
-        claim_ids = [claim.claim_id for claim in self.claims or []]
-        if len(claim_ids) != len(set(claim_ids)):
-            raise ValueError("edited claim IDs must be unique")
-        return self
 
 
 class ReviewDecision(APIModel):
@@ -142,7 +70,7 @@ class ReviewDecision(APIModel):
     reason: str | None = None
     feedback: str | None = None
     target_claim_ids: list[str] = Field(default_factory=list)
-    edits: ReportEdits | None = None
+    edits: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("reviewer")
     @classmethod
@@ -164,9 +92,14 @@ class ReviewDecision(APIModel):
             if len(set(self.target_claim_ids)) != len(self.target_claim_ids):
                 raise ValueError("target_claim_ids must be unique")
         if self.action == "edit":
-            if self.edits is None:
+            if not self.edits:
                 raise ValueError("edit requires at least one report field")
-        elif self.edits is not None:
+            invalid = set(self.edits) - EDITABLE_REPORT_FIELDS
+            if invalid:
+                raise ValueError(f"report fields are not editable: {', '.join(sorted(invalid))}")
+            if any(not value.strip() for value in self.edits.values()):
+                raise ValueError("edited report values must not be blank")
+        elif self.edits:
             raise ValueError("edits are only allowed for the edit action")
         return self
 
@@ -204,41 +137,6 @@ class ModelActivity(APIModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class GroundTruthTimeline(APIModel):
-    t_start: float | None = Field(default=None, ge=0)
-    t0: float | None = Field(default=None, ge=0)
-    t_end: float | None = Field(default=None, ge=0)
-
-    @model_validator(mode="after")
-    def validate_known_timestamps(self) -> GroundTruthTimeline:
-        known = [value for value in (self.t_start, self.t0, self.t_end) if value is not None]
-        if known != sorted(known):
-            raise ValueError("known ground-truth timestamps must be ordered")
-        return self
-
-
-class GroundTruth(APIModel):
-    source: Literal["CARLA Incident", "Human annotation", "Reviewer verified"]
-    incident_type: AccidentType | None = None
-    severity: str | None = None
-    timeline: GroundTruthTimeline | None = None
-
-
-class AiIncidentPrediction(APIModel):
-    incident_type: AccidentType | None = None
-    severity: str | None = None
-    timeline: GroundTruthTimeline | None = None
-
-
-class AiGroundTruthEvaluation(APIModel):
-    overall_accuracy: float | None = Field(default=None, ge=0, le=1)
-    incident_type_match: bool | None = None
-    severity_match: bool | None = None
-    t0_delta_s: float | None = Field(default=None, ge=0)
-    timeline_iou: float | None = Field(default=None, ge=0, le=1)
-    prediction: AiIncidentPrediction
-
-
 class IncidentSnapshot(APIModel):
     incident_id: str
     status: IncidentStatus
@@ -255,8 +153,6 @@ class IncidentSnapshot(APIModel):
     review_audit: list[ReviewAuditEntry] = Field(default_factory=list)
     model_activities: list[ModelActivity] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
-    ground_truth: GroundTruth | None = None
-    ai_evaluation: AiGroundTruthEvaluation | None = None
     error_code: str | None = None
     error_message: str | None = None
     stored_at: datetime | None = None
@@ -271,8 +167,6 @@ class StoredReport(APIModel):
     warnings: list[str] = Field(default_factory=list)
     review_audit: list[ReviewAuditEntry] = Field(default_factory=list)
     model_activities: list[ModelActivity] = Field(default_factory=list)
-    ground_truth: GroundTruth | None = None
-    ai_evaluation: AiGroundTruthEvaluation | None = None
     final_report: DraftReport | None = None
     evidence_ids: list[str] = Field(default_factory=list)
     reviewer: str

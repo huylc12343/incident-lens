@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import re
 import shutil
 from collections.abc import Awaitable, Callable
@@ -13,7 +12,6 @@ from typing import Protocol, cast
 
 from src.agents.incident_state import IncidentState
 from src.models.api import (
-    GroundTruth,
     IncidentCreateRequest,
     IncidentSnapshot,
     ReviewAuditEntry,
@@ -21,30 +19,8 @@ from src.models.api import (
     StoredReport,
 )
 from src.models.incidents import VerificationStatus
-from src.services.ground_truth import GroundTruthError, evaluate_ground_truth, load_ground_truth
 from src.services.model_observability import ModelActivityRegistry
 from src.services.report_repository import ReportRepository, ReportRepositoryError
-
-# Uvicorn configures this logger to stdout, so transitions are visible through
-# `docker compose logs -f` without requiring an additional logging setup.
-logger = logging.getLogger("uvicorn.error")
-
-
-def _log_transition(
-    incident_id: str,
-    previous_status: str | None,
-    next_status: str,
-    *,
-    event: str,
-) -> None:
-    """Emit a queryable workflow state transition in the container log."""
-    logger.info(
-        "workflow_transition incident_id=%s event=%s from_status=%s to_status=%s",
-        incident_id,
-        event,
-        previous_status or "none",
-        next_status,
-    )
 
 
 class WorkflowError(RuntimeError):
@@ -93,72 +69,11 @@ class WorkflowService:
         self._audit: dict[str, list[ReviewAuditEntry]] = {}
         self._stored_at: dict[str, datetime] = {}
         self._pending_terminal: dict[str, tuple[IncidentState, ReviewDecision]] = {}
-        self._background_tasks: dict[str, asyncio.Task[None]] = {}
         self._registry_lock = asyncio.Lock()
-
-    async def enqueue(self, request: IncidentCreateRequest) -> IncidentSnapshot:
-        """Register an incident and return immediately while analysis runs in the background."""
-        if self._input_validator is not None:
-            await self._input_validator.validate(request)
-        ground_truth = await self._load_ground_truth(request)
-        incident_id = request.incident_id.strip()
-        initial: IncidentState = {
-            "incident_id": incident_id,
-            "video_uri": request.video_uri,
-            "log_uri": request.log_uri,
-            "analysis_prompt": request.analysis_prompt,
-            "metadata": request.metadata,
-            "status": "queued",
-            "auto_reanalysis_count": 0,
-            "manual_reanalysis_count": 0,
-            "artifact_uris": {},
-            "warnings": [],
-            "review_audit": [],
-            "model_activities": [],
-        }
-        if ground_truth is not None:
-            initial["ground_truth"] = ground_truth
-        async with self._registry_lock:
-            checkpoint_state = await self._checkpoint_state(incident_id)
-            if (
-                incident_id in self._states
-                or checkpoint_state is not None
-                or await _repository_call(self._repository, "aget", "get", incident_id) is not None
-            ):
-                raise WorkflowError("INCIDENT_ALREADY_EXISTS", "incident ID already exists")
-            self._states[incident_id] = initial
-            _log_transition(incident_id, None, "queued", event="enqueued")
-            self._review_locks[incident_id] = asyncio.Lock()
-            self._audit[incident_id] = []
-            task = asyncio.create_task(self._run_enqueued(initial), name=f"incident:{incident_id}")
-            self._background_tasks[incident_id] = task
-            task.add_done_callback(lambda _: self._background_tasks.pop(incident_id, None))
-        return self._snapshot(initial)
-
-    async def _run_enqueued(self, initial: IncidentState) -> None:
-        incident_id = initial["incident_id"]
-        running = {**initial, "status": "running"}
-        self._states[incident_id] = running
-        _log_transition(incident_id, "queued", "running", event="background_started")
-        try:
-            result = await self._runner.start(running)
-            state = _without_legacy_claim_projection({**running, **result})
-            self._snapshot(state)
-            _log_transition(incident_id, "running", str(state.get("status")), event="background_finished")
-        except Exception as exc:
-            state = {
-                **running,
-                "status": "failed",
-                "error_code": getattr(exc, "code", "WORKFLOW_EXECUTION_FAILED"),
-                "error_message": str(exc) or "incident workflow failed",
-            }
-            _log_transition(incident_id, "running", "failed", event="background_failed")
-        self._states[incident_id] = state
 
     async def create(self, request: IncidentCreateRequest) -> IncidentSnapshot:
         if self._input_validator is not None:
             await self._input_validator.validate(request)
-        ground_truth = await self._load_ground_truth(request)
         incident_id = request.incident_id.strip()
         initial: IncidentState = {
             "incident_id": incident_id,
@@ -174,8 +89,6 @@ class WorkflowService:
             "review_audit": [],
             "model_activities": [],
         }
-        if ground_truth is not None:
-            initial["ground_truth"] = ground_truth
         async with self._registry_lock:
             checkpoint_state = await self._checkpoint_state(incident_id)
             if (
@@ -270,7 +183,7 @@ class WorkflowService:
             safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", incident_id)
             targets.append(self._artifact_root / safe_id)
         if state is not None and self._upload_root is not None:
-            for value in (state.get("video_uri"), state.get("review_video_uri"), state.get("log_uri")):
+            for value in (state.get("video_uri"), state.get("log_uri")):
                 if not value:
                     continue
                 path = Path(value).resolve()
@@ -314,25 +227,6 @@ class WorkflowService:
                 if self._observability is not None:
                     provider_calls = 3 if state.get("log_uri") else 2
                     self._observability.grant_additional_requests(incident_id, provider_calls)
-            if decision.action == "edit" and decision.edits is not None:
-                memory = state.get("video_memory")
-                known_claim_ids = {claim.claim_id for claim in memory.claims} if memory is not None else set()
-                edited_claim_ids = {claim.claim_id for claim in decision.edits.claims or []}
-                if edited_claim_ids - known_claim_ids:
-                    raise WorkflowError("EDIT_CLAIM_INVALID", "edited claim does not exist")
-                duration_s = state.get("video_duration_s")
-                edited_timestamps = [
-                    value
-                    for value in (
-                        decision.edits.t_start,
-                        decision.edits.t0,
-                        decision.edits.t_end,
-                        *(claim.timestamp_s for claim in decision.edits.claims or []),
-                    )
-                    if value is not None
-                ]
-                if duration_s is not None and any(value > duration_s for value in edited_timestamps):
-                    raise WorkflowError("EDIT_TIMESTAMP_INVALID", "edited timestamp exceeds video duration")
             try:
                 result = await self._runner.resume(incident_id, decision)
             except Exception as exc:
@@ -353,12 +247,6 @@ class WorkflowService:
                 self._commit_review(incident_id, updated, decision, stored.stored_at)
             else:
                 self._commit_review(incident_id, updated, decision)
-            _log_transition(
-                incident_id,
-                str(state.get("status")),
-                str(updated.get("status")),
-                event=f"review_{decision.action}",
-            )
             return self._snapshot(updated)
 
     def _commit_review(
@@ -411,8 +299,6 @@ class WorkflowService:
         report = state.get("report_narrative")
         if report is not None:
             evidence_ids.extend(report.evidence_ids)
-        ground_truth = _ground_truth_from_state(state)
-        ai_evaluation = evaluate_ground_truth(ground_truth, state.get("draft_report"))
         try:
             report_to_store = StoredReport(
                     incident_id=state["incident_id"],
@@ -423,8 +309,6 @@ class WorkflowService:
                     warnings=state.get("warnings", []),
                     review_audit=state.get("review_audit", []),
                     model_activities=state.get("model_activities", []),
-                    ground_truth=ground_truth,
-                    ai_evaluation=ai_evaluation,
                     final_report=state.get("draft_report") if status == "approved" else None,
                     evidence_ids=list(dict.fromkeys(evidence_ids)),
                     reviewer=decision.reviewer,
@@ -457,8 +341,6 @@ class WorkflowService:
             live_activities = self._observability.list(incident_id)
             if live_activities:
                 activities = live_activities
-        ground_truth = _ground_truth_from_state(state)
-        ai_evaluation = evaluate_ground_truth(ground_truth, report)
         return IncidentSnapshot(
             incident_id=incident_id,
             status=status,
@@ -475,34 +357,14 @@ class WorkflowService:
             review_audit=state.get("review_audit") or self._audit.get(incident_id, []),
             model_activities=activities,
             warnings=state.get("warnings", []),
-            ground_truth=ground_truth,
-            ai_evaluation=ai_evaluation,
             error_code=state.get("error_code"),
             error_message=_safe_processing_error(state.get("error_code")) if state.get("error_message") else None,
             stored_at=self._stored_at.get(incident_id),
         )
 
-    async def _load_ground_truth(self, request: IncidentCreateRequest) -> GroundTruth | None:
-        uri = request.metadata.get("ground_truth_uri")
-        if uri is None:
-            return None
-        if not isinstance(uri, str) or not uri.strip():
-            raise WorkflowError("GROUND_TRUTH_INVALID", "ground_truth_uri must be a non-empty string")
-        try:
-            return await asyncio.to_thread(load_ground_truth, uri, upload_root=self._upload_root)
-        except GroundTruthError as exc:
-            raise WorkflowError("GROUND_TRUTH_INVALID", str(exc)) from exc
-
 
 def _without_legacy_claim_projection(state: dict[str, object]) -> IncidentState:
     return cast(IncidentState, {key: value for key, value in state.items() if key != "claims"})
-
-
-def _ground_truth_from_state(state: IncidentState) -> GroundTruth | None:
-    value = state.get("ground_truth")
-    if value is None:
-        return None
-    return value if isinstance(value, GroundTruth) else GroundTruth.model_validate(value)
 
 
 def _stored_snapshot(stored: StoredReport) -> IncidentSnapshot:
@@ -517,8 +379,6 @@ def _stored_snapshot(stored: StoredReport) -> IncidentSnapshot:
         conflict_claim_ids=[],
         warnings=stored.warnings,
         model_activities=stored.model_activities,
-        ground_truth=stored.ground_truth,
-        ai_evaluation=stored.ai_evaluation,
         final_report=stored.final_report,
         review_audit=stored.review_audit
         or [ReviewAuditEntry(action=stored.decision, reviewer=stored.reviewer, reason=stored.reason)],

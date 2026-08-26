@@ -32,29 +32,6 @@ async def test_upload_endpoint_stores_video_and_optional_log(client, tmp_path: P
 
 
 @pytest.mark.asyncio
-async def test_upload_endpoint_stores_optional_ground_truth_json(client, tmp_path: Path) -> None:
-    app.state.incident_upload_service = IncidentUploadService(
-        upload_dir=str(tmp_path),
-        max_log_bytes=1024,
-    )
-    try:
-        response = await client.post(
-            "/api/v1/incidents/uploads",
-            files={
-                "video": ("camera.mp4", b"video-bytes", "video/mp4"),
-                "log": ("inference_vehicle_state.csv", b"timestamp_s,brake\n0,0\n", "text/csv"),
-                "ground_truth": ("ground_truth.json", b'{"is_incident": true}', "application/json"),
-            },
-        )
-    finally:
-        del app.state.incident_upload_service
-
-    assert response.status_code == 201
-    payload = response.json()
-    assert Path(payload["ground_truth_uri"]).read_text() == '{"is_incident": true}'
-
-
-@pytest.mark.asyncio
 async def test_upload_service_does_not_limit_video_size(tmp_path: Path) -> None:
     service = IncidentUploadService(
         upload_dir=str(tmp_path),

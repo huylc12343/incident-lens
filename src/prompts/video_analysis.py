@@ -50,8 +50,9 @@ def build_video_analysis_prompt(
             # =========================================================
             # 2. ANALYSIS PROCEDURE & ATTENTION HINT
             # =========================================================
-            "Nếu user context có log_attention_hint, dùng các timestamp đó để ưu tiên xem kỹ vùng trước–tại–sau "
-            "mốc được gợi ý. Hint chỉ là vị trí cần chú ý, không phải evidence; chỉ ghi sự kiện nếu video thực sự hỗ trợ.",
+            "Nếu user context có log_attention_hint, mỗi dòng hint là một KHOẢNG thời gian dạng 'trong khoảng Xs–Ys'. "
+            "Xem kỹ toàn bộ khoảng đó cùng vùng ngay trước và ngay sau, không chỉ một frame. Hint chỉ là vị trí cần "
+            "chú ý, không phải evidence; chỉ ghi sự kiện nếu video thực sự hỗ trợ.",
 
             "Bắt buộc xem toàn bộ video theo thứ tự thời gian đến kết cục cuối cùng. Trước tiên nhận diện các vùng "
             "bất thường hoặc được hint, sau đó xem kỹ chuỗi trước–tại–sau các vùng đó rồi mới kết luận. "
@@ -60,15 +61,12 @@ def build_video_analysis_prompt(
             # =========================================================
             # 3. INCIDENT TYPES
             # =========================================================
-            "Chủ động tìm sự cố liên quan trực tiếp đến ego. Phân loại chi tiết gồm: "
-            "rear_end_collision (đâm vào phía sau xe cùng hướng), "
-            "crossing_collision (xe cắt ngang quỹ đạo ego), "
-            "side_collision (nhập/đổi làn hoặc hai xe gần cùng hướng va chạm bên hông), "
-            "head_on_collision (xe ngược chiều đối đầu), "
+            "Chủ động tìm sự cố liên quan trực tiếp đến ego. Các loại gồm: "
+            "vehicle_collision (ego va chạm với phương tiện khác, gồm cùng hướng, ngược hướng, đâm phía sau, nhập/đổi làn hoặc bên hông), "
+            "crossing_collision (va chạm xe cắt ngang), "
             "pedestrian_collision (người đi bộ), "
-            "static_object_collision (vật thể tĩnh), "
-            "roadside_collision (rời đường hoặc môi trường ven đường), "
-            "no_incident (không có tai nạn), other_unknown (có tai nạn nhưng không xác định được cơ chế).",
+            "environment_collision (va chạm vật thể không phải phương tiện/người đi bộ hoặc rời đường), "
+            "no_incident (không có tai nạn).",
 
             # =========================================================
             # 4. INCIDENT DECISION
@@ -103,7 +101,11 @@ def build_video_analysis_prompt(
             "hậu quả bất thường; không chọn frame muộn hơn chỉ vì hình ảnh rõ hơn.",
 
             "Nếu không có tai nạn, đặt incident_window.t_start=0, incident_window.t0=0 và "
-            "incident_window.t_end=video_duration.",
+            "incident_window.t_end=video_duration (bắt buộc lớn hơn 0). "
+            "Không có tai nạn KHÔNG có nghĩa là không có gì để mô tả: timeline và claims vẫn phải ghi nhận "
+            "các diễn biến quan trọng của video như trạng thái ban đầu, thay đổi tốc độ hoặc hướng, tình huống "
+            "giao thông đáng chú ý, near-miss và kết cục cuối. "
+            "Tuyệt đối không để trống timeline hoặc claims chỉ vì kết luận là không có tai nạn.",
 
             "Mọi timestamp_s phải nằm trong [0, video_duration]. Timeline và claims có thể nằm ngoài incident_window. "
             "Với cùng một sự kiện, timestamp và mô tả phải nhất quán giữa video_summary, timeline và claims. "

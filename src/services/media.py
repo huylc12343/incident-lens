@@ -4,26 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 import shutil
-import subprocess
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
 from imageio_ffmpeg import get_ffmpeg_exe
 
 from src.models.incidents import IncidentWindow, NativeVideoMetadata, TimestampedFrame, VideoSequenceManifest
-
-
-def _bundled_tool(name: str) -> str | None:
-    """Find a locally unpacked FFmpeg binary when it is not on PATH."""
-    executable = f"{name}.exe" if os.name == "nt" else name
-    tools_root = Path(__file__).resolve().parents[2] / ".tools" / "ffmpeg"
-    if not tools_root.is_dir():
-        return None
-    match = next(tools_root.glob(f"**/bin/{executable}"), None)
-    return str(match) if match is not None and match.is_file() else None
 
 
 class MediaServiceError(RuntimeError):
@@ -39,20 +28,13 @@ class NormalizedVideoArtifact:
 
 
 class MediaService:
-    def __init__(
-        self,
-        *,
-        command_timeout_s: float = 120.0,
-        redaction_image_size: int = 512,
-        redaction_detection_fps: float = 5.0,
-    ) -> None:
-        if command_timeout_s <= 0 or redaction_image_size <= 0 or redaction_detection_fps <= 0:
-            raise ValueError("media service configuration must be positive")
+    def __init__(self, *, command_timeout_s: float = 120.0, redaction_image_size: int = 512) -> None:
+        if command_timeout_s <= 0 or redaction_image_size <= 0:
+            raise ValueError("command timeout and redaction image size must be positive")
         self._command_timeout_s = command_timeout_s
         self._redaction_image_size = redaction_image_size
-        self._redaction_detection_fps = redaction_detection_fps
-        self._ffmpeg = shutil.which("ffmpeg") or _bundled_tool("ffmpeg") or get_ffmpeg_exe()
-        self._ffprobe = shutil.which("ffprobe") or _bundled_tool("ffprobe")
+        self._ffmpeg = shutil.which("ffmpeg") or get_ffmpeg_exe()
+        self._ffprobe = shutil.which("ffprobe")
 
     async def probe_video(self, video_uri: str) -> NativeVideoMetadata:
         source = _existing_file(video_uri)
@@ -188,7 +170,6 @@ class MediaService:
                 video_uri,
                 output_uri,
                 imgsz=self._redaction_image_size,
-                detection_fps=self._redaction_detection_fps,
             )
         except Exception as exc:
             raise MediaServiceError("VIDEO_REDACTION_FAILED", "video redaction failed") from exc
@@ -204,11 +185,11 @@ class MediaService:
         min_duration_s: float = 5.0,
         pre_roll_s: float = 1.0,
         post_roll_s: float = 2.0,
-        output_fps: float | None = None,
     ) -> NormalizedVideoArtifact:
         source = _existing_file(video_uri)
         probe = await self.probe_video(str(source))
-        window = bounded_incident_window(window, probe.duration_s)
+        if window.t_end > probe.duration_s:
+            raise MediaServiceError("CLIP_WINDOW_OUT_OF_RANGE", "incident window exceeds video duration")
         clip_start, clip_end = _expanded_clip_bounds(
             window,
             source_duration_s=probe.duration_s,
@@ -218,9 +199,7 @@ class MediaService:
         )
         output = Path(output_uri).resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
-        if output_fps is not None and output_fps <= 0:
-            raise ValueError("output FPS must be positive")
-        command = [
+        await self._run_command(
             self._ffmpeg,
             "-y",
             "-ss",
@@ -229,23 +208,16 @@ class MediaService:
             str(source),
             "-t",
             str(clip_end - clip_start),
-        ]
-        if output_fps is not None:
-            command.extend(["-vf", f"fps={output_fps}"])
-        command.extend(
-            [
-                "-c:v",
-                codec,
-                "-pix_fmt",
-                pixel_format,
-                "-c:a",
-                "aac",
-                "-movflags",
-                "+faststart",
-                str(output),
-            ]
+            "-c:v",
+            codec,
+            "-pix_fmt",
+            pixel_format,
+            "-c:a",
+            "aac",
+            "-movflags",
+            "+faststart",
+            str(output),
         )
-        await self._run_command(*command)
         if not output.is_file():
             raise MediaServiceError("INCIDENT_CLIP_FAILED", "ffmpeg did not create the incident clip")
         return NormalizedVideoArtifact(uri=str(output), metadata=await self.probe_video(str(output)))
@@ -270,25 +242,21 @@ class MediaService:
             raise ValueError("frame sampling parameters must be positive")
         if start_s < 0 or start_s >= probe.duration_s:
             raise ValueError("start_s must be within the video duration")
-        clip_end = probe.duration_s if end_s is None else min(end_s, probe.duration_s)
-        if clip_end <= start_s:
+        clip_end = probe.duration_s if end_s is None else end_s
+        if clip_end <= start_s or clip_end > probe.duration_s:
             raise ValueError("end_s must be after start_s and within the video duration")
         if image_format not in {"jpeg", "png"}:
             raise ValueError("image_format must be jpeg or png")
         if not 1 <= jpeg_quality <= 100:
             raise ValueError("jpeg_quality must be between 1 and 100")
 
-        # Never invent duplicate frames when the requested evidence rate is
-        # higher than the source. Besides wasting work, duplicates used to be
-        # assigned synthetic timestamps that could not map back to the claim.
-        effective_fps = min(fps, probe.fps)
         destination = Path(output_dir).resolve()
         destination.mkdir(parents=True, exist_ok=True)
         extension = "jpg" if image_format == "jpeg" else "png"
         output_pattern = destination / f"frame-%06d.{extension}"
         duration_s = clip_end - start_s
         video_filter = (
-            f"fps={effective_fps},scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"fps={fps},scale={width}:{height}:force_original_aspect_ratio=decrease,"
             f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
         )
         command = [
@@ -314,19 +282,14 @@ class MediaService:
         if not frame_paths:
             raise MediaServiceError("FRAME_SAMPLING_FAILED", "ffmpeg did not produce any frames")
         frames = []
-        # ffmpeg may emit one fewer frame than the nominal ``fps * duration``
-        # at a fractional frame rate.  Spread the manifest timestamps over the
-        # requested interval instead of deriving them solely from fps, so a VLM
-        # timestamp at either semantic boundary can always map to an artifact.
-        timestamp_step = duration_s / max(len(frame_paths) - 1, 1)
         for index, path in enumerate(frame_paths):
-            timestamp_s = min(start_s + (index / effective_fps), clip_end)
+            timestamp_s = min(start_s + (index / fps), clip_end)
             frames.append(
                 TimestampedFrame(
                     frame_id=path.stem,
                     sequence_index=index,
                     timestamp_s=timestamp_s,
-                    delta_from_previous_s=0.0 if index == 0 else 1 / effective_fps,
+                    delta_from_previous_s=0.0 if index == 0 else 1 / fps,
                     image_uri=str(path),
                     mime_type="image/jpeg" if image_format == "jpeg" else "image/png",
                 )
@@ -335,22 +298,26 @@ class MediaService:
 
     async def _run_command(self, *command: str) -> tuple[str, str]:
         try:
-            completed = await asyncio.to_thread(
-                subprocess.run,
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=self._command_timeout_s,
-                check=False,
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-        except subprocess.TimeoutExpired as exc:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=self._command_timeout_s)
+        except TimeoutError as exc:
+            if "process" in locals():
+                if process.returncode is None:
+                    with suppress(ProcessLookupError):
+                        process.kill()
+                with suppress(ProcessLookupError):
+                    await process.communicate()
             raise MediaServiceError("MEDIA_COMMAND_TIMEOUT", "media command timed out") from exc
         except OSError as exc:
             raise MediaServiceError("MEDIA_COMMAND_FAILED", str(exc)) from exc
-        if completed.returncode != 0:
-            detail = completed.stderr.decode("utf-8", errors="replace").strip()
+        if process.returncode != 0:
+            detail = stderr.decode("utf-8", errors="replace").strip()
             raise MediaServiceError("MEDIA_COMMAND_FAILED", detail or "media command failed")
-        return completed.stdout.decode("utf-8"), completed.stderr.decode("utf-8", errors="replace")
+        return stdout.decode("utf-8"), stderr.decode("utf-8", errors="replace")
 
 
 def _existing_file(uri: str) -> Path:
@@ -399,16 +366,3 @@ def _expanded_clip_bounds(
     missing_s -= extend_after_s
     start_s = max(0.0, start_s - missing_s)
     return start_s, end_s
-
-
-def bounded_incident_window(window: IncidentWindow, source_duration_s: float) -> IncidentWindow:
-    """Clamp a partially overlapping model window to the real video duration."""
-    if source_duration_s <= 0:
-        raise ValueError("source duration must be positive")
-    if window.t_start >= source_duration_s:
-        raise MediaServiceError("CLIP_WINDOW_OUT_OF_RANGE", "incident window starts outside video duration")
-    start_s = max(0.0, window.t_start)
-    end_s = min(window.t_end, source_duration_s)
-    if end_s <= start_s:
-        raise MediaServiceError("CLIP_WINDOW_OUT_OF_RANGE", "incident window does not overlap video duration")
-    return IncidentWindow(t_start=start_s, t0=min(max(window.t0, start_s), end_s), t_end=end_s)

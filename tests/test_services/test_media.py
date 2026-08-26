@@ -6,7 +6,7 @@ import pytest
 from src.models.incidents import IncidentWindow, NativeVideoMetadata
 from src.services.media import MediaService, MediaServiceError
 
-SAMPLE_VIDEO = Path("data_mock/front_camera.mp4")
+SAMPLE_VIDEO = Path("data_mock/data1/front_camera.mp4")
 
 
 @pytest.mark.asyncio

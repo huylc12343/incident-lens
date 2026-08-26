@@ -10,8 +10,8 @@ from src.models.incidents import (
     IncidentWindow,
     NativeVideoAnalysisRequest,
     NativeVideoMetadata,
-    Observation,
     PromptEnvelope,
+    TimelineEvent,
     TimestampedFrame,
     TimestampedFramesAnalysisRequest,
     VerificationStatus,
@@ -62,13 +62,11 @@ def _frame_request(count: int) -> TimestampedFramesAnalysisRequest:
 def _memory(
     *,
     duration_s: float,
-    frame_ids: list[str] | None = None,
     mode: AnalysisMode = AnalysisMode.SINGLE_REQUEST,
 ) -> VideoMemory:
     return VideoMemory(
         global_scene="Road scene",
         incident_window=IncidentWindow(t_start=0, t0=min(1, duration_s), t_end=duration_s),
-        source_frame_ids=frame_ids or [],
         analysis_mode=mode,
     )
 
@@ -98,7 +96,7 @@ async def test_frames_within_limit_use_exactly_one_request() -> None:
     service = _vlm(
         input_mode=VLMInputMode.TIMESTAMPED_FRAMES,
         max_images=3,
-        side_effect=_memory(duration_s=3, frame_ids=["frame-0", "frame-1"]),
+        side_effect=_memory(duration_s=3),
     )
     workflow = VideoMemoryWorkflow(
         vlm=service,
@@ -120,13 +118,15 @@ async def test_frames_within_limit_use_exactly_one_request() -> None:
 @pytest.mark.asyncio
 async def test_video_analysis_cannot_preverify_claims() -> None:
     request = _frame_request(3)
-    memory = _memory(duration_s=3, frame_ids=["frame-0"])
+    memory = _memory(duration_s=3)
     memory = memory.model_copy(
         update={
             "claims": [
                 Claim(
                     claim_id="claim-1",
                     text="Model says this is already verified",
+                    timestamp_s=1,
+                    evidence=[EvidenceReference(evidence_id="model-invented", timestamp_s=1)],
                     verification_status=VerificationStatus.SUPPORTED,
                 )
             ]
@@ -147,22 +147,18 @@ async def test_video_analysis_cannot_preverify_claims() -> None:
 @pytest.mark.asyncio
 async def test_video_analysis_recovers_and_canonicalizes_supplied_frame_evidence() -> None:
     request = _frame_request(3)
-    memory = _memory(duration_s=3, frame_ids=["frame-0", "frame-1"])
+    memory = _memory(duration_s=3)
     memory = memory.model_copy(
         update={
+            "timeline": [
+                TimelineEvent(timestamp_s=0, description="Mở đầu.", evidence_ids=["invented-timeline-id"]),
+            ],
             "claims": [
                 Claim(
                     claim_id="claim-1",
                     text="Visible event",
-                    evidence_ids=["frame-0", "frame-1"],
-                )
-            ],
-            "evidence": [
-                EvidenceReference(
-                    evidence_id="frame-1",
-                    kind="frame",
-                    artifact_uri="hallucinated.jpg",
-                    timestamp_s=2,
+                    timestamp_s=1,
+                    evidence=[EvidenceReference(evidence_id="hallucinated", timestamp_s=2)],
                 )
             ],
         }
@@ -176,17 +172,16 @@ async def test_video_analysis_recovers_and_canonicalizes_supplied_frame_evidence
 
     result = await workflow.analyze(request)
 
-    evidence = {item.evidence_id: item for item in result.evidence}
-    assert set(evidence) == {"frame-0", "frame-1"}
-    assert evidence["frame-0"].artifact_uri == request.manifest.frames[0].image_uri
-    assert evidence["frame-1"].artifact_uri == request.manifest.frames[1].image_uri
-    assert evidence["frame-1"].timestamp_s == request.manifest.frames[1].timestamp_s
+    # Model-supplied evidence is discarded; each claim keeps exactly the nearest real frame.
+    assert [item.evidence_id for item in result.claims[0].evidence] == ["frame-1"]
+    assert result.claims[0].evidence[0].timestamp_s == request.manifest.frames[1].timestamp_s
+    assert result.timeline[0].evidence_ids == ["frame-0"]
 
 
 @pytest.mark.asyncio
 async def test_video_analysis_maps_model_evidence_alias_to_nearest_real_frame() -> None:
     request = _frame_request(3)
-    memory = _memory(duration_s=3, frame_ids=["invented-source-id"])
+    memory = _memory(duration_s=3)
     memory = memory.model_copy(
         update={
             "claims": [
@@ -194,16 +189,7 @@ async def test_video_analysis_maps_model_evidence_alias_to_nearest_real_frame() 
                     claim_id="claim-1",
                     text="Hai xe va chạm",
                     timestamp_s=1.8,
-                    evidence_ids=["collision-evidence"],
-                )
-            ],
-            "evidence": [
-                EvidenceReference(
-                    evidence_id="collision-evidence",
-                    kind="frame",
-                    artifact_uri="hallucinated.jpg",
-                    timestamp_s=1.8,
-                    description="Khung hình va chạm.",
+                    evidence=[EvidenceReference(evidence_id="collision-evidence", timestamp_s=1.8)],
                 )
             ],
         }
@@ -215,10 +201,9 @@ async def test_video_analysis_maps_model_evidence_alias_to_nearest_real_frame() 
 
     result = await workflow.analyze(request)
 
-    assert result.claims[0].evidence_ids == ["frame-2"]
-    assert result.evidence[0].evidence_id == "frame-2"
-    assert result.evidence[0].artifact_uri == request.manifest.frames[2].image_uri
-    assert result.source_frame_ids == ["frame-2"]
+    # 1.8s is nearest to the frame sampled at 2.0s.
+    assert [item.evidence_id for item in result.claims[0].evidence] == ["frame-2"]
+    assert result.claims[0].evidence[0].timestamp_s == request.manifest.frames[2].timestamp_s
 
 
 @pytest.mark.asyncio
@@ -226,10 +211,7 @@ async def test_rolling_batches_only_on_overflow_and_finish_with_synthesis() -> N
     request = _frame_request(6)
 
     async def response_for(batch_request: TimestampedFramesAnalysisRequest) -> VideoMemory:
-        return _memory(
-            duration_s=request.manifest.duration_s,
-            frame_ids=[frame.frame_id for frame in batch_request.manifest.frames],
-        )
+        return _memory(duration_s=request.manifest.duration_s)
 
     service = _vlm(
         input_mode=VLMInputMode.TIMESTAMPED_FRAMES,
@@ -341,18 +323,25 @@ def test_validate_video_memory_rejects_out_of_range_timestamp() -> None:
     assert memory.incident_window.t_end == 5  # rejected, not clamped
 
 
-def test_validate_video_memory_rejects_unknown_evidence_reference() -> None:
+def test_validate_video_memory_rejects_evidence_outside_source_frames() -> None:
     memory = VideoMemory(
         global_scene="Road scene",
         incident_window=IncidentWindow(t_start=0, t0=1, t_end=2),
-        claims=[Claim(claim_id="claim-1", text="Claim", evidence_ids=["missing"])],
+        claims=[
+            Claim(
+                claim_id="claim-1",
+                text="Claim",
+                timestamp_s=1,
+                evidence=[EvidenceReference(evidence_id="missing", timestamp_s=1)],
+            )
+        ],
         analysis_mode=AnalysisMode.SINGLE_REQUEST,
     )
 
     with pytest.raises(VideoMemoryError) as exc_info:
-        validate_video_memory(memory, source_duration_s=2)
+        validate_video_memory(memory, source_duration_s=2, source_frame_ids={"frame-0"})
 
-    assert exc_info.value.code == "VLM_EVIDENCE_REFERENCE_INVALID"
+    assert exc_info.value.code == "VLM_SOURCE_FRAME_INVALID"
 
 
 def test_validate_video_memory_rejects_representative_timestamp_outside_incident() -> None:
@@ -377,15 +366,7 @@ def test_reanalysis_patch_maps_evidence_alias_to_real_frame() -> None:
                 claim_id="claim-1",
                 text="Va chạm được xác nhận lại",
                 timestamp_s=1.9,
-                evidence_ids=["model-collision-proof"],
-            )
-        ],
-        evidence=[
-            EvidenceReference(
-                evidence_id="model-collision-proof",
-                kind="frame",
-                artifact_uri="invented.jpg",
-                timestamp_s=1.9,
+                evidence=[EvidenceReference(evidence_id="model-collision-proof", timestamp_s=1.9)],
             )
         ],
         base_revision=1,
@@ -393,9 +374,9 @@ def test_reanalysis_patch_maps_evidence_alias_to_real_frame() -> None:
 
     result = reconcile_video_memory_patch_evidence(patch, _frames(3), fallback_timestamp_s=1)
 
-    assert result.claims[0].evidence_ids == ["frame-2"]
-    assert result.evidence[0].evidence_id == "frame-2"
-    assert result.evidence[0].artifact_uri == "data:image/jpeg;base64,2"
+    assert [item.evidence_id for item in result.claims[0].evidence] == ["frame-2"]
+    assert result.claims[0].evidence[0].timestamp_s == 2
+    assert result.claims[0].verification_status == VerificationStatus.UNVERIFIED
 
 
 def test_merge_video_memory_patch_updates_only_targets_and_revision() -> None:
@@ -403,10 +384,19 @@ def test_merge_video_memory_patch_updates_only_targets_and_revision() -> None:
         global_scene="Road scene",
         incident_window=IncidentWindow(t_start=0, t0=1, t_end=2),
         claims=[
-            Claim(claim_id="claim-1", text="Original target"),
-            Claim(claim_id="claim-2", text="Unrelated"),
+            Claim(
+                claim_id="claim-1",
+                text="Original target",
+                timestamp_s=1,
+                evidence=[EvidenceReference(evidence_id="frame-1", timestamp_s=1)],
+            ),
+            Claim(
+                claim_id="claim-2",
+                text="Unrelated",
+                timestamp_s=2,
+                evidence=[EvidenceReference(evidence_id="frame-2", timestamp_s=2)],
+            ),
         ],
-        evidence=[EvidenceReference(evidence_id="frame-1", kind="frame", artifact_uri="frame.jpg")],
         analysis_mode=AnalysisMode.SINGLE_REQUEST,
         revision=2,
     )
@@ -416,12 +406,11 @@ def test_merge_video_memory_patch_updates_only_targets_and_revision() -> None:
             Claim(
                 claim_id="claim-1",
                 text="Revised target",
+                timestamp_s=1,
+                evidence=[EvidenceReference(evidence_id="frame-1", timestamp_s=1)],
                 verification_status=VerificationStatus.SUPPORTED,
             )
         ],
-        observations=[Observation(observation_id="obs-1", text="New observation")],
-        evidence=[EvidenceReference(evidence_id="frame-2", kind="frame", artifact_uri="frame-2.jpg")],
-        uncertainties=["Visibility is limited"],
         base_revision=2,
     )
 
@@ -432,8 +421,7 @@ def test_merge_video_memory_patch_updates_only_targets_and_revision() -> None:
         "claim-1": "Revised target",
         "claim-2": "Unrelated",
     }
-    assert [item.observation_id for item in merged.observations] == ["obs-1"]
-    assert [item.evidence_id for item in merged.evidence] == ["frame-1", "frame-2"]
+    # Revised text resets the provider-declared status; the untouched claim is preserved.
     assert merged.claims[0].verification_status == VerificationStatus.UNVERIFIED
     assert memory.revision == 2
 

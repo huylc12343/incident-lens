@@ -13,6 +13,8 @@ from src.models.api import IncidentCreateRequest, ReviewDecision
 from src.models.incidents import (
     AccidentType,
     AnalysisMode,
+    AutomaticReanalysisClaim,
+    AutomaticReanalysisOutput,
     Claim,
     ClaimVerification,
     IncidentWindow,
@@ -154,10 +156,16 @@ async def test_real_graph_log_conflict_reanalyzes_once_and_reports_warning(tmp_p
     settings = _settings(tmp_path)
     vlm_client = _qwen_client(
         _video_memory(),
-        VideoMemoryPatch(
-            target_claim_ids=["claim-1"],
-            claims=[Claim(claim_id="claim-1", text="Vehicle brakes", timestamp_s=7.1)],
-            base_revision=1,
+        # Auto-reanalysis asks Qwen for one minimal claim, not a full memory patch.
+        AutomaticReanalysisOutput(
+            claims=[
+                AutomaticReanalysisClaim(
+                    claim_id="claim-1",
+                    text="Vehicle brakes",
+                    timestamp_s=7.1,
+                    verification_status=VerificationStatus.UNVERIFIED,
+                )
+            ]
         ),
     )
     contradicted = VerificationResult(

@@ -184,7 +184,8 @@ def test_claim_log_summary_formats_rule_derived_states_for_verification(tmp_path
     assert "Gia tốc tại 17.0s: -26.8981 m/s²" in summary.summary
     assert "Đã loại" not in summary.summary
     assert "Yaw thay đổi: 0.05°" in summary.summary
-    assert "Steering tại 17.0s: 0.02 => xe có xu hướng rẽ phải." in summary.summary
+    # 0.02 sits inside the ±0.1 straight-ahead deadband.
+    assert "Steering tại 17.0s: 0.02 => steering gần trung tâm." in summary.summary
     assert "| 17.0s | 0.65 |" in summary.summary
 
 
@@ -228,7 +229,7 @@ def test_claim_log_summary_formats_per_second_series_and_claim_acceleration(tmp_
     assert "Số mẫu log trong cửa sổ: 13" in summary.summary
     assert "Số dòng log model được phép dùng: 13" in summary.summary
     assert "brake [0, 1]: 0 là không phanh, 1 là đạp phanh hết cỡ;" in summary.summary
-    assert "steering <= -0.02 rẽ trái" in summary.summary
+    assert "steering <= -0.1 rẽ trái" in summary.summary
     assert "| Timestamp | Speed (km/h) |" in summary.summary
     for timestamp_s, speed, _, brake, _ in rows:
         assert f"| {timestamp_s:.1f}s | {speed:g} |" in summary.summary
@@ -246,11 +247,11 @@ def test_claim_log_summary_formats_per_second_series_and_claim_acceleration(tmp_
 @pytest.mark.parametrize(
     ("steer", "expected_direction"),
     [
-        (-0.02, "left"),
-        (-0.019, "straight"),
+        (-0.1, "left"),
+        (-0.099, "straight"),
         (0.0, "straight"),
-        (0.019, "straight"),
-        (0.02, "right"),
+        (0.099, "straight"),
+        (0.1, "right"),
     ],
 )
 def test_claim_verification_uses_steering_deadband(tmp_path, steer: float, expected_direction: str) -> None:

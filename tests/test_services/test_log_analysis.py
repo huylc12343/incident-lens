@@ -17,8 +17,8 @@ from src.services.log_analysis import (
     build_verification_log_artifact,
 )
 
-REAL_LOG = Path("data_mock/vehicle_state.csv")
-CONFLICT_LOG = Path("data_mock/vehicle_state_fake.csv")
+REAL_LOG = Path("data_mock/data1/vehicle_state.csv")
+CONFLICT_LOG = Path("data_mock/data1/vehicle_state_fake.csv")
 WINDOW = IncidentWindow(t_start=6, t0=7.5, t_end=14.5)
 
 
@@ -29,21 +29,23 @@ def test_analyze_real_log_slices_window_and_derives_metrics(tmp_path: Path) -> N
         video_duration_s=WINDOW.t_end,
     )
 
-    assert result.row_count == 18
-    assert result.summary.metrics["speed_start"] == 40
+    # analyze() slices the full video range [0, video_duration_s]; narrowing to the
+    # incident window happens later, per claim.
+    assert result.row_count == 30
+    assert result.summary.metrics["speed_start"] == 45
     assert result.summary.metrics["speed_end"] == 0
     assert result.summary.metrics["max_brake"] == 1
     assert result.summary.metrics["max_deceleration"] == pytest.approx(-3.611111, rel=1e-5)
     assert result.summary.metrics["brake_rise_time"] == 6.5
-    assert "Tốc độ đầu 40 km/h" in result.summary.summary
+    assert "Tốc độ đầu 45 km/h" in result.summary.summary
     assert "Brake tăng mạnh lần đầu tại 6.5 giây" in result.summary.summary
     assert "log-metric:speed_start" in result.summary.evidence_ids
     assert "log-metric:max_deceleration" in result.summary.evidence_ids
     assert any(event.event_type == "brake_rise" for event in result.events)
 
-    with Path(result.log_artifact_uri).open(encoding="utf-8") as file:
+    with Path(result.log_artifact_uri).open(encoding="utf-8-sig") as file:
         rows = list(csv.DictReader(file))
-    assert float(rows[0]["timestamp_s"]) == WINDOW.t_start
+    assert float(rows[0]["timestamp_s"]) == 0
     assert float(rows[-1]["timestamp_s"]) == WINDOW.t_end
 
 

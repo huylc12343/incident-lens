@@ -60,7 +60,8 @@ async def create_incident(
     service: Any = Depends(get_workflow_service),
 ) -> IncidentSnapshot:
     try:
-        snapshot = await service.create(payload)
+        create_detached = getattr(service, "create_detached", None)
+        snapshot = await create_detached(payload) if create_detached is not None else await service.create(payload)
     except Exception as exc:
         raise incident_http_error(exc) from exc
     response.status_code = _response_status(snapshot)

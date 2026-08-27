@@ -29,7 +29,7 @@ export function IncidentNavigationSidebar({ snapshot }: { snapshot: IncidentSnap
             <NavIcon><path d="m5 12 4 4L19 6M4 3h16v18H4z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" /></NavIcon>
             <span>Review</span>{pending && <b>1</b>}
           </Link>
-          <Link className={reportActive ? "active" : ""} href="/report">
+          <Link className={`reports-nav-link${reportActive ? " active" : ""}`} href="/report">
             <NavIcon><path d="M6 3h9l3 3v15H6zM9 10h6M9 14h6M9 18h4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></NavIcon>
             <span>Reports</span>
           </Link>

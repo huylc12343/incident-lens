@@ -42,6 +42,12 @@ export async function listIncidents() {
   );
 }
 
+export async function deleteIncident(id: string) {
+  return responseJson<{ incident_id: string; deleted: boolean }>(
+    await fetch(`${API_URL}/api/v1/incidents/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  );
+}
+
 export async function reviewIncident(id: string, payload: ReviewPayload) {
   return responseJson<IncidentSnapshot>(await fetch(`${API_URL}/api/v1/incidents/${encodeURIComponent(id)}/review`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),

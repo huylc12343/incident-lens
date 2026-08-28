@@ -5,6 +5,10 @@ export const INCIDENT_KEYS = {
   snapshot: "vlens:incident-snapshot",
 } as const;
 
+export function processingPath(incidentId: string) {
+  return `/processing/${encodeURIComponent(incidentId)}`;
+}
+
 export function isTimestamp(value: string) {
   const match = /^(\d{2}):(\d{2}):(\d{2})\.(\d{3})$/.exec(value);
   return Boolean(

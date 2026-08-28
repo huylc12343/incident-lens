@@ -2,9 +2,11 @@
 """Append explicit user prompts from local Codex sessions to .ai-log.
 
 Codex Desktop stores each local conversation as JSONL under
-``~/.codex/sessions/YYYY/MM/DD``. This scanner reads only ``user_message``
-events, limits them to sessions opened for the current repository, and uses a
-stable entry ID so a prompt is never appended twice.
+``~/.codex/sessions/YYYY/MM/DD``. This scanner reads explicit user messages
+from both the legacy ``event_msg/user_message`` schema and the current
+``response_item/message`` schema, limits them to sessions opened for the
+current repository, and uses a stable entry ID so a prompt is never appended
+twice.
 """
 
 import argparse
@@ -42,18 +44,22 @@ def parse_timestamp(value: str) -> datetime | None:
         return None
 
 
-def logged_ids(log_file: Path) -> set[str]:
-    if not log_file.exists():
-        return set()
+def logged_ids(log_file: Path, archive_dir: Path) -> set[str]:
     ids: set[str] = set()
-    with open(log_file, encoding="utf-8-sig") as stream:
-        for line in stream:
-            try:
-                entry_id = json.loads(line).get("entry_id")
-            except json.JSONDecodeError:
-                continue
-            if entry_id:
-                ids.add(entry_id)
+    files = [log_file]
+    if archive_dir.exists():
+        files.extend(archive_dir.glob("*.jsonl"))
+    for path in files:
+        if not path.exists():
+            continue
+        with open(path, encoding="utf-8-sig") as stream:
+            for line in stream:
+                try:
+                    entry_id = json.loads(line).get("entry_id")
+                except json.JSONDecodeError:
+                    continue
+                if entry_id:
+                    ids.add(entry_id)
     return ids
 
 
@@ -84,10 +90,21 @@ def user_prompts(sessions_dir: Path, repo_root: str, cutoff: datetime | None):
                         continue
 
                     payload = entry.get("payload") or {}
-                    if entry.get("type") != "event_msg" or payload.get("type") != "user_message":
-                        continue
+                    prompt = None
+                    if entry.get("type") == "event_msg" and payload.get("type") == "user_message":
+                        prompt = payload.get("message")
+                    elif (
+                        entry.get("type") == "response_item"
+                        and payload.get("type") == "message"
+                        and payload.get("role") == "user"
+                    ):
+                        text_parts = [
+                            item.get("text", "")
+                            for item in payload.get("content", [])
+                            if isinstance(item, dict) and item.get("type") == "input_text"
+                        ]
+                        prompt = "\n".join(part for part in text_parts if part)
 
-                    prompt = payload.get("message")
                     if not isinstance(prompt, str) or len(prompt.strip()) < 2:
                         continue
 
@@ -118,7 +135,7 @@ def main() -> None:
     cutoff = None if args.all else datetime.now(timezone.utc) - timedelta(hours=args.hours)
     log_dir = Path(os.environ.get("AI_LOG_DIR", ".ai-log"))
     log_file = log_dir / "session.jsonl"
-    existing_ids = logged_ids(log_file)
+    existing_ids = logged_ids(log_file, log_dir / "archive")
     repo = git("git remote get-url origin").split("/")[-1].removesuffix(".git")
     branch = git("git rev-parse --abbrev-ref HEAD")
     commit = git("git rev-parse --short HEAD")

@@ -1,11 +1,12 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileUploadCard } from "./FileUploadCard";
 import { saveUploadedVideo } from "../lib/uploadStorage";
 import { INCIDENT_KEYS } from "../lib/incidentSession";
-import { createIncident, uploadIncident } from "../lib/incidentApi";
+import { createIncident, deleteIncident, uploadIncident } from "../lib/incidentApi";
+import { createIncidentAndNavigate } from "../lib/incidentSubmission";
 import { uiText as text } from "../lib/ui-copy";
 
 type DemoSample = {
@@ -71,6 +72,8 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
   const [error, setError] = useState("");
   const [selectedDemo, setSelectedDemo] = useState<DemoSample["id"] | null>(null);
   const [loadingDemo, setLoadingDemo] = useState<DemoSample["id"] | null>(null);
+  const requestController = useRef<AbortController | null>(null);
+  const activeIncidentId = useRef<string | null>(null);
   const ready = Boolean(video);
 
   useEffect(() => {
@@ -112,6 +115,8 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
     if (!ready || !video || submitting) return;
     setSubmitting(true);
     setError("");
+    const controller = new AbortController();
+    requestController.current = controller;
     const previousUrl = sessionStorage.getItem("vlens:video-url");
     if (previousUrl) URL.revokeObjectURL(previousUrl);
     sessionStorage.setItem("vlens:video-url", URL.createObjectURL(video));
@@ -122,9 +127,10 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
     });
     sessionStorage.setItem("vlens:video-name", video.name);
     const incidentId = createIncidentId();
+    activeIncidentId.current = incidentId;
     try {
-      const uploaded = await uploadIncident(video, telemetry[0], groundTruth ?? undefined);
-      const snapshot = await createIncident({
+      const uploaded = await uploadIncident(video, telemetry[0], groundTruth ?? undefined, controller.signal);
+      await createIncidentAndNavigate({
         incident_id: incidentId,
         video_uri: uploaded.video_uri,
         log_uri: uploaded.log_uri,
@@ -136,17 +142,43 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
           telemetry_files: telemetry.map((file) => file.name),
           ground_truth_file: groundTruth?.name ?? null,
         },
+      }, {
+        create: (payload) => createIncident(payload, controller.signal),
+        beforeNavigate: (created) => {
+          setSubmitProgress(100);
+          sessionStorage.removeItem(INCIDENT_KEYS.timestamp);
+          sessionStorage.setItem(INCIDENT_KEYS.incidentId, created.incident_id);
+          sessionStorage.setItem(INCIDENT_KEYS.snapshot, JSON.stringify(created));
+          setToast(true);
+        },
+        navigate: router.push,
       });
-      setSubmitProgress(100);
-      sessionStorage.removeItem(INCIDENT_KEYS.timestamp);
-      sessionStorage.setItem(INCIDENT_KEYS.incidentId, snapshot.incident_id);
-      sessionStorage.setItem(INCIDENT_KEYS.snapshot, JSON.stringify(snapshot));
-      setToast(true);
-      router.push("/processing");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : text("Could not start incident analysis.", "Không thể bắt đầu phân tích sự cố."));
+      if (!(cause instanceof DOMException && cause.name === "AbortError")) {
+        setError(cause instanceof Error ? cause.message : text("Could not start incident analysis.", "Không thể bắt đầu phân tích sự cố."));
+      }
     } finally {
+      if (requestController.current === controller) requestController.current = null;
+      if (activeIncidentId.current === incidentId) activeIncidentId.current = null;
       setSubmitting(false);
+    }
+  }
+
+  async function stopAnalysis() {
+    if (!submitting) return;
+    const incidentId = activeIncidentId.current;
+    requestController.current?.abort();
+    requestController.current = null;
+    activeIncidentId.current = null;
+    setSubmitting(false);
+    setSubmitProgress(0);
+    setToast(false);
+    setError("Đã dừng tiến trình phân tích.");
+    if (!incidentId) return;
+    try {
+      await deleteIncident(incidentId);
+    } catch {
+      // The upload may have been stopped before the incident was created.
     }
   }
   return (
@@ -215,9 +247,14 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
         )}
         <div className="form-footer">
           <p>{text("Files are used to review this recorded disengagement only.", "Các tệp chỉ được dùng để rà soát sự kiện disengagement này.")}</p>
-          <button className="primary-button" type="submit" disabled={!ready || submitting}>
-            {submitting ? text("Uploading…", "Đang tải lên…") : text("Analyze Disengagement", "Phân tích Disengagement")} <span>→</span>
-          </button>
+          <div className="analysis-form-actions">
+            <button className="primary-button analysis-submit-button" type="submit" disabled={!ready || submitting}>
+              {submitting ? text("Uploading…", "Đang tải lên…") : text("Analyze Disengagement", "Phân tích Disengagement")} <span>→</span>
+            </button>
+            <button className="analysis-stop-button" type="button" disabled={!submitting} onClick={() => void stopAnalysis()}>
+              Dừng tiến trình
+            </button>
+          </div>
         </div>
       </form>
       {toast && (

@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getIncident, listIncidents } from "../lib/incidentApi";
-import { INCIDENT_KEYS, secondsToTimestamp } from "../lib/incidentSession";
+import { deleteIncident, getIncident, listIncidents } from "../lib/incidentApi";
+import { INCIDENT_KEYS, processingPath, secondsToTimestamp } from "../lib/incidentSession";
 import type { IncidentSnapshot } from "../types/incident";
 
 export function RecentReviewsTable() {
@@ -11,6 +11,7 @@ export function RecentReviewsTable() {
   const [reviews, setReviews] = useState<IncidentSnapshot[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState("");
 
   useEffect(() => {
     listIncidents()
@@ -26,7 +27,22 @@ export function RecentReviewsTable() {
     const report = snapshot.final_report ?? snapshot.draft_report;
     const timestamp = report?.incident_window?.t0 ?? snapshot.claims[0]?.timestamp_s;
     if (typeof timestamp === "number") sessionStorage.setItem(INCIDENT_KEYS.timestamp, secondsToTimestamp(timestamp));
-    router.push(snapshot.status === "awaiting_review" ? "/processing#engineer-review" : snapshot.status === "running" || snapshot.status === "queued" ? "/processing" : "/report");
+    const processing = processingPath(snapshot.incident_id);
+    router.push(snapshot.status === "awaiting_review" ? `${processing}#engineer-review` : snapshot.status === "running" || snapshot.status === "queued" ? processing : "/report");
+  };
+
+  const removeIncident = async (incidentId: string) => {
+    if (!window.confirm(`Xóa report ${incidentId} khỏi lịch sử?`)) return;
+    setDeletingId(incidentId);
+    setError("");
+    try {
+      await deleteIncident(incidentId);
+      setReviews((current) => current.filter((review) => review.incident_id !== incidentId));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Không thể xóa report.");
+    } finally {
+      setDeletingId("");
+    }
   };
 
   return (
@@ -37,7 +53,7 @@ export function RecentReviewsTable() {
           {reviews.map((review) => {
             const report = review.final_report ?? review.draft_report;
             const timestamp = report?.incident_window?.t0 ?? review.claims[0]?.timestamp_s ?? 0;
-            return <tr key={review.incident_id}><td><strong>{review.incident_id}</strong></td><td className="mono">{secondsToTimestamp(timestamp)}</td><td>{review.stored_at ? new Date(review.stored_at).toLocaleString() : "Active"}</td><td><span className={`status ${review.status}`}>{review.status}</span></td><td><button type="button" className="row-action" onClick={() => openIncident(review)}>Open <span>→</span></button></td></tr>;
+            return <tr key={review.incident_id}><td><strong>{review.incident_id}</strong></td><td className="mono">{secondsToTimestamp(timestamp)}</td><td>{review.stored_at ? new Date(review.stored_at).toLocaleString() : "Active"}</td><td><span className={`status ${review.status}`}>{review.status}</span></td><td><div className="history-row-actions"><button type="button" className="row-action" onClick={() => openIncident(review)}>Open <span>→</span></button><button type="button" className="history-delete-action" disabled={deletingId === review.incident_id} onClick={() => removeIncident(review.incident_id)} aria-label={`Xóa lịch sử ${review.incident_id}`} title="Xóa lịch sử"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button></div></td></tr>;
           })}
           {loading && <tr className="table-state-row"><td colSpan={5}><span className="state-spinner" aria-hidden="true" /> Loading incident history…</td></tr>}
           {!loading && !reviews.length && <tr className="table-state-row"><td colSpan={5}><strong>{error ? "History unavailable" : "No incidents yet"}</strong><small>{error || "Upload evidence above to create the first analysis."}</small></td></tr>}

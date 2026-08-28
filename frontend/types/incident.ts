@@ -105,6 +105,7 @@ export type IncidentSnapshot = {
   final_report: DraftReport | null;
   review_audit: ReviewAudit[];
   model_activities: ModelActivity[];
+  progress?: { stage: string; message: string; started_at: string } | null;
   warnings: string[];
   ground_truth?: GroundTruth | null;
   ai_evaluation?: AiGroundTruthEvaluation | null;
@@ -112,7 +113,7 @@ export type IncidentSnapshot = {
   error_message?: string | null;
   stored_at?: string | null;
 };
-export type IncidentUploadResponse = { video_uri: string; log_uri: string | null; ground_truth_uri: string | null };
+export type IncidentUploadResponse = { video_uri: string; log_uri: string | null };
 export type IncidentCreateRequest = {
   incident_id: string;
   video_uri: string;

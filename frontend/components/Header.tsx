@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { clearDemoSession } from "../lib/auth";
 import { getAiSettings, saveAiSettings, type AiSettings } from "../lib/settingsApi";
 import { uiText as text } from "../lib/ui-copy";
@@ -19,7 +19,9 @@ export function Header({
   processing?: boolean;
 }) {
   const router = useRouter();
+  const accountMenuRef = useRef<HTMLDivElement>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [isLightOptionDark, setIsLightOptionDark] = useState(false);
   const [isAiSettingsOpen, setIsAiSettingsOpen] = useState(false);
   const [aiSettings, setAiSettings] = useState<AiSettings | null>(null);
@@ -41,9 +43,30 @@ export function Header({
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [isSettingsOpen]);
 
+  useEffect(() => {
+    if (!isAccountMenuOpen) return;
+
+    const closeAccountMenu = (event: MouseEvent) => {
+      if (!accountMenuRef.current?.contains(event.target as Node)) {
+        setIsAccountMenuOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsAccountMenuOpen(false);
+    };
+
+    document.addEventListener("mousedown", closeAccountMenu);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeAccountMenu);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isAccountMenuOpen]);
+
   const handleLogout = () => {
     clearDemoSession();
     setIsSettingsOpen(false);
+    setIsAccountMenuOpen(false);
     router.replace("/login");
   };
 
@@ -115,9 +138,32 @@ export function Header({
           >
             <Image src="/images/settings.png" alt="" width={22} height={22} />
           </button>
-          <span className="avatar" aria-label={text("User account", "Tài khoản người dùng")}>
-            PT
-          </span>
+          <div className="account-menu" ref={accountMenuRef}>
+            <span
+              className="avatar"
+              role="button"
+              tabIndex={0}
+              aria-label={text("User account", "Tài khoản người dùng")}
+              aria-haspopup="menu"
+              aria-expanded={isAccountMenuOpen}
+              onClick={() => setIsAccountMenuOpen((current) => !current)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setIsAccountMenuOpen((current) => !current);
+                }
+              }}
+            >
+              PT
+            </span>
+            {isAccountMenuOpen && (
+              <div className="account-dropdown" role="menu">
+                <button type="button" role="menuitem" onClick={handleLogout}>
+                  {text("Log out", "Đăng xuất")}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
       {isSettingsOpen && (

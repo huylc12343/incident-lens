@@ -196,6 +196,12 @@ class ModelActivity(APIModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class ProcessingProgress(APIModel):
+    stage: str
+    message: str
+    started_at: datetime
+
+
 class IncidentSnapshot(APIModel):
     incident_id: str
     status: IncidentStatus
@@ -211,6 +217,9 @@ class IncidentSnapshot(APIModel):
     final_report: DraftReport | None = None
     review_audit: list[ReviewAuditEntry] = Field(default_factory=list)
     model_activities: list[ModelActivity] = Field(default_factory=list)
+    progress: ProcessingProgress | None = None
+    ground_truth: GroundTruth | None = None
+    ai_evaluation: AiGroundTruthEvaluation | None = None
     warnings: list[str] = Field(default_factory=list)
     error_code: str | None = None
     error_message: str | None = None

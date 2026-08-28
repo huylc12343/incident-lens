@@ -19,7 +19,7 @@ import { ReviewSidebar } from "./ReviewSidebar";
 import { TechnicalDetails } from "./TechnicalDetails";
 import { TelemetryPanel, telemetryChartArtifacts } from "./TelemetryPanel";
 
-export function IncidentReviewWorkspace() {
+export function IncidentReviewWorkspace({ incidentId }: { incidentId?: string } = {}) {
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [snapshot, setSnapshot] = useState<IncidentSnapshot | null>(null);
@@ -35,8 +35,9 @@ export function IncidentReviewWorkspace() {
   }, []);
 
   useEffect(() => {
-    const id = sessionStorage.getItem(INCIDENT_KEYS.incidentId);
+    const id = incidentId || sessionStorage.getItem(INCIDENT_KEYS.incidentId);
     if (!id) { setError("No active incident. Start an analysis or open one from History."); return; }
+    sessionStorage.setItem(INCIDENT_KEYS.incidentId, id);
     let active = true;
     let failures = 0;
     let timer: ReturnType<typeof setTimeout>;
@@ -59,7 +60,7 @@ export function IncidentReviewWorkspace() {
     };
     void refresh();
     return () => { active = false; clearTimeout(timer); };
-  }, []);
+  }, [incidentId]);
 
   const selectedClaim = useMemo(() => snapshot?.claims.find((claim) => claim.claim_id === selectedClaimId) ?? snapshot?.claims[0], [snapshot, selectedClaimId]);
   const selectClaim = (claim: Claim) => {

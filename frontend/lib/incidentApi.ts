@@ -11,25 +11,49 @@ async function responseJson<T>(response: Response): Promise<T> {
     const message = Array.isArray(detail)
       ? detail.map((item) => `${item.loc?.join(".") ?? "request"}: ${item.msg}`).join("; ")
       : detail?.message ?? detail ?? `API request failed (${response.status})`;
-    throw new Error(String(message));
+    throw new IncidentApiError(String(message), response.status);
   }
   return data as T;
 }
 
-export async function uploadIncident(video: File, log?: File, groundTruth?: File) {
+class IncidentApiError extends Error {
+  constructor(message: string, readonly status?: number) {
+    super(message);
+    this.name = "IncidentApiError";
+  }
+}
+
+export async function uploadIncident(video: File, log?: File) {
   const body = new FormData();
   body.append("video", video);
   if (log) body.append("log", log);
-  if (groundTruth) body.append("ground_truth", groundTruth);
-  return responseJson<{ video_uri: string; log_uri: string | null; ground_truth_uri: string | null }>(
+  return responseJson<{ video_uri: string; log_uri: string | null }>(
     await fetch(`${API_URL}/api/v1/incidents/uploads`, { method: "POST", body }),
   );
 }
 
 export async function createIncident(payload: Record<string, unknown>) {
-  return responseJson<IncidentSnapshot>(await fetch(`${API_URL}/api/v1/incidents`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-  }));
+  try {
+    return await responseJson<IncidentSnapshot>(await fetch(`${API_URL}/api/v1/incidents`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }));
+  } catch (cause) {
+    const incidentId = typeof payload.incident_id === "string" ? payload.incident_id.trim() : "";
+    const recoverable = !(cause instanceof IncidentApiError) || !cause.status || cause.status >= 500;
+    if (!incidentId || !recoverable) throw cause;
+
+    // A proxy can fail after FastAPI accepted the client-generated incident ID.
+    // Verify server state before treating the create as failed or redirecting.
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        return await getIncident(incidentId);
+      } catch {
+        if (attempt === 3) throw cause;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
+    throw cause;
+  }
 }
 
 export async function getIncident(id: string) {

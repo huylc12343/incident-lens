@@ -211,6 +211,8 @@ class IncidentSnapshot(APIModel):
     final_report: DraftReport | None = None
     review_audit: list[ReviewAuditEntry] = Field(default_factory=list)
     model_activities: list[ModelActivity] = Field(default_factory=list)
+    ground_truth: GroundTruth | None = None
+    ai_evaluation: AiGroundTruthEvaluation | None = None
     warnings: list[str] = Field(default_factory=list)
     error_code: str | None = None
     error_message: str | None = None

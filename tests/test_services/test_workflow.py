@@ -152,6 +152,67 @@ async def test_workflow_rejects_duplicate_create_and_invalid_transition() -> Non
 
 
 @pytest.mark.asyncio
+async def test_create_detached_returns_before_long_workflow_finishes() -> None:
+    release = asyncio.Event()
+
+    async def slow_start(state):
+        await release.wait()
+        return _review_state(state["incident_id"])
+
+    runner = SimpleNamespace(start=AsyncMock(side_effect=slow_start), resume=AsyncMock())
+    service = WorkflowService(runner=runner, repository=InMemoryReportRepository())
+    request = IncidentCreateRequest(
+        incident_id="INC-DETACHED",
+        video_uri="video.mp4",
+        analysis_prompt="Analyze",
+    )
+
+    snapshot = await asyncio.wait_for(service.create_detached(request), timeout=0.5)
+    task = service._active_create_tasks["INC-DETACHED"]
+
+    assert snapshot.incident_id == "INC-DETACHED"
+    assert snapshot.status == "queued"
+    assert task.done() is False
+    assert runner.start.await_count == 1
+
+    release.set()
+    await task
+    assert (await service.get("INC-DETACHED")).status == "awaiting_review"
+
+
+@pytest.mark.asyncio
+async def test_create_detached_retry_is_idempotent_for_same_client_incident_id() -> None:
+    release = asyncio.Event()
+
+    async def slow_start(state):
+        await release.wait()
+        return _review_state(state["incident_id"])
+
+    runner = SimpleNamespace(start=AsyncMock(side_effect=slow_start), resume=AsyncMock())
+    service = WorkflowService(runner=runner, repository=InMemoryReportRepository())
+    request = IncidentCreateRequest(
+        incident_id="INC-RETRY",
+        video_uri="video.mp4",
+        analysis_prompt="Analyze",
+    )
+
+    first = await service.create_detached(request)
+    retried = await service.create_detached(request)
+    await asyncio.sleep(0)
+
+    assert first.incident_id == retried.incident_id
+    assert runner.start.await_count == 1
+
+    with pytest.raises(WorkflowError) as mismatch:
+        await service.create_detached(request.model_copy(update={"video_uri": "different.mp4"}))
+    assert mismatch.value.code == "INCIDENT_ALREADY_EXISTS"
+
+    task = service._active_create_tasks["INC-RETRY"]
+    release.set()
+    await task
+
+
+@pytest.mark.asyncio
 async def test_manual_reanalysis_rejects_unknown_target_before_resume() -> None:
     runner = SimpleNamespace(start=AsyncMock(return_value=_review_state("INC-MANUAL")), resume=AsyncMock())
     service = WorkflowService(runner=runner, repository=InMemoryReportRepository())

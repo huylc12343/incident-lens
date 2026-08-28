@@ -6,6 +6,7 @@ import { FileUploadCard } from "./FileUploadCard";
 import { saveUploadedVideo } from "../lib/uploadStorage";
 import { INCIDENT_KEYS } from "../lib/incidentSession";
 import { createIncident, uploadIncident } from "../lib/incidentApi";
+import { createIncidentAndNavigate } from "../lib/incidentSubmission";
 import { uiText as text } from "../lib/ui-copy";
 
 type DemoSample = {
@@ -123,8 +124,8 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
     sessionStorage.setItem("vlens:video-name", video.name);
     const incidentId = createIncidentId();
     try {
-      const uploaded = await uploadIncident(video, telemetry[0], groundTruth ?? undefined);
-      const snapshot = await createIncident({
+      const uploaded = await uploadIncident(video, telemetry[0]);
+      await createIncidentAndNavigate({
         incident_id: incidentId,
         video_uri: uploaded.video_uri,
         log_uri: uploaded.log_uri,
@@ -136,13 +137,17 @@ export function AnalysisForm({ highlighted = false }: { highlighted?: boolean })
           telemetry_files: telemetry.map((file) => file.name),
           ground_truth_file: groundTruth?.name ?? null,
         },
+      }, {
+        create: createIncident,
+        beforeNavigate: (created) => {
+          setSubmitProgress(100);
+          sessionStorage.removeItem(INCIDENT_KEYS.timestamp);
+          sessionStorage.setItem(INCIDENT_KEYS.incidentId, created.incident_id);
+          sessionStorage.setItem(INCIDENT_KEYS.snapshot, JSON.stringify(created));
+          setToast(true);
+        },
+        navigate: router.push,
       });
-      setSubmitProgress(100);
-      sessionStorage.removeItem(INCIDENT_KEYS.timestamp);
-      sessionStorage.setItem(INCIDENT_KEYS.incidentId, snapshot.incident_id);
-      sessionStorage.setItem(INCIDENT_KEYS.snapshot, JSON.stringify(snapshot));
-      setToast(true);
-      router.push("/processing");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : text("Could not start incident analysis.", "Không thể bắt đầu phân tích sự cố."));
     } finally {

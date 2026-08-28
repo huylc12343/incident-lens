@@ -112,7 +112,7 @@ export type IncidentSnapshot = {
   error_message?: string | null;
   stored_at?: string | null;
 };
-export type IncidentUploadResponse = { video_uri: string; log_uri: string | null; ground_truth_uri: string | null };
+export type IncidentUploadResponse = { video_uri: string; log_uri: string | null };
 export type IncidentCreateRequest = {
   incident_id: string;
   video_uri: string;

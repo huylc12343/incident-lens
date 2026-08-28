@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import shutil
 from collections.abc import Awaitable, Callable
@@ -21,6 +22,8 @@ from src.models.api import (
 from src.models.incidents import VerificationStatus
 from src.services.model_observability import ModelActivityRegistry
 from src.services.report_repository import ReportRepository, ReportRepositoryError
+
+logger = logging.getLogger(__name__)
 
 
 class WorkflowError(RuntimeError):
@@ -69,19 +72,69 @@ class WorkflowService:
         self._audit: dict[str, list[ReviewAuditEntry]] = {}
         self._stored_at: dict[str, datetime] = {}
         self._pending_terminal: dict[str, tuple[IncidentState, ReviewDecision]] = {}
+        self._active_create_tasks: dict[str, asyncio.Task[IncidentSnapshot]] = {}
+        self._create_requests: dict[str, IncidentCreateRequest] = {}
         self._registry_lock = asyncio.Lock()
 
+    async def create_detached(self, request: IncidentCreateRequest) -> IncidentSnapshot:
+        """Validate/register an incident and return while its workflow runs in the background."""
+        incident_id = request.incident_id.strip()
+        initial, created = await self._register_incident(request, idempotent=True)
+        if not created:
+            return self._snapshot(initial)
+        task = asyncio.create_task(self._run_registered(initial), name=f"incident-create:{incident_id}")
+        self._active_create_tasks[incident_id] = task
+        task.add_done_callback(lambda completed: self._finish_create_task(incident_id, completed))
+        logger.info("WORKFLOW_ENQUEUED incident_id=%s", incident_id)
+        return self._snapshot(initial)
+
+    def _finish_create_task(self, incident_id: str, task: asyncio.Task[IncidentSnapshot]) -> None:
+        if self._active_create_tasks.get(incident_id) is task:
+            self._active_create_tasks.pop(incident_id, None)
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            logger.warning("Incident workflow was cancelled incident_id=%s", incident_id)
+        except Exception:
+            logger.exception("Incident workflow failed after enqueue incident_id=%s", incident_id)
+
+    def _request_matches(self, incident_id: str, request: IncidentCreateRequest) -> bool:
+        original = self._create_requests.get(incident_id)
+        return original is not None and original == request
+
+    async def shutdown(self) -> None:
+        """Cancel and drain detached workflows before runtime resources are closed."""
+        tasks = list(self._active_create_tasks.values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     async def create(self, request: IncidentCreateRequest) -> IncidentSnapshot:
+        initial, _ = await self._register_incident(request, idempotent=False)
+        return await self._run_registered(initial)
+
+    async def _register_incident(
+        self,
+        request: IncidentCreateRequest,
+        *,
+        idempotent: bool,
+    ) -> tuple[IncidentState, bool]:
+        incident_id = request.incident_id.strip()
+        existing = self._states.get(incident_id)
+        if existing is not None:
+            if idempotent and self._request_matches(incident_id, request):
+                return existing, False
+            raise WorkflowError("INCIDENT_ALREADY_EXISTS", "incident ID already exists")
         if self._input_validator is not None:
             await self._input_validator.validate(request)
-        incident_id = request.incident_id.strip()
         initial: IncidentState = {
             "incident_id": incident_id,
             "video_uri": request.video_uri,
             "log_uri": request.log_uri,
             "analysis_prompt": request.analysis_prompt,
             "metadata": request.metadata,
-            "status": "running",
+            "status": "queued",
             "auto_reanalysis_count": 0,
             "manual_reanalysis_count": 0,
             "artifact_uris": {},
@@ -91,8 +144,11 @@ class WorkflowService:
         }
         async with self._registry_lock:
             checkpoint_state = await self._checkpoint_state(incident_id)
+            existing = self._states.get(incident_id)
+            if existing is not None and idempotent and self._request_matches(incident_id, request):
+                return existing, False
             if (
-                incident_id in self._states
+                existing is not None
                 or checkpoint_state is not None
                 or await _repository_call(self._repository, "aget", "get", incident_id) is not None
             ):
@@ -100,8 +156,16 @@ class WorkflowService:
             self._states[incident_id] = initial
             self._review_locks[incident_id] = asyncio.Lock()
             self._audit[incident_id] = []
+            self._create_requests.setdefault(incident_id, request.model_copy(deep=True))
+            logger.info("INCIDENT_CREATED incident_id=%s status=%s", incident_id, initial["status"])
+        return initial, True
+
+    async def _run_registered(self, initial: IncidentState) -> IncidentSnapshot:
+        incident_id = initial["incident_id"]
+        running = {**initial, "status": "running"}
+        self._states[incident_id] = cast(IncidentState, running)
         try:
-            result = await self._runner.start(initial)
+            result = await self._runner.start(cast(IncidentState, running))
         except Exception as exc:
             async with self._registry_lock:
                 self._states.pop(incident_id, None)
@@ -110,7 +174,7 @@ class WorkflowService:
             if isinstance(exc, WorkflowError):
                 raise
             raise WorkflowError("WORKFLOW_EXECUTION_FAILED", "incident workflow could not start") from exc
-        state = _without_legacy_claim_projection({**initial, **result})
+        state = _without_legacy_claim_projection({**running, **result})
         try:
             snapshot = self._snapshot(state)
         except Exception as exc:
@@ -167,6 +231,7 @@ class WorkflowService:
                 self._audit.pop(incident_id, None)
                 self._stored_at.pop(incident_id, None)
                 self._pending_terminal.pop(incident_id, None)
+                self._create_requests.pop(incident_id, None)
             if self._observability is not None:
                 self._observability.delete(incident_id)
 

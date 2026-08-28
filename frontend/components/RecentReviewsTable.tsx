@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getIncident, listIncidents } from "../lib/incidentApi";
-import { INCIDENT_KEYS, secondsToTimestamp } from "../lib/incidentSession";
+import { INCIDENT_KEYS, processingPath, secondsToTimestamp } from "../lib/incidentSession";
 import type { IncidentSnapshot } from "../types/incident";
 
 export function RecentReviewsTable() {
@@ -26,7 +26,8 @@ export function RecentReviewsTable() {
     const report = snapshot.final_report ?? snapshot.draft_report;
     const timestamp = report?.incident_window?.t0 ?? snapshot.claims[0]?.timestamp_s;
     if (typeof timestamp === "number") sessionStorage.setItem(INCIDENT_KEYS.timestamp, secondsToTimestamp(timestamp));
-    router.push(snapshot.status === "awaiting_review" ? "/processing#engineer-review" : snapshot.status === "running" || snapshot.status === "queued" ? "/processing" : "/report");
+    const processing = processingPath(snapshot.incident_id);
+    router.push(snapshot.status === "awaiting_review" ? `${processing}#engineer-review` : snapshot.status === "running" || snapshot.status === "queued" ? processing : "/report");
   };
 
   return (

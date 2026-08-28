@@ -51,6 +51,53 @@ async def test_incident_api_create_get_and_approve(client) -> None:
 
 
 @pytest.mark.asyncio
+async def test_incident_api_prefers_detached_create_and_returns_valid_snapshot(client) -> None:
+    service = SimpleNamespace(
+        create_detached=AsyncMock(return_value=_snapshot("queued")),
+        create=AsyncMock(),
+    )
+    app.state.incident_workflow_service = service
+    try:
+        response = await client.post(
+            "/api/v1/incidents",
+            json={
+                "incident_id": "INC-HTTP",
+                "video_uri": "video.mp4",
+                "analysis_prompt": "Analyze",
+            },
+        )
+    finally:
+        del app.state.incident_workflow_service
+
+    assert response.status_code == 202
+    assert IncidentSnapshot.model_validate(response.json()).status == "queued"
+    service.create_detached.assert_awaited_once()
+    service.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_incident_api_rejects_invalid_create_response_before_fastapi_serialization(client) -> None:
+    service = SimpleNamespace(
+        create_detached=AsyncMock(return_value={"incident_id": "INC-HTTP", "status": "unknown"}),
+    )
+    app.state.incident_workflow_service = service
+    try:
+        response = await client.post(
+            "/api/v1/incidents",
+            json={
+                "incident_id": "INC-HTTP",
+                "video_uri": "video.mp4",
+                "analysis_prompt": "Analyze",
+            },
+        )
+    finally:
+        del app.state.incident_workflow_service
+
+    assert response.status_code == 500
+    assert response.json()["detail"]["code"] == "INCIDENT_WORKFLOW_FAILED"
+
+
+@pytest.mark.asyncio
 async def test_incident_api_lists_sqlite_reports(client) -> None:
     service = SimpleNamespace(list_reports=AsyncMock(return_value=[]))
     app.state.incident_workflow_service = service

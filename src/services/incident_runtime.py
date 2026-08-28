@@ -222,6 +222,8 @@ async def incident_workflow_service(
         )
         yield service
     finally:
+        if "service" in locals():
+            await service.shutdown()
         await checkpoint_worker.call(connection.close)
         checkpoint_worker.close()
 

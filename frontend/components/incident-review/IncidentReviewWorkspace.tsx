@@ -46,6 +46,7 @@ export function IncidentReviewWorkspace({ incidentId }: { incidentId?: string } 
         const next = await getIncident(id);
         if (!active) return;
         failures = 0;
+        setError("");
         setSnapshot(next);
         sessionStorage.setItem(INCIDENT_KEYS.snapshot, JSON.stringify(next));
         setSelectedClaimId((current) => current || next.claims[0]?.claim_id || "");
@@ -54,7 +55,7 @@ export function IncidentReviewWorkspace({ incidentId }: { incidentId?: string } 
         if (active) {
           failures += 1;
           setError(cause instanceof Error ? cause.message : "Could not load incident.");
-          if (failures < 5) timer = setTimeout(refresh, 5000);
+          timer = setTimeout(refresh, Math.min(15_000, 3_000 + failures * 2_000));
         }
       }
     };
@@ -70,7 +71,7 @@ export function IncidentReviewWorkspace({ incidentId }: { incidentId?: string } 
     if (videoRef.current && typeof claim.timestamp_s === "number") videoRef.current.currentTime = Math.max(0, claim.timestamp_s - clipStart);
   };
   const submitReview = async (payload: ReviewPayload) => {
-    if (!snapshot) return;
+    if (!snapshot) return false;
     setBusy(true);
     setError("");
     try {
@@ -78,8 +79,10 @@ export function IncidentReviewWorkspace({ incidentId }: { incidentId?: string } 
       setSnapshot(next);
       sessionStorage.setItem(INCIDENT_KEYS.snapshot, JSON.stringify(next));
       if (["approved", "not_incident"].includes(next.status)) router.push("/evaluation");
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Review request failed.");
+      return false;
     } finally {
       setBusy(false);
     }

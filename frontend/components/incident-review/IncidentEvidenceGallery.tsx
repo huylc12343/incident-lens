@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useState } from "react";
 import { artifactUrl } from "../../lib/incidentApi";
 import { secondsToTimestamp } from "../../lib/incidentSession";
+import { normalizeReviewText } from "../../lib/reviewText";
 import type { IncidentSnapshot } from "../../types/incident";
 
 function ReportEvidenceImage({ src, fallback, alt }: { src: string; fallback: string; alt: string }) {
@@ -43,7 +44,7 @@ export function IncidentEvidenceGallery({ snapshot }: { snapshot: IncidentSnapsh
     <div className="report-evidence-grid">
       {evidence.map((item, index) => <figure key={item.evidence_id}>
         <div><ReportEvidenceImage src={item.imageUrl} fallback={representative} alt={`Bằng chứng ${index + 1} liên quan ${item.claim.claim_id}`} /><time>{secondsToTimestamp(item.timestamp_s)}</time></div>
-        <figcaption><div><strong>Bằng chứng {index + 1}</strong><span>{item.claim.claim_id}</span></div><p>{item.claim.text}</p></figcaption>
+        <figcaption><div><strong>Bằng chứng {index + 1}</strong><span>{item.claim.claim_id}</span></div><p className="review-multiline">{normalizeReviewText(item.claim.text)}</p></figcaption>
       </figure>)}
       {!evidence.length && representative && <figure>
         <div><ReportEvidenceImage src={representative} fallback="" alt={`Ảnh đại diện sự cố ${snapshot.incident_id}`} /></div>

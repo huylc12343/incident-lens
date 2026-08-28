@@ -4,12 +4,14 @@ import Image from "next/image";
 import { useState } from "react";
 import { artifactUrl } from "../../lib/incidentApi";
 import { secondsToTimestamp } from "../../lib/incidentSession";
+import { normalizeReviewText } from "../../lib/reviewText";
 import type { Claim, IncidentSnapshot } from "../../types/incident";
 
 function EvidenceDescription({ text }: { text: string }) {
   const [expanded, setExpanded] = useState(false);
-  const canExpand = text.length > 120;
-  return <><p className={expanded ? "expanded" : ""}>{text}</p>{canExpand && <button type="button" className="evidence-description-toggle" onClick={() => setExpanded((current) => !current)} aria-expanded={expanded}>{expanded ? "Thu gọn" : "Xem thêm"}</button>}</>;
+  const normalized = normalizeReviewText(text);
+  const canExpand = normalized.length > 120;
+  return <><p className={`review-multiline${expanded ? " expanded" : ""}`}>{normalized}</p>{canExpand && <button type="button" className="evidence-description-toggle" onClick={() => setExpanded((current) => !current)} aria-expanded={expanded}>{expanded ? "Thu gọn" : "Xem thêm"}</button>}</>;
 }
 
 function EvidenceFrame({ primarySrc, fallbackSrc, alt }: { primarySrc: string; fallbackSrc: string; alt: string }) {

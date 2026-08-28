@@ -1,6 +1,7 @@
 "use client";
 
 import { secondsToTimestamp } from "../../lib/incidentSession";
+import { normalizeReviewText } from "../../lib/reviewText";
 import type { Claim, ClaimLogSummary, ClaimVerification } from "../../types/incident";
 
 function number(value: unknown) {
@@ -79,8 +80,8 @@ export function ClaimReviewList({
             <div><time>{typeof claim.timestamp_s === "number" ? secondsToTimestamp(claim.timestamp_s) : "Không có timestamp"}</time><span className={`finding-status ${claim.verification_status}`}>{claim.verification_status.replaceAll("_", " ")}</span></div>
           </header>
           <div className="claim-primary-fields">
-            <section><h3>Nhận định</h3><p>{claim.text}</p></section>
-            <section><h3>Lý do xác thực</h3><p>{verification?.reason || "Backend chưa cung cấp lý do xác thực cho claim này."}</p></section>
+            <section><h3>Nhận định</h3><p className="review-multiline">{normalizeReviewText(claim.text)}</p></section>
+            <section><h3>Lý do xác thực</h3><p className="review-multiline">{normalizeReviewText(verification?.reason) || "Backend chưa cung cấp lý do xác thực cho claim này."}</p></section>
             <section><h3>Tham chiếu log</h3><LogReference summary={summary} hasLog={hasLog} /></section>
           </div>
           <ClaimDetails claim={claim} summary={summary} />

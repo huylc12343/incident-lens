@@ -12,6 +12,7 @@ from src.models.incidents import (
     Claim,
     ClaimLogSummary,
     DraftReport,
+    TimelineEvent,
     VerificationStatus,
 )
 
@@ -90,11 +91,22 @@ class ReportEdits(APIModel):
     claims: list[ReportClaimEdit] | None = None
     summary: str | None = Field(default=None, min_length=1)
     timeline: str | None = Field(default=None, min_length=1)
+    timeline_events: list[TimelineEvent] | None = None
     video_observations: str | None = Field(default=None, min_length=1)
     log_findings: str | None = Field(default=None, min_length=1)
     alignment: str | None = Field(default=None, min_length=1)
     hypothesized_causes: str | None = Field(default=None, min_length=1)
     warnings: list[str] | None = None
+
+    @field_validator("timeline_events")
+    @classmethod
+    def validate_timeline_order(cls, value: list[TimelineEvent] | None) -> list[TimelineEvent] | None:
+        if value is not None and any(
+            current.timestamp_s < previous.timestamp_s
+            for previous, current in zip(value, value[1:], strict=False)
+        ):
+            raise ValueError("timeline events must be ordered by timestamp_s")
+        return value
 
 
 class IncidentCreateRequest(APIModel):

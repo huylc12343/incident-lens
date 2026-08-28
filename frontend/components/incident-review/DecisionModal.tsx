@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { secondsToTimestamp } from "../../lib/incidentSession";
+import { normalizeReviewText } from "../../lib/reviewText";
 import type { Claim, IncidentSnapshot, ReviewPayload } from "../../types/incident";
 import { StructuredReportEditor } from "./StructuredReportEditor";
 
@@ -20,7 +21,7 @@ export function DecisionModal({ open, snapshot, selectedClaim, busy, onClose, on
   selectedClaim?: Claim;
   busy: boolean;
   onClose: () => void;
-  onReview: (payload: ReviewPayload) => Promise<void>;
+  onReview: (payload: ReviewPayload) => Promise<boolean>;
 }) {
   const [decision, setDecision] = useState<Decision>("approve");
   const [reviewer, setReviewer] = useState("engineer@example.com");
@@ -43,10 +44,11 @@ export function DecisionModal({ open, snapshot, selectedClaim, busy, onClose, on
   const valid = reviewer.trim() && (decision === "approve" || (decision === "edit" && report) || (decision === "not_incident" && reason.trim()) || (decision === "reanalyze" && feedback.trim() && targetClaimIds.length > 0));
   const confirm = async () => {
     if (!valid || busy) return;
-    if (decision === "approve") await onReview({ action: "approve", reviewer });
-    if (decision === "not_incident") await onReview({ action: "not_incident", reviewer, reason });
-    if (decision === "reanalyze" && targetClaimIds.length) await onReview({ action: "reanalyze", reviewer: reviewer.trim(), feedback: feedback.trim(), target_claim_ids: targetClaimIds });
-    onClose();
+    let saved = false;
+    if (decision === "approve") saved = await onReview({ action: "approve", reviewer });
+    if (decision === "not_incident") saved = await onReview({ action: "not_incident", reviewer, reason });
+    if (decision === "reanalyze" && targetClaimIds.length) saved = await onReview({ action: "reanalyze", reviewer: reviewer.trim(), feedback: feedback.trim(), target_claim_ids: targetClaimIds });
+    if (saved) onClose();
   };
 
   return (
@@ -63,11 +65,11 @@ export function DecisionModal({ open, snapshot, selectedClaim, busy, onClose, on
             {decision === "not_incident" && <label>Reason for closing<textarea autoFocus rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Explain why this is not an incident…" /></label>}
             {decision === "reanalyze" && <div className="decision-claim-targets"><div className="decision-target-heading"><div><strong>Chọn claim cần phân tích lại</strong><small>Có thể chọn một hoặc nhiều claim</small></div><span>{targetClaimIds.length} đã chọn</span></div><div className="decision-claim-grid" role="group" aria-label="Claims cần phân tích lại">{snapshot.claims.map((claim, index) => {
               const selected = targetClaimIds.includes(claim.claim_id);
-              return <button type="button" role="checkbox" aria-checked={selected} className={selected ? "selected" : ""} key={claim.claim_id} onClick={() => setTargetClaimIds((current) => selected ? current.filter((claimId) => claimId !== claim.claim_id) : [...current, claim.claim_id])}><span className="decision-claim-check" aria-hidden="true">{selected ? "✓" : index + 1}</span><div><header><strong>{claim.claim_id}</strong><time>{typeof claim.timestamp_s === "number" ? secondsToTimestamp(claim.timestamp_s) : "Không có timestamp"}</time></header><p>{claim.text}</p></div></button>;
+              return <button type="button" role="checkbox" aria-checked={selected} className={selected ? "selected" : ""} key={claim.claim_id} onClick={() => setTargetClaimIds((current) => selected ? current.filter((claimId) => claimId !== claim.claim_id) : [...current, claim.claim_id])}><span className="decision-claim-check" aria-hidden="true">{selected ? "✓" : index + 1}</span><div><header><strong>{claim.claim_id}</strong><time>{typeof claim.timestamp_s === "number" ? secondsToTimestamp(claim.timestamp_s) : "Không có timestamp"}</time></header><p className="review-multiline">{normalizeReviewText(claim.text)}</p></div></button>;
             })}</div>{!snapshot.claims.length && <p className="form-error">Incident chưa có claim để phân tích lại.</p>}</div>}
             {decision === "reanalyze" && <label>Yêu cầu agent xác minh lại<textarea autoFocus rows={4} value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="Mô tả rõ nội dung cần kiểm tra lại cho các claim đã chọn…" /></label>}
           </div>
-          {decision === "edit" && report && <StructuredReportEditor report={report} reviewer={reviewer} busy={busy} onCancel={() => setDecision("approve")} onReview={async (payload) => { await onReview(payload); onClose(); }} />}
+          {decision === "edit" && report && <StructuredReportEditor report={report} claims={snapshot.claims} reviewer={reviewer} busy={busy} onCancel={() => setDecision("approve")} onReview={onReview} />}
           {decision === "edit" && !report && <p className="form-error" role="alert">This incident does not have a report to edit yet.</p>}
           {decision !== "edit" && <footer><button type="button" className="decision-cancel" onClick={onClose} disabled={busy}>Cancel</button><button type="button" className={`decision-confirm ${decision}`} disabled={!valid || busy} onClick={() => void confirm()}>{busy ? "Submitting…" : "Confirm decision"}</button></footer>}
         </div>

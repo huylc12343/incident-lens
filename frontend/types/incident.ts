@@ -8,8 +8,10 @@ export type Claim = {
   text: string;
   timestamp_s: number | null;
   evidence: Evidence[];
-  verification_status: string;
+  verification_status: VerificationStatus;
 };
+export type VerificationStatus = "supported" | "contradicted" | "unverified";
+export type TimelineEvent = { timestamp_s: number; description: string; evidence_ids: string[] };
 export type ModelActivity = {
   activity_id: string;
   step: string;
@@ -49,7 +51,7 @@ export type ClaimLogSummary = {
 };
 export type ClaimVerification = {
   claim_id: string;
-  status: string;
+  status: VerificationStatus;
   reason: string;
   evidence_ids: string[];
 };
@@ -67,7 +69,7 @@ export type DraftReport = {
   type_of_accident?: string;
   incident_window?: { t_start: number; t0: number; t_end: number };
   summary: string;
-  timeline?: { narrative?: string; events?: Array<{ timestamp_s: number; description: string; evidence_ids: string[] }> };
+  timeline?: { narrative?: string; events?: TimelineEvent[] };
   video_observations?: { narrative?: string; observations?: Array<{ observation_id?: string; timestamp_s?: number; description?: string; evidence_ids?: string[] }> };
   log_findings?: { narrative?: string; claim_summaries?: ClaimLogSummary[]; summary?: LogEvidenceSummary | null };
   alignment?: { narrative?: string; verification?: VerificationResult | null };
@@ -134,5 +136,12 @@ export type ReviewPayload = {
     log_findings?: string;
     alignment?: string;
     hypothesized_causes?: string;
+    claims?: Array<{
+      claim_id: string;
+      text?: string;
+      timestamp_s?: number;
+      verification_status?: VerificationStatus;
+    }>;
+    timeline_events?: TimelineEvent[];
   };
 };

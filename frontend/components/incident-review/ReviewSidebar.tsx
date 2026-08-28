@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useState } from "react";
 import { artifactUrl } from "../../lib/incidentApi";
 import { secondsToTimestamp } from "../../lib/incidentSession";
+import { normalizeReviewText } from "../../lib/reviewText";
 import type { Claim, IncidentSnapshot, ReviewPayload } from "../../types/incident";
 import { StructuredReportEditor } from "./StructuredReportEditor";
 
@@ -48,7 +49,7 @@ export function ReviewSidebar({ snapshot, selectedClaim, busy, error, onSelectCl
   busy: boolean;
   error: string;
   onSelectClaim: (claim: Claim) => void;
-  onReview: (payload: ReviewPayload) => Promise<void>;
+  onReview: (payload: ReviewPayload) => Promise<boolean>;
 }) {
   const report = snapshot.final_report ?? snapshot.draft_report;
   const [reviewer, setReviewer] = useState("engineer@example.com");
@@ -59,10 +60,9 @@ export function ReviewSidebar({ snapshot, selectedClaim, busy, error, onSelectCl
 
   return <section className="workspace-panel review-report-panel" id="report" aria-labelledby="report-title">
     <div className="workspace-panel-heading"><div><p className="eyebrow">Report</p><h2 id="report-title">Báo cáo rà soát</h2></div>{report && <button type="button" className="report-text-action" disabled={!canReview} onClick={() => setEditingReport((current) => !current)}>{editingReport ? "Cancel" : "Edit report"}</button>}</div>
-    {editingReport && report ? <StructuredReportEditor report={report} reviewer={reviewer} busy={busy} onCancel={() => setEditingReport(false)} onReview={onReview} /> : <div className="vertical-report-sections">
-      <section><h3>Nhận định tổng quát</h3><p>{report?.video_observations?.narrative || "Backend chưa cung cấp nhận định từ video."}</p></section>
-      <section><h3>Kết luận báo cáo</h3><p>{report?.summary || "Báo cáo chưa sẵn sàng."}</p></section>
-      <section><h3>Nguyên nhân giả thuyết</h3><p>{report?.hypothesized_causes || "Chưa ghi nhận nguyên nhân giả thuyết."}</p></section>
+    {editingReport && report ? <StructuredReportEditor report={report} claims={snapshot.claims} reviewer={reviewer} busy={busy} onCancel={() => setEditingReport(false)} onReview={onReview} /> : <div className="vertical-report-sections">
+      <section><h3>Nhận định tổng quát</h3><p className="review-multiline">{normalizeReviewText(report?.video_observations?.narrative) || "Backend chưa cung cấp nhận định từ video."}</p></section>
+      <section><h3>Nguyên nhân giả thuyết</h3><p className="review-multiline">{normalizeReviewText(report?.hypothesized_causes) || "Chưa ghi nhận nguyên nhân giả thuyết."}</p></section>
     </div>}
 
     <section className="review-action-section focused-reanalysis-card" aria-labelledby="focused-reanalysis-title">
@@ -70,18 +70,18 @@ export function ReviewSidebar({ snapshot, selectedClaim, busy, error, onSelectCl
 
       <div className="focused-claim-picker" role="radiogroup" aria-label="Chọn claim cần phân tích lại">
         {snapshot.claims.map((claim, index) => <button type="button" role="radio" aria-checked={selectedClaim?.claim_id === claim.claim_id} className={selectedClaim?.claim_id === claim.claim_id ? "selected" : ""} key={claim.claim_id} onClick={() => onSelectClaim(claim)}>
-          <span>{index + 1}</span><div><strong>{claim.claim_id}</strong><small>{typeof claim.timestamp_s === "number" ? secondsToTimestamp(claim.timestamp_s) : "Không có timestamp"}</small></div><p>{claim.text}</p>
+          <span>{index + 1}</span><div><strong>{claim.claim_id}</strong><small>{typeof claim.timestamp_s === "number" ? secondsToTimestamp(claim.timestamp_s) : "Không có timestamp"}</small></div><p className="review-multiline">{normalizeReviewText(claim.text)}</p>
         </button>)}
       </div>
 
       {selectedClaim ? <div className="focused-selected-claim">
         <header><div><span>Claim đang chọn</span><strong>{selectedClaim.claim_id}</strong></div>{typeof selectedClaim.timestamp_s === "number" && <time>{secondsToTimestamp(selectedClaim.timestamp_s)}</time>}</header>
-        <p>{selectedClaim.text}</p>
+        <p className="review-multiline">{normalizeReviewText(selectedClaim.text)}</p>
         <ClaimEvidenceGallery snapshot={snapshot} claim={selectedClaim} />
       </div> : <p className="focused-claim-required">Chọn một claim để xem bằng chứng và yêu cầu agent xác minh lại.</p>}
 
       <label className="focused-feedback-field"><span>Nội dung cần xác minh lại</span><textarea aria-label="Phản hồi để phân tích lại" value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="Ví dụ: Kiểm tra lại thời điểm bắt đầu phanh và đối chiếu với tốc độ trong telemetry…" /></label>
-      <button type="button" className="report-secondary-action focused-reanalysis-submit" disabled={!canReview || !selectedClaim || !feedback.trim() || !reviewer.trim()} onClick={() => void onReview({ action: "reanalyze", reviewer: reviewer.trim(), feedback: feedback.trim(), target_claim_ids: selectedClaim ? [selectedClaim.claim_id] : [] }).then(() => setFeedback(""))}>{busy ? "Đang gửi yêu cầu…" : `Phân tích lại ${selectedClaim?.claim_id ?? "claim đã chọn"}`}</button>
+      <button type="button" className="report-secondary-action focused-reanalysis-submit" disabled={!canReview || !selectedClaim || !feedback.trim() || !reviewer.trim()} onClick={() => void onReview({ action: "reanalyze", reviewer: reviewer.trim(), feedback: feedback.trim(), target_claim_ids: selectedClaim ? [selectedClaim.claim_id] : [] }).then((saved) => { if (saved) setFeedback(""); })}>{busy ? "Đang gửi yêu cầu…" : `Phân tích lại ${selectedClaim?.claim_id ?? "claim đã chọn"}`}</button>
     </section>
 
     <section className="review-action-section">

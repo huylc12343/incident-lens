@@ -19,7 +19,7 @@ export function IncidentNavigationSidebar({ snapshot }: { snapshot: IncidentSnap
       <div className="incident-nav-main">
         <div className="unit-identity">
           <span className={`unit-status-dot ${running ? "running" : ""}`} aria-hidden="true" />
-          <div><strong>IncidentLens</strong><small>Autonomous Unit 04</small></div>
+          <div><strong>Vlens</strong><small>Autonomous Unit 04</small></div>
         </div>
         <Link className="new-analysis-link" href="/">
           <span aria-hidden="true">＋</span> New analysis

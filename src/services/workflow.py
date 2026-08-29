@@ -7,6 +7,7 @@ import logging
 import re
 import shutil
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol, cast
@@ -21,6 +22,7 @@ from src.models.api import (
 )
 from src.models.incidents import VerificationStatus
 from src.services.model_observability import ModelActivityRegistry
+from src.services.processing_progress import ProcessingProgressRegistry
 from src.services.report_repository import ReportRepository, ReportRepositoryError
 
 logger = logging.getLogger(__name__)
@@ -56,6 +58,7 @@ class WorkflowService:
         repository: ReportRepository,
         input_validator: IncidentInputValidator | None = None,
         observability: ModelActivityRegistry | None = None,
+        progress: ProcessingProgressRegistry | None = None,
         artifact_dir: str | None = None,
         upload_dir: str | None = None,
         remote_resource_releaser: Callable[[list], Awaitable[None]] | None = None,
@@ -64,6 +67,7 @@ class WorkflowService:
         self._repository = repository
         self._input_validator = input_validator
         self._observability = observability
+        self._progress = progress
         self._artifact_root = Path(artifact_dir).resolve() if artifact_dir else None
         self._upload_root = Path(upload_dir).resolve() if upload_dir else None
         self._remote_resource_releaser = remote_resource_releaser
@@ -112,7 +116,15 @@ class WorkflowService:
 
     async def create(self, request: IncidentCreateRequest) -> IncidentSnapshot:
         initial, _ = await self._register_incident(request, idempotent=False)
-        return await self._run_registered(initial)
+        incident_id = initial["incident_id"]
+        current_task = asyncio.current_task()
+        if current_task is not None:
+            self._active_create_tasks[incident_id] = current_task
+        try:
+            return await self._run_registered(initial)
+        finally:
+            if current_task is not None and self._active_create_tasks.get(incident_id) is current_task:
+                self._active_create_tasks.pop(incident_id, None)
 
     async def _register_incident(
         self,
@@ -156,6 +168,8 @@ class WorkflowService:
             self._states[incident_id] = initial
             self._review_locks[incident_id] = asyncio.Lock()
             self._audit[incident_id] = []
+            if self._progress is not None:
+                self._progress.update(incident_id, "validating", "Đang kiểm tra dữ liệu đầu vào")
             self._create_requests.setdefault(incident_id, request.model_copy(deep=True))
             logger.info("INCIDENT_CREATED incident_id=%s status=%s", incident_id, initial["status"])
         return initial, True
@@ -175,6 +189,11 @@ class WorkflowService:
                 raise
             raise WorkflowError("WORKFLOW_EXECUTION_FAILED", "incident workflow could not start") from exc
         state = _without_legacy_claim_projection({**running, **result})
+        if self._progress is not None:
+            if state.get("status") == "failed":
+                self._progress.update(incident_id, "failed", "Phân tích không hoàn tất")
+            else:
+                self._progress.update(incident_id, "completed", "Phân tích hoàn tất, sẵn sàng để rà soát")
         try:
             snapshot = self._snapshot(state)
         except Exception as exc:
@@ -213,6 +232,11 @@ class WorkflowService:
         await _repository_call(self._repository, "alist_reports", "list_reports")
 
     async def delete(self, incident_id: str) -> None:
+        active_task = self._active_create_tasks.get(incident_id)
+        if active_task is not None and active_task is not asyncio.current_task():
+            active_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await active_task
         async with self._registry_lock:
             lock = self._review_locks.setdefault(incident_id, asyncio.Lock())
         async with lock:
@@ -220,8 +244,6 @@ class WorkflowService:
             stored = await _repository_call(self._repository, "aget", "get", incident_id)
             if state is None and stored is None:
                 raise WorkflowError("INCIDENT_NOT_FOUND", "incident does not exist")
-            if state is not None and state.get("status") in {"queued", "running"}:
-                raise WorkflowError("INCIDENT_DELETE_ACTIVE", "running incident cannot be deleted")
             await self._cleanup_incident_resources(incident_id, state)
             await self._runner.delete(incident_id)
             await _repository_call(self._repository, "adelete", "delete", incident_id)
@@ -231,9 +253,12 @@ class WorkflowService:
                 self._audit.pop(incident_id, None)
                 self._stored_at.pop(incident_id, None)
                 self._pending_terminal.pop(incident_id, None)
+                self._active_create_tasks.pop(incident_id, None)
                 self._create_requests.pop(incident_id, None)
             if self._observability is not None:
                 self._observability.delete(incident_id)
+            if self._progress is not None:
+                self._progress.delete(incident_id)
 
     async def _cleanup_incident_resources(self, incident_id: str, state: IncidentState | None) -> None:
         if state is not None and self._remote_resource_releaser is not None:
@@ -421,6 +446,7 @@ class WorkflowService:
             final_report=report if status == "approved" else None,
             review_audit=state.get("review_audit") or self._audit.get(incident_id, []),
             model_activities=activities,
+            progress=self._progress.get(incident_id) if self._progress is not None else None,
             warnings=state.get("warnings", []),
             error_code=state.get("error_code"),
             error_message=_safe_processing_error(state.get("error_code")) if state.get("error_message") else None,
@@ -504,3 +530,10 @@ async def _repository_call(repository: ReportRepository, async_name: str, sync_n
     if async_method is not None:
         return await async_method(*args)
     return getattr(repository, sync_name)(*args)
+
+
+def _consume_background_task_result(task: asyncio.Task) -> None:
+    """Retrieve detached task failures so asyncio does not emit orphan warnings."""
+    if task.cancelled():
+        return
+    task.exception()

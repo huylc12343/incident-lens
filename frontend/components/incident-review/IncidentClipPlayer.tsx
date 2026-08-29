@@ -108,7 +108,7 @@ export function IncidentClipPlayer({ clipUrl, isOriginalVideo = false, noInciden
               playsInline
               preload="auto"
               src={clipUrl}
-              aria-label={isOriginalVideo ? text("Original video for engineer review", "Video gốc để kỹ sư rà soát") : text("Incident evidence clip", "Video bằng chứng sự cố")}
+              aria-label={isOriginalVideo ? text("Original video for engineer review", "Video gốc để kỹ sư rà soát") : text("Extracted data segment", "Đoạn dữ liệu đã được trích xuất")}
               onClick={togglePlayback}
               onLoadedMetadata={(event) => {
                 const video = event.currentTarget;

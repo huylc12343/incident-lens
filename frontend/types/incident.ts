@@ -107,6 +107,7 @@ export type IncidentSnapshot = {
   final_report: DraftReport | null;
   review_audit: ReviewAudit[];
   model_activities: ModelActivity[];
+  progress?: { stage: string; message: string; started_at: string } | null;
   warnings: string[];
   ground_truth?: GroundTruth | null;
   ai_evaluation?: AiGroundTruthEvaluation | null;

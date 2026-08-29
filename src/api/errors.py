@@ -22,7 +22,6 @@ def incident_http_error(exc: Exception) -> HTTPException:
         "INVALID_REVIEW_TRANSITION": 409,
         "REANALYSIS_TARGET_INVALID": 409,
         "REPORT_ALREADY_STORED": 409,
-        "INCIDENT_DELETE_ACTIVE": 409,
     }.get(code, 422 if code in input_errors else 500)
     safe_message = {
         "INCIDENT_NOT_FOUND": "incident does not exist",
@@ -34,6 +33,5 @@ def incident_http_error(exc: Exception) -> HTTPException:
         "INVALID_REVIEW_TRANSITION": "incident is not awaiting review",
         "REANALYSIS_TARGET_INVALID": "re-analysis target claim does not exist",
         "REPORT_ALREADY_STORED": "terminal outcome is already stored",
-        "INCIDENT_DELETE_ACTIVE": "running incident cannot be deleted",
     }.get(code, "incident input is invalid" if code in input_errors else "incident workflow failed")
     return HTTPException(status_code=status_code, detail={"code": code, "message": safe_message})

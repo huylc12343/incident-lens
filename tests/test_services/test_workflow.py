@@ -503,6 +503,92 @@ async def test_workflow_lists_and_deletes_one_incident_history() -> None:
 
 
 @pytest.mark.asyncio
+async def test_workflow_deletes_running_incident_history() -> None:
+    running_state = {**_review_state("INC-RUNNING"), "status": "running"}
+    runner = SimpleNamespace(
+        start=AsyncMock(return_value=running_state),
+        resume=AsyncMock(),
+        get=AsyncMock(return_value=None),
+        list_incident_ids=AsyncMock(return_value=["INC-RUNNING"]),
+        delete=AsyncMock(return_value=None),
+    )
+    service = WorkflowService(runner=runner, repository=InMemoryReportRepository())
+    await service.create(
+        IncidentCreateRequest(incident_id="INC-RUNNING", video_uri="video.mp4", analysis_prompt="Analyze")
+    )
+
+    await service.delete("INC-RUNNING")
+
+    runner.delete.assert_awaited_once_with("INC-RUNNING")
+    with pytest.raises(WorkflowError) as exc_info:
+        await service.get("INC-RUNNING")
+    assert exc_info.value.code == "INCIDENT_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_delete_cancels_active_incident_analysis() -> None:
+    started = asyncio.Event()
+
+    async def start(_state):
+        started.set()
+        await asyncio.Event().wait()
+
+    runner = SimpleNamespace(
+        start=AsyncMock(side_effect=start),
+        resume=AsyncMock(),
+        get=AsyncMock(return_value=None),
+        list_incident_ids=AsyncMock(return_value=["INC-ACTIVE"]),
+        delete=AsyncMock(return_value=None),
+    )
+    service = WorkflowService(runner=runner, repository=InMemoryReportRepository())
+    create_task = asyncio.create_task(
+        service.create(IncidentCreateRequest(incident_id="INC-ACTIVE", video_uri="video.mp4", analysis_prompt="A"))
+    )
+    await started.wait()
+
+    await service.delete("INC-ACTIVE")
+
+    assert create_task.cancelled()
+    runner.delete.assert_awaited_once_with("INC-ACTIVE")
+    with pytest.raises(WorkflowError) as exc_info:
+        await service.get("INC-ACTIVE")
+    assert exc_info.value.code == "INCIDENT_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_detached_create_returns_queued_and_survives_caller_completion() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    completed = asyncio.Event()
+
+    async def start(_state):
+        started.set()
+        await release.wait()
+        completed.set()
+        return _review_state("INC-DETACHED")
+
+    runner = SimpleNamespace(
+        start=AsyncMock(side_effect=start),
+        resume=AsyncMock(),
+        get=AsyncMock(return_value=None),
+        list_incident_ids=AsyncMock(return_value=["INC-DETACHED"]),
+        delete=AsyncMock(return_value=None),
+    )
+    service = WorkflowService(runner=runner, repository=InMemoryReportRepository())
+
+    initial = await service.create_detached(
+        IncidentCreateRequest(incident_id="INC-DETACHED", video_uri="video.mp4", analysis_prompt="Analyze")
+    )
+
+    assert initial.status == "queued"
+    await started.wait()
+    release.set()
+    await completed.wait()
+    await asyncio.sleep(0)
+    assert (await service.get("INC-DETACHED")).status == "awaiting_review"
+
+
+@pytest.mark.asyncio
 async def test_delete_removes_incident_artifacts_and_uploaded_inputs(tmp_path) -> None:
     artifact_dir = tmp_path / "artifacts"
     incident_dir = artifact_dir / "INC-CLEAN"

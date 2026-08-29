@@ -92,7 +92,7 @@ export default function LoginPage() {
         </div>
         <Image className={styles.vlensWordmark} src="/images/vlens.png" alt="VLENS" width={2172} height={724} priority />
       </div>
-      <section className={`${styles.shell} ${manrope.variable}`} aria-label="Đăng nhập Incident Lens">
+      <section className={`${styles.shell} ${manrope.variable}`} aria-label="Đăng nhập Vlens">
         <div className={styles.formSide}>
           <form className={styles.card} onSubmit={handleSubmit} noValidate>
             <div className={styles.loginPrimary}>
@@ -108,7 +108,7 @@ export default function LoginPage() {
               <button className={styles.demoButton} type="button" onClick={useDemoAccount}>Dùng tài khoản demo</button>
             </div>
             <div className={styles.loginSecondary}>
-              <p className={styles.demoHint}>Tài khoản thử nghiệm: user@incidentlens.demo</p>
+              <p className={styles.demoHint}>Tài khoản thử nghiệm: user@vlens.demo</p>
               <div className={styles.divider}><span>hoặc</span></div>
               <button className={styles.google} type="button"><GoogleIcon />Tiếp tục với Google</button>
               <p className={styles.footer}>Chưa có tài khoản? <a href="mailto:admin@example.com">Liên hệ quản trị viên</a></p>

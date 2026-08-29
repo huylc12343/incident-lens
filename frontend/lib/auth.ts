@@ -13,8 +13,8 @@ export const SESSION_STORAGE_KEY = "incident-lens-demo-session";
 export const demoAccount = {
   id: "demo-user-001",
   name: "Demo User",
-  email: "user@incidentlens.demo",
-  password: "incidentlens123",
+  email: "user@vlens.demo",
+  password: "Vlens123",
   role: "user" as const,
 };
 

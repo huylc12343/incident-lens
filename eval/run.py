@@ -11,23 +11,25 @@ import argparse
 import asyncio
 import json
 import tempfile
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from openai import AsyncOpenAI
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ValidationError
 
 from eval.metrics import (
-    aggregate_event_mae,
+    aggregate_resource_usage,
     aggregate_temporal_errors,
     binary_incident_metrics,
     evidence_id_validity,
     multiclass_metrics,
+    paired_temporal_comparison,
     report_decision_consistency,
+    sample_resource_usage,
     status_distribution,
     temporal_iou,
 )
@@ -35,7 +37,6 @@ from src.config import get_settings
 from src.models.api import IncidentCreateRequest
 from src.models.incidents import ReportModelOutput, VerificationResult, VideoMemory
 from src.services.incident_runtime import ProviderClients, incident_workflow_service
-from src.services.llm import get_llm
 
 
 @dataclass(frozen=True)
@@ -44,22 +45,6 @@ class GoldenSample:
     video_uri: Path
     log_uri: Path | None
     label: dict[str, Any]
-
-
-class EventMatch(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    gold_event_index: int = Field(ge=0)
-    pred_event_index: int = Field(ge=0)
-    gold_event_type: str = Field(min_length=1)
-    gold_timestamp: float = Field(ge=0)
-    pred_timestamp: float = Field(ge=0)
-
-
-class EventMatches(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    matches: list[EventMatch] = Field(default_factory=list)
 
 
 class CaptureResponses:
@@ -89,6 +74,10 @@ def discover_samples(golden_root: Path) -> list[GoldenSample]:
     for label_path in sorted(golden_root.glob("*/labels/*.json")):
         sample_root = label_path.parents[1]
         label = _read_json(label_path)
+        # A reviewer marks a sample unusable (bad annotation, unresolved
+        # inconsistency) with "eval_exclude": true; skip it before any validation.
+        if label.get("eval_exclude") is True:
+            continue
         sample_id = label.get("sample_id")
         if not isinstance(sample_id, str) or not sample_id:
             raise ValueError(f"{label_path} must contain a non-empty sample_id")
@@ -102,47 +91,6 @@ def discover_samples(golden_root: Path) -> list[GoldenSample]:
     if not samples:
         raise ValueError(f"no labels found below {golden_root}")
     return samples
-
-
-async def semantic_event_matches(label: dict[str, Any], memory: VideoMemory) -> list[dict[str, Any]]:
-    """Use the configured ``src.services.llm.get_llm`` semantic judge for event matching."""
-    candidates = [
-        {"pred_event_index": index, "timestamp": event.timestamp_s, "text": event.description}
-        for index, event in enumerate(memory.timeline)
-    ] + [
-        {
-            "pred_event_index": len(memory.timeline) + index,
-            "timestamp": claim.timestamp_s,
-            "text": claim.text,
-        }
-        for index, claim in enumerate(memory.claims)
-        if claim.timestamp_s is not None
-    ]
-    events = label.get("evaluation_events", [])
-    if not candidates or not isinstance(events, list):
-        return []
-    prompt = (
-        "Đối chiếu semantic các gold event với event dự đoán. Chỉ match khi cùng sự kiện/diễn biến; "
-        "mỗi gold_event_index và pred_event_index được dùng tối đa một lần. Không match chỉ vì timestamp gần nhau. "
-        "Trả matches với nguyên event type và timestamp đã cho, không tạo event mới."
-    )
-    judge = get_llm().with_structured_output(EventMatches)
-    result = await judge.ainvoke(
-        [
-            SystemMessage(content=prompt),
-            HumanMessage(
-                content=json.dumps(
-                    {"gold_events": events, "predicted_events": candidates},
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                )
-            ),
-        ]
-    )
-    if not isinstance(result, EventMatches):
-        result = EventMatches.model_validate(result)
-    _validate_event_matches(result.matches, events, candidates)
-    return [item.model_dump(mode="json") for item in result.matches]
 
 
 async def evaluate_sample(
@@ -180,9 +128,12 @@ async def evaluate_sample(
         metadata={"evaluation_sample_id": sample.sample_id},
     )
     async with incident_workflow_service(settings, clients=clients) as service:
+        started_at = time.perf_counter()
         snapshot = await service.create(request)
+        wall_time_s = time.perf_counter() - started_at
         states = await _state_history(service, sample.sample_id)
 
+    resource = sample_resource_usage(snapshot.model_activities, wall_time_s=wall_time_s)
     stage_states = _select_stage_states(states)
     final_state = stage_states["final"]
     auto_reanalysis_attempted = _node_was_scheduled(states, "auto_reanalyze")
@@ -198,11 +149,11 @@ async def evaluate_sample(
             auto_reanalysis_attempted=auto_reanalysis_attempted,
             manual_reanalysis_attempted=manual_reanalysis_attempted,
             workflow_error=workflow_error,
+            resource=resource,
         )
     final_verification = _optional_model(final_state.get("verification"), VerificationResult)
     raw_verification = _last_raw_output(verification_client.parsed_outputs)
     raw_report = _last_model_output(report_client.parsed_outputs)
-    matches = await semantic_event_matches(sample.label, initial_memory)
     return _evaluate_snapshot(
         sample=sample,
         public_status=snapshot.status,
@@ -210,7 +161,7 @@ async def evaluate_sample(
         final_verification=final_verification,
         raw_verification=raw_verification,
         raw_report=raw_report,
-        matches=matches,
+        resource=resource,
         allowed_ids_by_claim=_allowed_evidence_ids(final_state),
         auto_reanalysis_count=final_state.get("auto_reanalysis_count", 0),
         manual_reanalysis_count=final_state.get("manual_reanalysis_count", 0),
@@ -286,7 +237,7 @@ def _evaluate_snapshot(
     final_verification: VerificationResult | None,
     raw_verification: dict[str, Any] | None,
     raw_report: ReportModelOutput | None,
-    matches: list[dict[str, Any]],
+    resource: dict[str, Any],
     allowed_ids_by_claim: dict[str, list[str]],
     auto_reanalysis_count: Any,
     manual_reanalysis_count: Any,
@@ -297,7 +248,7 @@ def _evaluate_snapshot(
     analysis_prompt: str,
 ) -> dict[str, Any]:
     gold_incident = _required_bool(sample.label, "is_incident")
-    gold_window = _required_window(sample.label["timeline"], "label.timeline")
+    gold_window = _gold_window(sample.label, gold_incident)
     vlm_pred = initial_memory.vlm_has_accident
     vlm_timing = _timing_row(initial_memory.incident_window.model_dump(), gold_window, gold_incident, vlm_pred)
     report_payload = raw_report.model_dump(mode="json") if raw_report is not None else None
@@ -326,7 +277,7 @@ def _evaluate_snapshot(
             "report_final": report_payload,
         },
         "metrics": {
-            "vlm": {"has_accident": vlm_pred, **vlm_timing, "event_matches": matches},
+            "vlm": {"has_accident": vlm_pred, **vlm_timing},
             "verifier": {
                 "has_accident": final_verification.has_accident if final_verification else None,
                 "evidence_id_validity": evidence_id_validity(raw_results, allowed_ids_by_claim),
@@ -337,6 +288,7 @@ def _evaluate_snapshot(
                 "has_accident": final_verification.has_accident if final_verification else None,
                 **report_timing,
             },
+            "resource": resource,
         },
     }
 
@@ -350,6 +302,7 @@ def _failed_sample(
     auto_reanalysis_attempted: bool,
     manual_reanalysis_attempted: bool,
     workflow_error: str | None,
+    resource: dict[str, Any],
 ) -> dict[str, Any]:
     """Preserve a production workflow failure without inventing a score."""
     error_code = state.get("error_code")
@@ -377,7 +330,7 @@ def _failed_sample(
             "report_final": None,
         },
         "metrics": {
-            "vlm": {"has_accident": None, "t0_error_s": None, "temporal_iou": None, "event_matches": []},
+            "vlm": {"has_accident": None, "t0_error_s": None, "temporal_iou": None},
             "verifier": {
                 "has_accident": None,
                 "evidence_id_validity": evidence_id_validity([], {}),
@@ -389,6 +342,7 @@ def _failed_sample(
                 "t0_error_s": None,
                 "temporal_iou": None,
             },
+            "resource": resource,
         },
     }
 
@@ -415,7 +369,7 @@ def _evaluation_exception_sample(sample: GoldenSample, analysis_prompt: str, exc
             "report_final": None,
         },
         "metrics": {
-            "vlm": {"has_accident": None, "t0_error_s": None, "temporal_iou": None, "event_matches": []},
+            "vlm": {"has_accident": None, "t0_error_s": None, "temporal_iou": None},
             "verifier": {
                 "has_accident": None,
                 "evidence_id_validity": evidence_id_validity([], {}),
@@ -427,6 +381,7 @@ def _evaluation_exception_sample(sample: GoldenSample, analysis_prompt: str, exc
                 "t0_error_s": None,
                 "temporal_iou": None,
             },
+            "resource": sample_resource_usage([], wall_time_s=None),
         },
     }
 
@@ -460,6 +415,7 @@ def _aggregate_without_labels(
     ]
     vlm_rows = [row["metrics"]["vlm"] for row in rows]
     report_rows = [row["metrics"]["report"] for row in rows]
+    resource_rows = [row["metrics"].get("resource", {}) for row in rows]
     raw_verifier_rows = [row["model_outputs"]["verification_raw_final"] for row in rows]
     all_raw_results = [
         result
@@ -479,7 +435,6 @@ def _aggregate_without_labels(
                 prefix="vlm_incident",
             ),
             **aggregate_temporal_errors(vlm_rows, prefix="vlm"),
-            **aggregate_event_mae(vlm_rows),
             "num_incident_samples_used": len(valid_vlm),
         },
         "verifier": {
@@ -504,6 +459,10 @@ def _aggregate_without_labels(
                 prefix="type_of_accident",
             ),
         },
+        "temporal_comparison": paired_temporal_comparison(
+            vlm_rows, report_rows, num_gold_incidents=sum(labels)
+        ),
+        "resource": aggregate_resource_usage(resource_rows),
     }
 
 
@@ -630,30 +589,30 @@ def _allowed_evidence_ids(state: dict[str, Any]) -> dict[str, list[str]]:
     }
 
 
-def _validate_event_matches(
-    matches: list[EventMatch], gold_events: list[Any], candidates: list[dict[str, Any]]
-) -> None:
-    used_gold: set[int] = set()
-    used_predictions: set[int] = set()
-    for match in matches:
-        if match.gold_event_index >= len(gold_events) or match.pred_event_index >= len(candidates):
-            raise ValueError("semantic judge returned an event index outside the input")
-        if match.gold_event_index in used_gold or match.pred_event_index in used_predictions:
-            raise ValueError("semantic judge must return one-to-one event matches")
-        gold = gold_events[match.gold_event_index]
-        predicted = candidates[match.pred_event_index]
-        if match.gold_event_type != gold.get("event_type") or match.gold_timestamp != gold.get("timestamp"):
-            raise ValueError("semantic judge must copy the gold event type and timestamp")
-        if match.pred_timestamp != predicted["timestamp"]:
-            raise ValueError("semantic judge must copy the predicted timestamp")
-        used_gold.add(match.gold_event_index)
-        used_predictions.add(match.pred_event_index)
+_WINDOW_FIELDS = ("t_start", "t0", "t_end")
 
 
 def _required_window(value: Any, name: str) -> dict[str, float]:
     if not isinstance(value, dict):
         raise ValueError(f"{name} must be an object")
-    return {field: float(value[field]) for field in ("t_start", "t0", "t_end")}
+    return {field: float(value[field]) for field in _WINDOW_FIELDS}
+
+
+def _gold_window(label: dict[str, Any], gold_incident: bool) -> dict[str, float]:
+    """Numeric incident window for scoring.
+
+    An incident sample must carry a numeric ``t_start/t0/t_end``. A non-incident
+    sample may legitimately have a null (or absent) timeline; timing metrics gate
+    on ``gold_incident`` and never read the window in that case, so return zeros.
+    """
+    timeline = label.get("timeline")
+    if gold_incident:
+        return _required_window(timeline, "label.timeline")
+    if isinstance(timeline, dict) and all(
+        isinstance(timeline.get(field), (int, float)) for field in _WINDOW_FIELDS
+    ):
+        return {field: float(timeline[field]) for field in _WINDOW_FIELDS}
+    return dict.fromkeys(_WINDOW_FIELDS, 0.0)
 
 
 def _required_bool(value: dict[str, Any], name: str) -> bool:

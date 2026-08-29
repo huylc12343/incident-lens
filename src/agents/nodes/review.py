@@ -107,9 +107,12 @@ def apply_report_edits(
         updates["hypothesized_causes"] = edits.hypothesized_causes
     if edits.timeline is not None:
         updates["timeline"] = report.timeline.model_copy(update={"narrative": edits.timeline})
+<<<<<<< HEAD
     if edits.timeline_events is not None:
         timeline = updates.get("timeline", report.timeline)
         updates["timeline"] = timeline.model_copy(update={"events": edits.timeline_events})
+=======
+>>>>>>> 1ac5567 (chore: overwrite src, tests, eval and .env.example from feature/ai-brain_v1)
     if edits.video_observations is not None:
         updates["video_observations"] = report.video_observations.model_copy(
             update={"narrative": edits.video_observations}
@@ -120,6 +123,7 @@ def apply_report_edits(
         )
     if edits.alignment is not None:
         updates["alignment"] = report.alignment.model_copy(update={"narrative": edits.alignment})
+<<<<<<< HEAD
     if edits.claims is not None and report.alignment.verification is not None:
         alignment = updates.get("alignment", report.alignment)
         status_by_claim_id = {
@@ -135,6 +139,8 @@ def apply_report_edits(
             ]
         })
         updates["alignment"] = alignment.model_copy(update={"verification": verification})
+=======
+>>>>>>> 1ac5567 (chore: overwrite src, tests, eval and .env.example from feature/ai-brain_v1)
     if edits.warnings is not None:
         updates["evidence_and_warnings"] = report.evidence_and_warnings.model_copy(
             update={"warnings": edits.warnings}
@@ -155,8 +161,11 @@ def _apply_memory_edits(
     if memory is None:
         return None
     memory_updates: dict[str, object] = {"incident_window": report.incident_window}
+<<<<<<< HEAD
     if edits.timeline_events is not None:
         memory_updates["timeline"] = edits.timeline_events
+=======
+>>>>>>> 1ac5567 (chore: overwrite src, tests, eval and .env.example from feature/ai-brain_v1)
     if edits.summary is not None:
         memory_updates["video_summary"] = edits.summary
     if edits.claims is not None:

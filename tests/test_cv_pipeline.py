@@ -15,6 +15,53 @@ def test_redaction_detection_interval_caps_expensive_inference_without_changing_
     assert redaction_detection_interval(1, 5) == 1
 
 
+def test_tracks_survive_the_gap_between_strided_detections():
+    """A stride wider than the persistence window must not expire live tracks.
+
+    ``redact_video`` widens ``max_missed`` to the detection stride for exactly
+    this reason: with the bare 0.15s persistence window a 20fps source at 5
+    detections/s would drop every box between inferences and flicker the blur.
+    """
+    stride = redaction_detection_interval(20, 5)
+    persist_frames = max(1, round(0.15 * 20))
+    max_missed = max(persist_frames, stride)
+    assert stride == 4 and persist_frames == 3
+
+    tracks = advance_tracks(
+        [],
+        [np.array([10, 10, 20, 20])],
+        1,
+        max_missed=max_missed,
+        match_distance=50,
+        width=100,
+        height=100,
+    )
+    # Frames 2..4 run no detector; the track has to coast, not expire.
+    for frame_idx in range(2, 1 + stride):
+        tracks = advance_tracks(
+            tracks,
+            [],
+            frame_idx,
+            max_missed=max_missed,
+            match_distance=50,
+            width=100,
+            height=100,
+        )
+        assert tracks, f"track expired at frame {frame_idx}, before the next detection"
+
+    # The next detection lands and re-anchors the track.
+    tracks = advance_tracks(
+        tracks,
+        [np.array([12, 10, 22, 20])],
+        1 + stride,
+        max_missed=max_missed,
+        match_distance=50,
+        width=100,
+        height=100,
+    )
+    assert tracks[0]["box"].tolist() == [12.0, 10.0, 22.0, 20.0]
+
+
 #
 
 

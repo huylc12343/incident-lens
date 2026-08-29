@@ -113,7 +113,10 @@ async def incident_workflow_service(
     clients: ProviderClients | None = None,
 ) -> AsyncIterator[WorkflowService]:
     clients = clients or ProviderClients()
-    media = MediaService(redaction_image_size=settings.redaction_image_size)
+    media = MediaService(
+        redaction_image_size=settings.redaction_image_size,
+        redaction_detection_fps=settings.redaction_detection_fps,
+    )
     tracing = build_langsmith_tracing(settings)
     observability = ModelActivityRegistry(
         max_provider_requests_per_incident=settings.provider_request_limit_per_incident,

@@ -4,7 +4,10 @@
   "workflow_status": "awaiting_review",
   "auto_reanalysis_count": 0,
   "manual_reanalysis_count": 0,
+  "auto_reanalysis_attempted": false,
+  "manual_reanalysis_attempted": false,
   "has_reanalyze": false,
+  "workflow_error": null,
   "warnings": [
     "LOG_ADAPTIVE_STEERING_CHANGE at 14.05s: adaptive change (peak z-score 4.94) merged from 14.050s to 14.050s",
     "LOG_ADAPTIVE_STEERING_CHANGE at 14.35s: adaptive change (peak z-score 6.44) merged from 14.350s to 14.350s",
@@ -19,68 +22,68 @@
   ],
   "model_outputs": {
     "vlm_initial": {
-      "global_scene": "Xe ego đang di chuyển trên đường phố thành phố vào ban ngày, đi qua một giao lộ và vào một vòng xoay hoặc đoạn đường cong. Có một chiếc xe buýt và một xe cảnh sát xuất hiện sau đó.",
+      "global_scene": "Xe ego di chuyển trên đường phố đô thị trong môi trường mô phỏng, đi qua ngã tư và tiến vào một bùng binh có tượng điêu khắc hình khối ở giữa. Một xe buýt và một xe cảnh sát cũng xuất hiện trong khu vực bùng binh.",
       "vlm_has_accident": true,
-      "video_summary": "Xe ego di chuyển thẳng trên đường phố, sau đó rẽ phải vào một đoạn đường cong. Khi đang đi qua đoạn đường cong, một chiếc xe buýt (CARLA) xuất hiện từ phía bên trái và cắt ngang đường đi về phía trước. Xe ego va chạm với bên hông phải của chiếc xe buýt. Sau khi va chạm, xe buýt tiếp tục di chuyển và rời khỏi khung hình, theo sau là một chiếc xe cảnh sát cũng đi qua. Xe ego dừng lại hoặc di chuyển rất chậm sau vụ va chạm.",
+      "video_summary": "Xe ego di chuyển thẳng trên đường phố đô thị vắng vẻ, đi qua ngã tư có đèn giao thông và tiến vào một bùng binh. Khi xe ego đang lưu thông trong bùng binh, một xe buýt màu trắng xanh đi từ hướng ngược lại cắt ngang quỹ đạo của xe ego. Xe ego không kịp tránh và va chạm trực diện với hông xe buýt, khiến xe dừng hẳn. Sau va chạm, xe buýt tiếp tục di chuyển và rời khỏi khung hình, để lại xe ego đứng yên tại vị trí va chạm.",
       "incident_window": {
-        "t_start": 17.0,
-        "t0": 18.5,
-        "t_end": 20.0
+        "t_start": 14.0,
+        "t0": 19.0,
+        "t_end": 28.0
       },
-      "representative_timestamp_s": 18.5,
+      "representative_timestamp_s": 19.0,
       "timeline": [
         {
           "timestamp_s": 0.0,
-          "description": "Xe ego di chuyển thẳng trên đường phố rộng, không có phương tiện khác gần đó.",
+          "description": "Xe ego bắt đầu di chuyển trên đường phố đô thị vắng vẻ, hướng về phía ngã tư.",
           "evidence_ids": []
         },
         {
-          "timestamp_s": 8.0,
-          "description": "Xe ego tiến vào một khu vực có tượng đài và đường cong, chuẩn bị rẽ phải.",
+          "timestamp_s": 7.0,
+          "description": "Xe ego đi qua ngã tư và rẽ phải, tiến vào khu vực có bùng binh với tượng điêu khắc hình khối.",
           "evidence_ids": []
         },
         {
-          "timestamp_s": 15.0,
-          "description": "Xe ego đang đi qua đoạn đường cong, một chiếc xe buýt xuất hiện từ phía bên trái.",
+          "timestamp_s": 14.0,
+          "description": "Xe ego đi vào bùng binh, một xe buýt và xe cảnh sát xuất hiện ở phía xa bên trái.",
           "evidence_ids": []
         },
         {
-          "timestamp_s": 18.5,
-          "description": "Xe buýt cắt ngang đường và va chạm với bên hông phải của xe ego.",
+          "timestamp_s": 19.0,
+          "description": "Xe buýt cắt ngang đường đi của xe ego, xảy ra va chạm trực tiếp giữa xe ego và hông xe buýt.",
           "evidence_ids": []
         },
         {
-          "timestamp_s": 32.0,
-          "description": "Sau khi xe buýt đi qua, một chiếc xe cảnh sát xuất hiện và đi theo cùng hướng.",
+          "timestamp_s": 28.0,
+          "description": "Xe buýt rời khỏi hiện trường, xe ego đứng yên tại vị trí va chạm.",
           "evidence_ids": []
         }
       ],
       "claims": [
         {
-          "claim_id": "1",
-          "text": "Xe ego di chuyển trên đường phố và tiến vào một đoạn đường cong.",
-          "timestamp_s": 8.0,
+          "claim_id": "claim_1",
+          "text": "Xe ego di chuyển thẳng và rẽ phải vào bùng binh có tượng điêu khắc hình khối ở giữa.",
+          "timestamp_s": 7.0,
           "evidence": [],
           "verification_status": "unverified"
         },
         {
-          "claim_id": "2",
-          "text": "Một chiếc xe buýt màu trắng xanh dương (CARLA) xuất hiện từ phía bên trái và cắt ngang đường.",
-          "timestamp_s": 17.5,
+          "claim_id": "claim_2",
+          "text": "Khi xe ego đang lưu thông trong bùng binh, một xe buýt màu trắng xanh đi từ hướng ngược lại và cắt ngang quỹ đạo của xe ego.",
+          "timestamp_s": 17.0,
           "evidence": [],
           "verification_status": "unverified"
         },
         {
-          "claim_id": "3",
-          "text": "Xe ego va chạm với bên hông phải của chiếc xe buýt khi xe buýt cắt ngang đường.",
-          "timestamp_s": 18.5,
+          "claim_id": "claim_3",
+          "text": "Xe ego va chạm trực tiếp với hông của xe buýt, khiến xe dừng hẳn lại.",
+          "timestamp_s": 19.0,
           "evidence": [],
           "verification_status": "unverified"
         },
         {
-          "claim_id": "4",
-          "text": "Sau vụ va chạm, xe buýt tiếp tục di chuyển và một chiếc xe cảnh sát xuất hiện sau đó.",
-          "timestamp_s": 32.0,
+          "claim_id": "claim_4",
+          "text": "Sau va chạm, xe buýt tiếp tục di chuyển và rời khỏi khung hình, trong khi xe ego vẫn đứng yên tại chỗ.",
+          "timestamp_s": 28.0,
           "evidence": [],
           "verification_status": "unverified"
         }
@@ -99,39 +102,43 @@
       "has_accident": true,
       "results": [
         {
-          "claim_id": "1",
+          "claim_id": "claim_1",
           "status": "supported",
-          "reason": "Xe ego đang di chuyển trong toàn bộ cửa sổ, tốc độ gần như ổn định và steering chuyển từ gần thẳng sang phải rồi giảm dần, phù hợp với diễn biến tiến vào đoạn cong.",
+          "reason": "Trong cửa sổ, xe ego đang di chuyển; steering gần như thẳng lúc bắt đầu, chuyển sang phải tại thời điểm claim rồi trở lại gần thẳng ở cuối cửa sổ.",
           "evidence_ids": [
-            "log-row:4.8",
-            "log-row:8",
-            "log-row:11.2"
+            "log-row:4.6",
+            "log-row:7",
+            "log-row:9.4"
           ]
         },
         {
-          "claim_id": "2",
-          "status": "unverified",
-          "reason": "Log không có signal trực tiếp liên quan đến chuyển động của xe ego cho phần claim này.",
-          "evidence_ids": []
-        },
-        {
-          "claim_id": "3",
+          "claim_id": "claim_2",
           "status": "supported",
-          "reason": "Trong cửa sổ, xe ego đang di chuyển ở khoảng 37 km/h, steering hướng trái, sau đó tốc độ giảm mạnh xuống gần 0 trong khi brake bằng 0; telemetry hỗ trợ diễn biến chuyển động bất thường nhưng không tự xác nhận nguyên nhân va chạm.",
+          "reason": "Xe ego vẫn đang di chuyển tại thời điểm claim với tốc độ 37.228 km/h; trong cửa sổ, tốc độ giảm mạnh xuống 11.302 km/h và steering có biến động.",
           "evidence_ids": [
-            "log-row:15.3",
-            "log-row:18.5",
-            "log-row:21.7"
+            "log-row:14.6",
+            "log-row:17",
+            "log-row:19.4"
           ]
         },
         {
-          "claim_id": "4",
+          "claim_id": "claim_3",
           "status": "supported",
-          "reason": "Xe ego đã dừng tại đầu cửa sổ và tiếp tục đứng yên đến cuối cửa sổ; không có diễn biến chuyển động khác được ghi nhận.",
+          "reason": "Trong cửa sổ, xe ego giảm tốc rất mạnh từ 36.879 km/h xuống 0.411 km/h và gần như dừng hẳn ở cuối cửa sổ; brake ghi nhận bằng 0.",
           "evidence_ids": [
-            "log-row:28.8",
-            "log-row:32",
-            "log-row:35.2"
+            "log-row:16.6",
+            "log-row:19",
+            "log-row:21.4"
+          ]
+        },
+        {
+          "claim_id": "claim_4",
+          "status": "supported",
+          "reason": "Xe ego ở trạng thái gần dừng tại thời điểm claim, với tốc độ 0.068 km/h; tốc độ là 0.009 km/h lúc bắt đầu và 0 km/h ở cuối cửa sổ, steering giữ thẳng.",
+          "evidence_ids": [
+            "log-row:25.6",
+            "log-row:28",
+            "log-row:30.4"
           ]
         }
       ]
@@ -140,45 +147,53 @@
       "has_accident": true,
       "results": [
         {
-          "claim_id": "1",
+          "claim_id": "claim_1",
           "status": "supported",
-          "reason": "Xe ego đang di chuyển trong toàn bộ cửa sổ, tốc độ gần như ổn định và steering chuyển từ gần thẳng sang phải rồi giảm dần, phù hợp với diễn biến tiến vào đoạn cong.",
+          "reason": "Trong cửa sổ, xe ego đang di chuyển; steering gần như thẳng lúc bắt đầu, chuyển sang phải tại thời điểm claim rồi trở lại gần thẳng ở cuối cửa sổ.",
           "evidence_ids": [
-            "log-row:4.8",
-            "log-row:8",
-            "log-row:11.2"
+            "log-row:4.6",
+            "log-row:7",
+            "log-row:9.4"
           ]
         },
         {
-          "claim_id": "2",
-          "status": "unverified",
-          "reason": "Log không có signal trực tiếp liên quan đến chuyển động của xe ego cho phần claim này.",
-          "evidence_ids": []
-        },
-        {
-          "claim_id": "3",
+          "claim_id": "claim_2",
           "status": "supported",
-          "reason": "Trong cửa sổ, xe ego đang di chuyển ở khoảng 37 km/h, steering hướng trái, sau đó tốc độ giảm mạnh xuống gần 0 trong khi brake bằng 0; telemetry hỗ trợ diễn biến chuyển động bất thường nhưng không tự xác nhận nguyên nhân va chạm.",
+          "reason": "Xe ego vẫn đang di chuyển tại thời điểm claim với tốc độ 37.228 km/h; trong cửa sổ, tốc độ giảm mạnh xuống 11.302 km/h và steering có biến động.",
           "evidence_ids": [
-            "log-row:15.3",
-            "log-row:18.5",
-            "log-row:21.7"
+            "log-row:14.6",
+            "log-row:17",
+            "log-row:19.4"
           ]
         },
         {
-          "claim_id": "4",
+          "claim_id": "claim_3",
           "status": "supported",
-          "reason": "Xe ego đã dừng tại đầu cửa sổ và tiếp tục đứng yên đến cuối cửa sổ; không có diễn biến chuyển động khác được ghi nhận.",
+          "reason": "Trong cửa sổ, xe ego giảm tốc rất mạnh từ 36.879 km/h xuống 0.411 km/h và gần như dừng hẳn ở cuối cửa sổ; brake ghi nhận bằng 0.",
           "evidence_ids": [
-            "log-row:28.8",
-            "log-row:32",
-            "log-row:35.2"
+            "log-row:16.6",
+            "log-row:19",
+            "log-row:21.4"
+          ]
+        },
+        {
+          "claim_id": "claim_4",
+          "status": "supported",
+          "reason": "Xe ego ở trạng thái gần dừng tại thời điểm claim, với tốc độ 0.068 km/h; tốc độ là 0.009 km/h lúc bắt đầu và 0 km/h ở cuối cửa sổ, steering giữ thẳng.",
+          "evidence_ids": [
+            "log-row:25.6",
+            "log-row:28",
+            "log-row:30.4"
           ]
         }
       ]
     },
     "verification_allowed_evidence_ids": {
-      "1": [
+      "claim_1": [
+        "log-row:4.6",
+        "log-row:4.65",
+        "log-row:4.7",
+        "log-row:4.75",
         "log-row:4.8",
         "log-row:4.85",
         "log-row:4.9",
@@ -271,51 +286,9 @@
         "log-row:9.25",
         "log-row:9.3",
         "log-row:9.35",
-        "log-row:9.4",
-        "log-row:9.45",
-        "log-row:9.5",
-        "log-row:9.55",
-        "log-row:9.6",
-        "log-row:9.65",
-        "log-row:9.7",
-        "log-row:9.75",
-        "log-row:9.8",
-        "log-row:9.85",
-        "log-row:9.9",
-        "log-row:9.95",
-        "log-row:10",
-        "log-row:10.05",
-        "log-row:10.1",
-        "log-row:10.15",
-        "log-row:10.2",
-        "log-row:10.25",
-        "log-row:10.3",
-        "log-row:10.35",
-        "log-row:10.4",
-        "log-row:10.45",
-        "log-row:10.5",
-        "log-row:10.55",
-        "log-row:10.6",
-        "log-row:10.65",
-        "log-row:10.7",
-        "log-row:10.75",
-        "log-row:10.8",
-        "log-row:10.85",
-        "log-row:10.9",
-        "log-row:10.95",
-        "log-row:11",
-        "log-row:11.05",
-        "log-row:11.1",
-        "log-row:11.15",
-        "log-row:11.2"
+        "log-row:9.4"
       ],
-      "2": [
-        "log-row:14.3",
-        "log-row:14.35",
-        "log-row:14.4",
-        "log-row:14.45",
-        "log-row:14.5",
-        "log-row:14.55",
+      "claim_2": [
         "log-row:14.6",
         "log-row:14.65",
         "log-row:14.7",
@@ -412,61 +385,9 @@
         "log-row:19.25",
         "log-row:19.3",
         "log-row:19.35",
-        "log-row:19.4",
-        "log-row:19.45",
-        "log-row:19.5",
-        "log-row:19.55",
-        "log-row:19.6",
-        "log-row:19.65",
-        "log-row:19.7",
-        "log-row:19.75",
-        "log-row:19.8",
-        "log-row:19.85",
-        "log-row:19.9",
-        "log-row:19.95",
-        "log-row:20",
-        "log-row:20.05",
-        "log-row:20.1",
-        "log-row:20.15",
-        "log-row:20.2",
-        "log-row:20.25",
-        "log-row:20.3",
-        "log-row:20.35",
-        "log-row:20.4",
-        "log-row:20.45",
-        "log-row:20.5",
-        "log-row:20.55",
-        "log-row:20.6",
-        "log-row:20.65",
-        "log-row:20.7"
+        "log-row:19.4"
       ],
-      "3": [
-        "log-row:15.3",
-        "log-row:15.35",
-        "log-row:15.4",
-        "log-row:15.45",
-        "log-row:15.5",
-        "log-row:15.55",
-        "log-row:15.6",
-        "log-row:15.65",
-        "log-row:15.7",
-        "log-row:15.75",
-        "log-row:15.8",
-        "log-row:15.85",
-        "log-row:15.9",
-        "log-row:15.95",
-        "log-row:16",
-        "log-row:16.05",
-        "log-row:16.1",
-        "log-row:16.15",
-        "log-row:16.2",
-        "log-row:16.25",
-        "log-row:16.3",
-        "log-row:16.35",
-        "log-row:16.4",
-        "log-row:16.45",
-        "log-row:16.5",
-        "log-row:16.55",
+      "claim_3": [
         "log-row:16.6",
         "log-row:16.65",
         "log-row:16.7",
@@ -563,15 +484,73 @@
         "log-row:21.25",
         "log-row:21.3",
         "log-row:21.35",
-        "log-row:21.4",
-        "log-row:21.45",
-        "log-row:21.5",
-        "log-row:21.55",
-        "log-row:21.6",
-        "log-row:21.65",
-        "log-row:21.7"
+        "log-row:21.4"
       ],
-      "4": [
+      "claim_4": [
+        "log-row:25.6",
+        "log-row:25.65",
+        "log-row:25.7",
+        "log-row:25.75",
+        "log-row:25.8",
+        "log-row:25.85",
+        "log-row:25.9",
+        "log-row:25.95",
+        "log-row:26",
+        "log-row:26.05",
+        "log-row:26.1",
+        "log-row:26.15",
+        "log-row:26.2",
+        "log-row:26.25",
+        "log-row:26.3",
+        "log-row:26.35",
+        "log-row:26.4",
+        "log-row:26.45",
+        "log-row:26.5",
+        "log-row:26.55",
+        "log-row:26.6",
+        "log-row:26.65",
+        "log-row:26.7",
+        "log-row:26.75",
+        "log-row:26.8",
+        "log-row:26.85",
+        "log-row:26.9",
+        "log-row:26.95",
+        "log-row:27",
+        "log-row:27.05",
+        "log-row:27.1",
+        "log-row:27.15",
+        "log-row:27.2",
+        "log-row:27.25",
+        "log-row:27.3",
+        "log-row:27.35",
+        "log-row:27.4",
+        "log-row:27.45",
+        "log-row:27.5",
+        "log-row:27.55",
+        "log-row:27.6",
+        "log-row:27.65",
+        "log-row:27.7",
+        "log-row:27.75",
+        "log-row:27.8",
+        "log-row:27.85",
+        "log-row:27.9",
+        "log-row:27.95",
+        "log-row:28",
+        "log-row:28.05",
+        "log-row:28.1",
+        "log-row:28.15",
+        "log-row:28.2",
+        "log-row:28.25",
+        "log-row:28.3",
+        "log-row:28.35",
+        "log-row:28.4",
+        "log-row:28.45",
+        "log-row:28.5",
+        "log-row:28.55",
+        "log-row:28.6",
+        "log-row:28.65",
+        "log-row:28.7",
+        "log-row:28.75",
         "log-row:28.8",
         "log-row:28.85",
         "log-row:28.9",
@@ -604,139 +583,27 @@
         "log-row:30.25",
         "log-row:30.3",
         "log-row:30.35",
-        "log-row:30.4",
-        "log-row:30.45",
-        "log-row:30.5",
-        "log-row:30.55",
-        "log-row:30.6",
-        "log-row:30.65",
-        "log-row:30.7",
-        "log-row:30.75",
-        "log-row:30.8",
-        "log-row:30.85",
-        "log-row:30.9",
-        "log-row:30.95",
-        "log-row:31",
-        "log-row:31.05",
-        "log-row:31.1",
-        "log-row:31.15",
-        "log-row:31.2",
-        "log-row:31.25",
-        "log-row:31.3",
-        "log-row:31.35",
-        "log-row:31.4",
-        "log-row:31.45",
-        "log-row:31.5",
-        "log-row:31.55",
-        "log-row:31.6",
-        "log-row:31.65",
-        "log-row:31.7",
-        "log-row:31.75",
-        "log-row:31.8",
-        "log-row:31.85",
-        "log-row:31.9",
-        "log-row:31.95",
-        "log-row:32",
-        "log-row:32.05",
-        "log-row:32.1",
-        "log-row:32.15",
-        "log-row:32.2",
-        "log-row:32.25",
-        "log-row:32.3",
-        "log-row:32.35",
-        "log-row:32.4",
-        "log-row:32.45",
-        "log-row:32.5",
-        "log-row:32.55",
-        "log-row:32.6",
-        "log-row:32.65",
-        "log-row:32.7",
-        "log-row:32.75",
-        "log-row:32.8",
-        "log-row:32.85",
-        "log-row:32.9",
-        "log-row:32.95",
-        "log-row:33",
-        "log-row:33.05",
-        "log-row:33.1",
-        "log-row:33.15",
-        "log-row:33.2",
-        "log-row:33.25",
-        "log-row:33.3",
-        "log-row:33.35",
-        "log-row:33.4",
-        "log-row:33.45",
-        "log-row:33.5",
-        "log-row:33.55",
-        "log-row:33.6",
-        "log-row:33.65",
-        "log-row:33.7",
-        "log-row:33.75",
-        "log-row:33.8",
-        "log-row:33.85",
-        "log-row:33.9",
-        "log-row:33.95",
-        "log-row:34",
-        "log-row:34.05",
-        "log-row:34.1",
-        "log-row:34.15",
-        "log-row:34.2",
-        "log-row:34.25",
-        "log-row:34.3",
-        "log-row:34.35",
-        "log-row:34.4",
-        "log-row:34.45",
-        "log-row:34.5",
-        "log-row:34.55",
-        "log-row:34.6",
-        "log-row:34.65",
-        "log-row:34.7",
-        "log-row:34.75",
-        "log-row:34.8",
-        "log-row:34.85",
-        "log-row:34.9",
-        "log-row:34.95",
-        "log-row:35",
-        "log-row:35.05",
-        "log-row:35.1",
-        "log-row:35.15",
-        "log-row:35.2"
+        "log-row:30.4"
       ]
     },
     "report_final": {
       "type_of_accident": "crossing_collision",
       "incident_window": {
-        "t_start": 17.0,
-        "t0": 18.5,
-        "t_end": 20.0
+        "t_start": 14.0,
+        "t0": 19.0,
+        "t_end": 28.0
       },
-      "representative_timestamp_s": 18.5,
-      "timeline": "Trước sự cố, xe ego di chuyển trên đường phố và tiến vào đoạn đường cong lúc 8.0 s. Đến 17.5 s, một xe buýt màu trắng xanh dương xuất hiện từ bên trái và cắt ngang quỹ đạo của xe ego. Khoảng 18.5 s, xảy ra va chạm giữa xe ego và xe buýt. Sau đó, xe buýt tiếp tục di chuyển; đến 32.0 s, một xe cảnh sát xuất hiện, trong khi xe ego đã dừng.",
-      "video_observations": "Xe ego có tai nạn dạng crossing_collision. Xe buýt đi từ bên trái và cắt ngang quỹ đạo đang di chuyển của xe ego, dẫn đến va chạm được mô tả với bên hông phải của xe buýt. Sau sự cố, xe buýt rời đi, xe cảnh sát xuất hiện sau đó và xe ego đứng yên.",
-      "hypothesized_causes": "- Xe buýt từ bên trái cắt ngang quỹ đạo của xe ego tại khu vực giao cắt.\n- Xe ego đang di chuyển qua đoạn đường cong khi quỹ đạo của hai phương tiện giao nhau.\n- Dữ liệu hiện có chưa đủ để kết luận thêm về nguyên nhân điều khiển hoặc trách nhiệm cụ thể của từng phương tiện."
+      "representative_timestamp_s": 19.0,
+      "timeline": "Trước sự cố, xe ego đi qua ngã tư và rẽ phải vào bùng binh có tượng điêu khắc ở giữa tại 7.0 s. Đến khoảng 14.0–17.0 s, xe ego đang lưu thông trong bùng binh thì một xe buýt màu trắng xanh từ hướng khác đi vào và cắt ngang quỹ đạo của ego. Tại 19.0 s, ego va chạm với hông xe buýt và dừng lại. Sau đó, xe buýt tiếp tục rời khỏi khu vực, còn ego đứng yên tại vị trí va chạm đến 28.0 s.",
+      "video_observations": "Xe ego có tai nạn, được phân loại là crossing_collision. Trước sự cố, ego di chuyển qua ngã tư, rẽ phải vào bùng binh và tiếp tục đi trong khu vực có tượng điêu khắc ở giữa. Trong khoảng 17.0 s, một xe buýt màu trắng xanh đi từ hướng khác và cắt ngang quỹ đạo đang đi của ego, tạo ra xung đột quỹ đạo rõ ràng. Khoảng 19.0 s, ego va chạm trực tiếp với hông xe buýt và giảm tốc gần như về 0, phù hợp với sự kiện va chạm được quan sát trong hình ảnh. Sau va chạm, xe buýt tiếp tục di chuyển rời khỏi khung hình, trong khi ego vẫn đứng yên tại chỗ.",
+      "hypothesized_causes": "1. Xe buýt cắt ngang quỹ đạo của ego là cơ chế trực tiếp có độ tin cậy cao. Hình ảnh tại 16.8–19.133 s cho thấy xe buýt đi từ hướng khác vào đường đi của ego và va chạm xảy ra tại 19.0 s.\n\n2. Ego không giảm tốc đủ trước thời điểm xung đột, có độ tin cậy trung bình đến cao. Tốc độ của ego còn khoảng 37.228 km/h tại 17.0 s và giảm rất mạnh xuống 0.411 km/h trong cửa sổ kết thúc quanh 19.0 s; mức giảm tốc cực đại được ghi nhận tại 19.05 s là -110.69, phù hợp hơn với giảm tốc do va chạm tại hoặc ngay sau t0. Brake ghi nhận bằng 0, còn mức throttle không được cung cấp nên không thể kết luận về thao tác ga.\n\n3. Ego có biến động điều khiển hướng trước xung đột, có độ tin cậy trung bình nhưng không đủ để xác định là nguyên nhân duy nhất. Log ghi nhận nhiều thay đổi steering từ 14.05 đến 18.35 s và độ thay đổi steering lớn nhất là 0.76 tại 14.05 s; các điều chỉnh này có thể hạn chế khả năng tránh xe buýt, nhưng dữ liệu không xác định chắc chắn hướng tránh hoặc lỗi điều khiển cụ thể."
     }
   },
   "metrics": {
     "vlm": {
       "has_accident": true,
-      "t0_error_s": 0.5500000000000007,
-      "temporal_iou": 0.46153846153846156,
-      "event_matches": [
-        {
-          "gold_event_index": 1,
-          "pred_event_index": 6,
-          "gold_event_type": "cut_in_started",
-          "gold_timestamp": 13.5,
-          "pred_timestamp": 17.5
-        },
-        {
-          "gold_event_index": 2,
-          "pred_event_index": 7,
-          "gold_event_type": "collision",
-          "gold_timestamp": 19.05,
-          "pred_timestamp": 18.5
-        }
-      ]
+      "t0_error_s": 0.05000000000000071,
+      "temporal_iou": 0.41379310344827586
     },
     "verifier": {
       "has_accident": true,
@@ -746,16 +613,45 @@
         "invalid_evidence_ids": []
       },
       "status_distribution": {
-        "supported": 0.75,
+        "supported": 1.0,
         "contradicted": 0.0,
-        "unverified": 0.25
+        "unverified": 0.0
       }
     },
     "report": {
       "type_of_accident": "crossing_collision",
       "has_accident": true,
-      "t0_error_s": 0.5500000000000007,
-      "temporal_iou": 0.46153846153846156
+      "t0_error_s": 0.05000000000000071,
+      "temporal_iou": 0.41379310344827586
+    },
+    "resource": {
+      "wall_time_s": 59.23044369099989,
+      "model_time_s": 56.552,
+      "num_model_requests": 3,
+      "input_tokens": 28538,
+      "output_tokens": 3503,
+      "total_tokens": 32041,
+      "cached_tokens": 3716,
+      "cost_usd": 0.00417793,
+      "unpriced_models": [],
+      "by_model": {
+        "qwen3.7-plus": {
+          "num_requests": 1,
+          "input_tokens": 18694,
+          "output_tokens": 1763,
+          "total_tokens": 20457,
+          "cost_usd": 0.00079001,
+          "cached_tokens": 0
+        },
+        "gpt-5.6-luna": {
+          "num_requests": 2,
+          "input_tokens": 9844,
+          "output_tokens": 1740,
+          "total_tokens": 11584,
+          "cost_usd": 0.00338792,
+          "cached_tokens": 3716
+        }
+      }
     }
   }
 }

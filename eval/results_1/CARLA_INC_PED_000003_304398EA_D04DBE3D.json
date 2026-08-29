@@ -1,10 +1,13 @@
 {
   "sample_id": "CARLA_INC_PED_000003_304398EA_D04DBE3D",
   "analysis_prompt": "Phân tích sự cố giao thông trong toàn bộ video.",
-  "workflow_status": "failed",
+  "workflow_status": "awaiting_review",
   "auto_reanalysis_count": 0,
   "manual_reanalysis_count": 0,
+  "auto_reanalysis_attempted": false,
+  "manual_reanalysis_attempted": false,
   "has_reanalyze": false,
+  "workflow_error": null,
   "warnings": [
     "LOG_EXTREME_ACCELERATION at 0.35s: adaptive change (peak z-score 42.91) merged from 0.350s to 0.350s",
     "LOG_ADAPTIVE_DECELERATION at 13.8s: adaptive change (peak z-score 5.07) merged from 13.800s to 13.800s",
@@ -13,68 +16,75 @@
   ],
   "model_outputs": {
     "vlm_initial": {
-      "global_scene": "Video ghi lại cảnh quay từ camera trước của một xe ego đang di chuyển trên một con đường cao tốc hoặc đường lớn có nhiều làn, bên trái là vách đá và hàng rào, bên phải là hàng rào chắn và các cột bê tông. Thời tiết nắng, đường vắng không có xe khác.",
+      "global_scene": "Đường cao tốc nhiều làn, một chiều, có dải phân cách bê tông bên trái và hàng cột bê tông bên phải, địa hình đồi núi, thời tiết ban ngày sáng rõ.",
       "vlm_has_accident": true,
-      "video_summary": "Xe ego đang di chuyển trên đường cao tốc. Khoảng giây 12, một người đi bộ xuất hiện từ bên trái và chạy ngang qua đường. Xe ego không né tránh và va chạm trực tiếp với người đi bộ vào khoảng giây 13.8, khiến người đi bộ bay lên và rơi xuống nóc/capô xe rồi rơi ra sau. Sau va chạm, xe ego tiếp tục di chuyển và không dừng lại, đi tiếp trên đường cho đến hết video.",
+      "video_summary": "Xe ego di chuyển thẳng trên đường cao tốc vắng vẻ với tốc độ ổn định. Khoảng 12s, một người đi bộ xuất hiện bên trái gần dải phân cách và bắt đầu chạy ngang qua đường về phía xe ego. Xe ego không giảm tốc đáng kể và đâm trực tiếp vào người đi bộ khoảng 13.7s. Người đi bộ bị hất tung lên không trung, đập vào kính chắn gió và rơi xuống nắp capo trước khi trượt ra khỏi tầm nhìn. Sau va chạm, xe ego tiếp tục di chuyển về phía trước trên đường cao tốc.",
       "incident_window": {
         "t_start": 12.0,
-        "t0": 13.8,
+        "t0": 13.7,
         "t_end": 16.5
       },
       "representative_timestamp_s": 14.0,
       "timeline": [
         {
           "timestamp_s": 0.0,
-          "description": "Xe ego đang di chuyển bình thường trên đường cao tốc, đường vắng không có phương tiện khác.",
+          "description": "Xe ego di chuyển thẳng trên đường cao tốc nhiều làn, không có phương tiện khác.",
           "evidence_ids": []
         },
         {
           "timestamp_s": 12.0,
-          "description": "Một người đi bộ xuất hiện từ phía bên trái, chạy ngang qua đường vào làn của xe ego.",
+          "description": "Người đi bộ xuất hiện bên trái gần dải phân cách và bắt đầu chạy ngang qua đường.",
           "evidence_ids": []
         },
         {
-          "timestamp_s": 13.8,
-          "description": "Xe ego va chạm trực tiếp với người đi bộ, người đi bộ bị hất lên và rơi trên nóc xe.",
+          "timestamp_s": 13.7,
+          "description": "Xe ego đâm trực tiếp vào người đi bộ đang chạy ngang đường.",
+          "evidence_ids": []
+        },
+        {
+          "timestamp_s": 14.5,
+          "description": "Người đi bộ bị hất lên không trung và đập vào kính chắn gió trước của xe ego.",
           "evidence_ids": []
         },
         {
           "timestamp_s": 16.5,
-          "description": "Người đi bộ rơi khỏi xe và ra khỏi khung hình, xe ego tiếp tục di chuyển.",
-          "evidence_ids": []
-        },
-        {
-          "timestamp_s": 45.0,
-          "description": "Xe ego tiếp tục lái trên đường cho đến hết video, không có sự cố nào khác.",
+          "description": "Người đi bộ trượt khỏi nắp capo và ra khỏi tầm nhìn, xe ego tiếp tục di chuyển.",
           "evidence_ids": []
         }
       ],
       "claims": [
         {
-          "claim_id": "1",
-          "text": "Xe ego đang di chuyển trên đường cao tốc với tốc độ ổn định, không có phương tiện khác trên đường.",
+          "claim_id": "C1",
+          "text": "Xe ego di chuyển trên đường cao tốc nhiều làn với tốc độ ổn định, không có phương tiện khác xung quanh.",
           "timestamp_s": 5.0,
           "evidence": [],
           "verification_status": "unverified"
         },
         {
-          "claim_id": "2",
-          "text": "Một người đi bộ chạy ngang từ bên trái vào đường vào khoảng giây 12.",
+          "claim_id": "C2",
+          "text": "Một người đi bộ xuất hiện bên trái gần dải phân cách và chạy ngang qua đường về phía xe ego.",
           "timestamp_s": 12.5,
           "evidence": [],
           "verification_status": "unverified"
         },
         {
-          "claim_id": "3",
-          "text": "Xe ego va chạm với người đi bộ vào khoảng giây 13.8, khiến người đi bộ bay lên và rơi trên nóc xe.",
-          "timestamp_s": 14.0,
+          "claim_id": "C3",
+          "text": "Xe ego đâm trực tiếp vào người đi bộ đang chạy ngang đường.",
+          "timestamp_s": 13.7,
           "evidence": [],
           "verification_status": "unverified"
         },
         {
-          "claim_id": "4",
-          "text": "Sau khi va chạm, người đi bộ rơi khỏi xe và xe ego tiếp tục di chuyển không dừng lại.",
-          "timestamp_s": 17.0,
+          "claim_id": "C4",
+          "text": "Người đi bộ bị hất tung lên không trung và đập vào kính chắn gió trước của xe ego.",
+          "timestamp_s": 14.5,
+          "evidence": [],
+          "verification_status": "unverified"
+        },
+        {
+          "claim_id": "C5",
+          "text": "Sau va chạm, người đi bộ trượt khỏi nắp capo và xe ego tiếp tục di chuyển về phía trước.",
+          "timestamp_s": 16.5,
           "evidence": [],
           "verification_status": "unverified"
         }
@@ -93,39 +103,41 @@
       "has_accident": true,
       "results": [
         {
-          "claim_id": "1",
-          "status": "contradicted",
-          "reason": "Xe vẫn đang di chuyển nhưng tốc độ tăng từ 25.780 lên 36.289 km/h trong cửa sổ, không phù hợp với mô tả tốc độ ổn định.",
+          "claim_id": "C1",
+          "status": "supported",
+          "reason": "Telemetry cho thấy xe ego đang di chuyển, tốc độ gần như ổn định trong khoảng 35.699–36.119 km/h, steering gần thẳng và không biến động đáng kể trong toàn bộ cửa sổ.",
           "evidence_ids": [
-            "log-row:1.8",
+            "log-row:2.6",
             "log-row:5",
-            "log-row:8.2"
+            "log-row:7.4"
           ]
         },
         {
-          "claim_id": "2",
+          "claim_id": "C2",
           "status": "unverified",
           "reason": "Log không có signal trực tiếp liên quan đến chuyển động của xe ego cho phần claim này.",
           "evidence_ids": []
         },
         {
-          "claim_id": "3",
-          "status": "supported",
-          "reason": "Trong cửa sổ, xe giảm tốc mạnh từ 36.074 xuống 7.693 km/h; brake bằng 0 và telemetry cho thấy mismatch giảm tốc đáng kể.",
-          "evidence_ids": [
-            "log-row:10.8",
-            "log-row:14",
-            "log-row:17.2"
-          ]
+          "claim_id": "C3",
+          "status": "unverified",
+          "reason": "Log không có signal trực tiếp phù hợp để xác nhận va chạm; telemetry ego cho thấy tốc độ giảm mạnh từ 36.348 xuống 13.188 km/h trong cửa sổ, steering vẫn gần thẳng và brake bằng 0.",
+          "evidence_ids": []
         },
         {
-          "claim_id": "4",
+          "claim_id": "C4",
+          "status": "unverified",
+          "reason": "Log không có signal trực tiếp liên quan đến chuyển động của xe ego cho phần claim này.",
+          "evidence_ids": []
+        },
+        {
+          "claim_id": "C5",
           "status": "supported",
-          "reason": "Xe tiếp tục di chuyển trong cửa sổ, tốc độ giảm từ 35.151 xuống 1.857 km/h nhưng chưa về 0 km/h.",
+          "reason": "Telemetry cho thấy xe ego vẫn đang di chuyển tại thời điểm claim nhưng giảm tốc rất mạnh trong cửa sổ, từ 31.922 xuống 0.431 km/h, với throttle và brake đều bằng 0; steering giữ thẳng.",
           "evidence_ids": [
-            "log-row:13.8",
-            "log-row:17",
-            "log-row:20.2"
+            "log-row:14.1",
+            "log-row:16.5",
+            "log-row:18.9"
           ]
         }
       ]
@@ -134,61 +146,51 @@
       "has_accident": true,
       "results": [
         {
-          "claim_id": "1",
-          "status": "contradicted",
-          "reason": "Xe vẫn đang di chuyển nhưng tốc độ tăng từ 25.780 lên 36.289 km/h trong cửa sổ, không phù hợp với mô tả tốc độ ổn định.",
+          "claim_id": "C1",
+          "status": "supported",
+          "reason": "Telemetry cho thấy xe ego đang di chuyển, tốc độ gần như ổn định trong khoảng 35.699–36.119 km/h, steering gần thẳng và không biến động đáng kể trong toàn bộ cửa sổ.",
           "evidence_ids": [
-            "log-row:1.8",
+            "log-row:2.6",
             "log-row:5",
-            "log-row:8.2"
+            "log-row:7.4"
           ]
         },
         {
-          "claim_id": "2",
+          "claim_id": "C2",
           "status": "unverified",
           "reason": "Log không có signal trực tiếp liên quan đến chuyển động của xe ego cho phần claim này.",
           "evidence_ids": []
         },
         {
-          "claim_id": "3",
-          "status": "supported",
-          "reason": "Trong cửa sổ, xe giảm tốc mạnh từ 36.074 xuống 7.693 km/h; brake bằng 0 và telemetry cho thấy mismatch giảm tốc đáng kể.",
+          "claim_id": "C3",
+          "status": "unverified",
+          "reason": "Log không có signal trực tiếp phù hợp để xác nhận va chạm; telemetry ego cho thấy tốc độ giảm mạnh từ 36.348 xuống 13.188 km/h trong cửa sổ, steering vẫn gần thẳng và brake bằng 0.",
           "evidence_ids": [
-            "log-row:10.8",
-            "log-row:14",
-            "log-row:17.2"
+            "log-row:11.3",
+            "log-row:13.7",
+            "log-row:16.1"
           ]
         },
         {
-          "claim_id": "4",
+          "claim_id": "C4",
+          "status": "unverified",
+          "reason": "Log không có signal trực tiếp liên quan đến chuyển động của xe ego cho phần claim này.",
+          "evidence_ids": []
+        },
+        {
+          "claim_id": "C5",
           "status": "supported",
-          "reason": "Xe tiếp tục di chuyển trong cửa sổ, tốc độ giảm từ 35.151 xuống 1.857 km/h nhưng chưa về 0 km/h.",
+          "reason": "Telemetry cho thấy xe ego vẫn đang di chuyển tại thời điểm claim nhưng giảm tốc rất mạnh trong cửa sổ, từ 31.922 xuống 0.431 km/h, với throttle và brake đều bằng 0; steering giữ thẳng.",
           "evidence_ids": [
-            "log-row:13.8",
-            "log-row:17",
-            "log-row:20.2"
+            "log-row:14.1",
+            "log-row:16.5",
+            "log-row:18.9"
           ]
         }
       ]
     },
     "verification_allowed_evidence_ids": {
-      "1": [
-        "log-row:1.8",
-        "log-row:1.85",
-        "log-row:1.9",
-        "log-row:1.95",
-        "log-row:2",
-        "log-row:2.05",
-        "log-row:2.1",
-        "log-row:2.15",
-        "log-row:2.2",
-        "log-row:2.25",
-        "log-row:2.3",
-        "log-row:2.35",
-        "log-row:2.4",
-        "log-row:2.45",
-        "log-row:2.5",
-        "log-row:2.55",
+      "C1": [
         "log-row:2.6",
         "log-row:2.65",
         "log-row:2.7",
@@ -285,41 +287,9 @@
         "log-row:7.25",
         "log-row:7.3",
         "log-row:7.35",
-        "log-row:7.4",
-        "log-row:7.45",
-        "log-row:7.5",
-        "log-row:7.55",
-        "log-row:7.6",
-        "log-row:7.65",
-        "log-row:7.7",
-        "log-row:7.75",
-        "log-row:7.8",
-        "log-row:7.85",
-        "log-row:7.9",
-        "log-row:7.95",
-        "log-row:8",
-        "log-row:8.05",
-        "log-row:8.1",
-        "log-row:8.15",
-        "log-row:8.2"
+        "log-row:7.4"
       ],
-      "2": [
-        "log-row:9.3",
-        "log-row:9.35",
-        "log-row:9.4",
-        "log-row:9.45",
-        "log-row:9.5",
-        "log-row:9.55",
-        "log-row:9.6",
-        "log-row:9.65",
-        "log-row:9.7",
-        "log-row:9.75",
-        "log-row:9.8",
-        "log-row:9.85",
-        "log-row:9.9",
-        "log-row:9.95",
-        "log-row:10",
-        "log-row:10.05",
+      "C2": [
         "log-row:10.1",
         "log-row:10.15",
         "log-row:10.2",
@@ -416,35 +386,9 @@
         "log-row:14.75",
         "log-row:14.8",
         "log-row:14.85",
-        "log-row:14.9",
-        "log-row:14.95",
-        "log-row:15",
-        "log-row:15.05",
-        "log-row:15.1",
-        "log-row:15.15",
-        "log-row:15.2",
-        "log-row:15.25",
-        "log-row:15.3",
-        "log-row:15.35",
-        "log-row:15.4",
-        "log-row:15.45",
-        "log-row:15.5",
-        "log-row:15.55",
-        "log-row:15.6",
-        "log-row:15.65",
-        "log-row:15.7"
+        "log-row:14.9"
       ],
-      "3": [
-        "log-row:10.8",
-        "log-row:10.85",
-        "log-row:10.9",
-        "log-row:10.95",
-        "log-row:11",
-        "log-row:11.05",
-        "log-row:11.1",
-        "log-row:11.15",
-        "log-row:11.2",
-        "log-row:11.25",
+      "C3": [
         "log-row:11.3",
         "log-row:11.35",
         "log-row:11.4",
@@ -541,6 +485,89 @@
         "log-row:15.95",
         "log-row:16",
         "log-row:16.05",
+        "log-row:16.1"
+      ],
+      "C4": [
+        "log-row:12.1",
+        "log-row:12.15",
+        "log-row:12.2",
+        "log-row:12.25",
+        "log-row:12.3",
+        "log-row:12.35",
+        "log-row:12.4",
+        "log-row:12.45",
+        "log-row:12.5",
+        "log-row:12.55",
+        "log-row:12.6",
+        "log-row:12.65",
+        "log-row:12.7",
+        "log-row:12.75",
+        "log-row:12.8",
+        "log-row:12.85",
+        "log-row:12.9",
+        "log-row:12.95",
+        "log-row:13",
+        "log-row:13.05",
+        "log-row:13.1",
+        "log-row:13.15",
+        "log-row:13.2",
+        "log-row:13.25",
+        "log-row:13.3",
+        "log-row:13.35",
+        "log-row:13.4",
+        "log-row:13.45",
+        "log-row:13.5",
+        "log-row:13.55",
+        "log-row:13.6",
+        "log-row:13.65",
+        "log-row:13.7",
+        "log-row:13.75",
+        "log-row:13.8",
+        "log-row:13.85",
+        "log-row:13.9",
+        "log-row:13.95",
+        "log-row:14",
+        "log-row:14.05",
+        "log-row:14.1",
+        "log-row:14.15",
+        "log-row:14.2",
+        "log-row:14.25",
+        "log-row:14.3",
+        "log-row:14.35",
+        "log-row:14.4",
+        "log-row:14.45",
+        "log-row:14.5",
+        "log-row:14.55",
+        "log-row:14.6",
+        "log-row:14.65",
+        "log-row:14.7",
+        "log-row:14.75",
+        "log-row:14.8",
+        "log-row:14.85",
+        "log-row:14.9",
+        "log-row:14.95",
+        "log-row:15",
+        "log-row:15.05",
+        "log-row:15.1",
+        "log-row:15.15",
+        "log-row:15.2",
+        "log-row:15.25",
+        "log-row:15.3",
+        "log-row:15.35",
+        "log-row:15.4",
+        "log-row:15.45",
+        "log-row:15.5",
+        "log-row:15.55",
+        "log-row:15.6",
+        "log-row:15.65",
+        "log-row:15.7",
+        "log-row:15.75",
+        "log-row:15.8",
+        "log-row:15.85",
+        "log-row:15.9",
+        "log-row:15.95",
+        "log-row:16",
+        "log-row:16.05",
         "log-row:16.1",
         "log-row:16.15",
         "log-row:16.2",
@@ -557,21 +584,9 @@
         "log-row:16.75",
         "log-row:16.8",
         "log-row:16.85",
-        "log-row:16.9",
-        "log-row:16.95",
-        "log-row:17",
-        "log-row:17.05",
-        "log-row:17.1",
-        "log-row:17.15",
-        "log-row:17.2"
+        "log-row:16.9"
       ],
-      "4": [
-        "log-row:13.8",
-        "log-row:13.85",
-        "log-row:13.9",
-        "log-row:13.95",
-        "log-row:14",
-        "log-row:14.05",
+      "C5": [
         "log-row:14.1",
         "log-row:14.15",
         "log-row:14.2",
@@ -668,65 +683,27 @@
         "log-row:18.75",
         "log-row:18.8",
         "log-row:18.85",
-        "log-row:18.9",
-        "log-row:18.95",
-        "log-row:19",
-        "log-row:19.05",
-        "log-row:19.1",
-        "log-row:19.15",
-        "log-row:19.2",
-        "log-row:19.25",
-        "log-row:19.3",
-        "log-row:19.35",
-        "log-row:19.4",
-        "log-row:19.45",
-        "log-row:19.5",
-        "log-row:19.55",
-        "log-row:19.6",
-        "log-row:19.65",
-        "log-row:19.7",
-        "log-row:19.75",
-        "log-row:19.8",
-        "log-row:19.85",
-        "log-row:19.9",
-        "log-row:19.95",
-        "log-row:20",
-        "log-row:20.05",
-        "log-row:20.1",
-        "log-row:20.15",
-        "log-row:20.2"
+        "log-row:18.9"
       ]
     },
-    "report_final": null
+    "report_final": {
+      "type_of_accident": "pedestrian_collision",
+      "incident_window": {
+        "t_start": 12.0,
+        "t0": 13.7,
+        "t_end": 16.5
+      },
+      "representative_timestamp_s": 14.0,
+      "timeline": "Khoảng 12.0 s, xe ego đang di chuyển thẳng trên đường cao tốc nhiều làn thì một người đi bộ xuất hiện gần dải phân cách bên trái và chạy ngang vào quỹ đạo xe. Khoảng 13.7 s, sự cố chính xảy ra khi người đi bộ liên quan trực tiếp đến quỹ đạo phía trước của xe ego, phù hợp với kết luận tai nạn và phân loại va chạm với người đi bộ. Khoảng 14.5 s, người đi bộ bị hất lên phía trước xe và tiếp xúc với khu vực kính chắn gió hoặc nắp capo theo quan sát hình ảnh. Đến 16.5 s, người đi bộ trượt khỏi nắp capo và ra khỏi tầm nhìn trong khi xe ego vẫn tiếp tục chuyển động rồi giảm tốc mạnh.",
+      "video_observations": "Xe ego đã gặp tai nạn thuộc loại pedestrian_collision. Trước khoảng 12.0 s, xe chạy thẳng trên đường cao tốc nhiều làn, với dải phân cách bê tông bên trái và không ghi nhận phương tiện khác xung quanh. Từ khoảng 12.0 s, một người đi bộ xuất hiện gần dải phân cách bên trái và chạy ngang qua đường vào quỹ đạo phía trước của xe ego. Quanh 13.7 s, người đi bộ liên quan trực tiếp đến sự cố với xe ego; hình ảnh cho thấy người này bị hất lên phía trước xe và tiếp xúc với vùng kính chắn gió hoặc nắp capo khoảng 14.5 s. Sau đó, đến 16.5 s, người đi bộ trượt khỏi nắp capo và ra khỏi tầm nhìn, còn xe ego vẫn tiến về phía trước trước khi giảm tốc mạnh.",
+      "hypothesized_causes": "1. Người đi bộ chạy ngang từ phía trái vào quỹ đạo đang đi của xe ego là cơ chế trực tiếp có độ tin cậy cao, dựa trên quan sát tại 12.0–13.7 s. Hai quỹ đạo giao nhau khi xe ego đang tiến thẳng, tạo điều kiện dẫn đến va chạm với người đi bộ.\n\n2. Khả năng tránh va chạm của xe ego có vẻ hạn chế tại thời điểm sự cố. Quanh 13.7–13.8 s, telemetry ghi nhận tốc độ giảm mạnh từ khoảng 36.348 km/h xuống 13.188 km/h, trong khi brake bằng 0 và steering vẫn gần thẳng; tổ hợp này cho thấy xe không thể hiện phanh hoặc đánh lái tránh rõ ràng trước/tại t0, dù log không đủ để xác định nguyên nhân của phản ứng đó.\n\n3. Tốc độ tiếp cận còn cao khi người đi bộ cắt ngang là yếu tố góp phần có độ tin cậy trung bình. Tại khoảng 13.7 s, xe ego vẫn ở mức khoảng 36 km/h trước khi giảm tốc mạnh, nên khoảng thời gian và không gian để tránh người đi bộ có thể đã bị hạn chế; tuy nhiên, context không đủ để xác định chính xác khoảng cách nhìn thấy hoặc thời điểm xe nhận biết người đi bộ."
+    }
   },
   "metrics": {
     "vlm": {
       "has_accident": true,
       "t0_error_s": 0.05000000000000071,
-      "temporal_iou": 0.6869565217391304,
-      "event_matches": [
-        {
-          "gold_event_index": 0,
-          "pred_event_index": 6,
-          "gold_event_type": "walker_started_crossing",
-          "gold_timestamp": 12.55,
-          "pred_timestamp": 12.5
-        },
-        {
-          "gold_event_index": 1,
-          "pred_event_index": 1,
-          "gold_event_type": "pedestrian_hazard_detected",
-          "gold_timestamp": 13.65,
-          "pred_timestamp": 12.0
-        },
-        {
-          "gold_event_index": 2,
-          "pred_event_index": 2,
-          "gold_event_type": "collision",
-          "gold_timestamp": 13.75,
-          "pred_timestamp": 13.8
-        }
-      ]
+      "temporal_iou": 0.6869565217391304
     },
     "verifier": {
       "has_accident": true,
@@ -736,16 +713,45 @@
         "invalid_evidence_ids": []
       },
       "status_distribution": {
-        "supported": 0.5,
-        "contradicted": 0.25,
-        "unverified": 0.25
+        "supported": 0.4,
+        "contradicted": 0.0,
+        "unverified": 0.6
       }
     },
     "report": {
-      "type_of_accident": null,
+      "type_of_accident": "pedestrian_collision",
       "has_accident": true,
-      "t0_error_s": null,
-      "temporal_iou": null
+      "t0_error_s": 0.05000000000000071,
+      "temporal_iou": 0.6869565217391304
+    },
+    "resource": {
+      "wall_time_s": 58.265486305001104,
+      "model_time_s": 56.095,
+      "num_model_requests": 3,
+      "input_tokens": 28271,
+      "output_tokens": 3714,
+      "total_tokens": 31985,
+      "cached_tokens": 3716,
+      "cost_usd": 0.00435152,
+      "unpriced_models": [],
+      "by_model": {
+        "qwen3.7-plus": {
+          "num_requests": 1,
+          "input_tokens": 18609,
+          "output_tokens": 1801,
+          "total_tokens": 20410,
+          "cost_usd": 0.0007924000000000001,
+          "cached_tokens": 0
+        },
+        "gpt-5.6-luna": {
+          "num_requests": 2,
+          "input_tokens": 9662,
+          "output_tokens": 1913,
+          "total_tokens": 11575,
+          "cost_usd": 0.0035591200000000003,
+          "cached_tokens": 3716
+        }
+      }
     }
   }
 }

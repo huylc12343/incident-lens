@@ -461,6 +461,23 @@
      "report_temporal_iou_mean": 0.78,  
      "report_temporal_iou_median": 0.81  
    }  
+
+  **Lưu ý so sánh công bằng VLM vs report**
+  `vlm_temporal_iou_mean` chỉ tính trên sample VLM tự nhận có tai nạn (`vlm_has_accident=true`); `report_temporal_iou_mean` tính trên sample verifier kết luận có tai nạn (`verification.has_accident=true`). Hai mean chạy trên hai tập sample khác nhau nên KHÔNG so trực tiếp — report thường bị chấm thêm các case VLM bỏ sót và khoanh window kém, kéo mean xuống.
+  Evaluator xuất thêm block `temporal_comparison`:
+  {
+     "num_gold_incidents": 9,
+     "vlm_localised_count": 5,
+     "report_localised_count": 9,
+     "paired_num_samples": 5,
+     "vlm_temporal_iou_mean_paired": 0.42,
+     "report_temporal_iou_mean_paired": 0.42,
+     "report_minus_vlm_temporal_iou_delta": 0.0
+   }
+  - `*_localised_count`: coverage — mỗi stage khoanh được cửa sổ cho bao nhiêu / `num_gold_incidents` gold incident.
+  - `*_paired` + `delta`: mean IoU chỉ trên các sample CẢ HAI cùng khoanh được; `delta = report - vlm` là mức report cải thiện/giữ nguyên localization của VLM trên tập chung.
+  Đọc coverage để thấy recall, đọc `delta` để thấy chất lượng localization; không kết luận "report kém hơn VLM" từ hai mean tuyệt đối.
+  Key đếm mẫu đã đổi tên để hết trùng: `vlm_num_samples_used`, `report_num_samples_used`, `type_of_accident_num_samples_used`.
   **8.3. ** **type ** **of **incident  
    
  **Loại**  
@@ -477,7 +494,60 @@ report
  Công thức**  
   prediction, f1, recall  
    
-  **12. CẤU HÌNH EVALUATOR PHẢI ĐẶT CỐ ĐỊNH**  
+  **11. RESOURCE — TOKEN / THỜI GIAN / CHI PHÍ**
+
+**Loại**
+CODE
+
+**Ý nghĩa**
+Đo chi phí vận hành trung bình của pipeline trên mỗi sample: token, thời gian hoàn thành, tiền USD.
+
+**Nguồn dữ liệu**
+`IncidentSnapshot.model_activities` (đã có sẵn từ `ModelActivityRegistry` trong `src`). Chỉ đếm activity `status == "completed"`. Evaluator KHÔNG gọi thêm provider để đo.
+
+**Per-sample** (`metrics.resource`)
+- `wall_time_s`: thời gian evaluator đo quanh `WorkflowService.create` (thời gian hoàn thành thực tế của 1 sample).
+- `model_time_s`: tổng `duration_ms/1000` của các lần gọi model (luôn <= wall_time_s khi chạy tuần tự).
+- `num_model_requests`, `input_tokens`, `output_tokens`, `total_tokens`, `cached_tokens`.
+- `cost_usd`: tổng tiền theo bảng giá `eval/pricing.py`; = null nếu có model chưa có giá.
+- `unpriced_models`, `by_model` (breakdown từng model).
+
+**Aggregate** (`aggregate.resource`)
+{
+   "mean_total_tokens": ...,
+   "mean_input_tokens": ...,
+   "mean_output_tokens": ...,
+   "mean_num_model_requests": ...,
+   "mean_wall_time_s": ...,
+   "mean_model_time_s": ...,
+   "mean_cost_usd": ...,        # trung bình trên sample được định giá đầy đủ
+   "total_cost_usd": ...,
+   "num_samples_used": N,       # sample có >=1 lần gọi model
+   "num_samples_costed": M,     # sample mọi model đều có giá
+   "unpriced_models": [...]
+ }
+
+**Bảng giá**
+`eval/pricing.py :: MODEL_PRICES_USD_PER_1M` (USD / 1M token, `(input, output)`). Sửa đúng theo hợp đồng tài khoản trước khi trích số. Model không có trong bảng => `cost_usd = null` và tên model vào `unpriced_models` (không bịa giá). `qwen3-vl-flash` hiện là ESTIMATE.
+
+**11b. TYPE_OF_ACCIDENT — CHUẨN HOÁ & ĐỌC KẾT QUẢ**
+
+`multiclass_metrics` so khớp **không phân biệt hoa/thường** (`Crossing_collision` == `crossing_collision`) vì golden set không nhất quán viết hoa và đây là nhãn định danh, không phải văn bản.
+
+Output bổ sung trong khối `report`:
+- `type_of_accident_accuracy`: tỉ lệ đúng trực tiếp (micro) — đây là số nên đọc đầu tiên.
+- `type_of_accident_confusion`: ma trận `{gold: {pred: count}}` để thấy model nhầm cặp nào.
+- `type_of_accident_precision/recall/f1`: vẫn là macro trên MỌI class xuất hiện ở pred hoặc gold, nên class model không bao giờ sinh ra vẫn là một hàng 0 kéo macro xuống — luôn đọc kèm accuracy + confusion, không đọc macro-F1 một mình.
+
+Nhãn gold phải nằm trong enum `AccidentType` (`src/models/incidents.py`): `vehicle_collision`, `crossing_collision`, `pedestrian_collision`, `environment_collision`, `no_incident`, `other_unknown` (+ `side_collision` legacy). Nhãn ngoài enum (vd `pedestrian_near_miss`) là lỗi gán nhãn, phải sửa ở `golden_set/`, không map trong evaluator.
+
+Sample non-incident có thể có `timeline` null hợp lệ; `_gold_window` bỏ qua và metric thời gian gate theo `is_incident` nên không crash.
+
+**11c. LOẠI SAMPLE KHỎI EVAL**
+
+Thêm `"eval_exclude": true` vào file label JSON để reviewer đánh dấu sample không dùng được (nhãn hỏng, mâu thuẫn chưa giải quyết, timeline chưa gán). `discover_samples` bỏ qua sample này trước mọi validation; nó không vào `num_samples_total`, không vào aggregate.
+
+**12. CẤU HÌNH EVALUATOR PHẢI ĐẶT CỐ ĐỊNH**  
    
     
    

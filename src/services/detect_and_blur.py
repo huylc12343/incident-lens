@@ -208,6 +208,7 @@ def redact_video(
     plate_conf: float = 0.05,
     face_conf: float = 0.05,
     imgsz: int = 512,
+    detection_fps: float | None = None,
     augment: bool = False,
     pad_ratio: float = 0.20,
     persist_seconds: float = 0.15,
@@ -224,12 +225,19 @@ def redact_video(
     This is a synchronous, CPU/GPU-bound operation. Call it through
     ``asyncio.to_thread`` from an async workflow. The returned artifact can be
     assigned directly to a native VLM request's ``normalized_video_uri``.
+
+    ``detection_fps`` caps how often the two detectors run, in detections per
+    second of source footage; the tracker bridges the frames in between and
+    every frame is still blurred and written. ``None`` detects on every frame.
+    Capping it is the main speed lever here, and it is a privacy trade: an
+    object appearing and leaving inside one gap is never localized, so it is
+    never blurred.
     """
     source = Path(source_uri).resolve()
     output = Path(output_uri).resolve()
     src_dir = Path(__file__).resolve().parent.parent
-    plate_weights_path = Path(plate_weights or src_dir / "models" / "best_cv.pt").resolve()
-    face_weights_path = Path(face_weights or src_dir / "models" / "face_yolov8n.pt").resolve()
+    plate_weights_path = Path(plate_weights or src_dir / "models" / "best_plate.pt").resolve()
+    face_weights_path = Path(face_weights or src_dir / "models" / "best3_face.pt").resolve()
 
     if not source.is_file():
         raise FileNotFoundError(f"video source file not found: {source}")
@@ -243,6 +251,8 @@ def redact_video(
         raise ValueError("detection confidence thresholds must be between 0 and 1")
     if imgsz <= 0 or min(pad_ratio, persist_seconds, track_match_distance) < 0:
         raise ValueError("redaction dimensions and tracking parameters must be valid")
+    if detection_fps is not None and detection_fps <= 0:
+        raise ValueError("detection_fps must be positive when set")
 
     use_cuda = torch.cuda.is_available()
     device = 0 if use_cuda else "cpu"
@@ -272,6 +282,14 @@ def redact_video(
         raise RuntimeError(f"could not open video output: {output}")
 
     persist_frames = max(1, int(round(persist_seconds * fps)))
+    # Detection is the dominant cost, so cap how often it runs rather than
+    # tying it to the source frame rate. ``detection_fps=None`` keeps the
+    # every-frame behaviour.
+    detect_every = redaction_detection_interval(fps, detection_fps) if detection_fps else 1
+    # A confirmed track has to survive the whole gap between detections. Without
+    # this, a stride wider than the persistence window expires every box in
+    # between and the redaction flickers off.
+    max_missed = max(persist_frames, detect_every)
     plate_tracks, face_tracks = [], []
     frame_idx = 0
     try:
@@ -281,32 +299,37 @@ def redact_video(
                 break
             frame_idx += 1
 
-            plate_res = plate_model.predict(
-                source=frame,
-                conf=plate_conf,
-                imgsz=imgsz,
-                device=device,
-                quantize=16 if use_cuda else None,
-                augment=augment,
-                verbose=False,
-            )[0]
-            face_res = face_model.predict(
-                source=frame,
-                conf=face_conf,
-                imgsz=imgsz,
-                device=device,
-                quantize=16 if use_cuda else None,
-                augment=augment,
-                verbose=False,
-            )[0]
-            plate_boxes = [box.xyxy[0].cpu().numpy() for box in plate_res.boxes] if len(plate_res.boxes) else []
-            face_boxes = [box for box in face_res.boxes.xyxy.cpu().numpy()] if len(face_res.boxes) else []
+            if (frame_idx - 1) % detect_every == 0:
+                plate_res = plate_model.predict(
+                    source=frame,
+                    conf=plate_conf,
+                    imgsz=imgsz,
+                    device=device,
+                    quantize=16 if use_cuda else None,
+                    augment=augment,
+                    verbose=False,
+                )[0]
+                face_res = face_model.predict(
+                    source=frame,
+                    conf=face_conf,
+                    imgsz=imgsz,
+                    device=device,
+                    quantize=16 if use_cuda else None,
+                    augment=augment,
+                    verbose=False,
+                )[0]
+                plate_boxes = [box.xyxy[0].cpu().numpy() for box in plate_res.boxes] if len(plate_res.boxes) else []
+                face_boxes = [box for box in face_res.boxes.xyxy.cpu().numpy()] if len(face_res.boxes) else []
+            else:
+                # No model runs on this frame; every confirmed track coasts along
+                # its measured velocity until the next detection corrects it.
+                plate_boxes, face_boxes = [], []
 
             plate_tracks = advance_tracks(
                 plate_tracks,
                 plate_boxes,
                 frame_idx,
-                max_missed=persist_frames,
+                max_missed=max_missed,
                 match_distance=track_match_distance,
                 width=width,
                 height=height,
@@ -315,7 +338,7 @@ def redact_video(
                 face_tracks,
                 face_boxes,
                 frame_idx,
-                max_missed=persist_frames,
+                max_missed=max_missed,
                 match_distance=track_match_distance,
                 width=width,
                 height=height,
@@ -379,8 +402,8 @@ def main():
     # Resolve model paths relative to this file:
     # src/services/detect_and_blur.py -> src/models/*.pt
     src_dir = Path(__file__).resolve().parent.parent
-    default_plate_weights = src_dir / "models" / "best_cv.pt"
-    default_face_weights = src_dir / "models" / "face_yolov8n.pt"
+    default_plate_weights = src_dir / "models" / "best_plate.pt"
+    default_face_weights = src_dir / "models" / "best3_face.pt"
 
     parser.add_argument("--plate-weights", type=str, default=str(default_plate_weights))
     parser.add_argument("--face-weights", type=str, default=str(default_face_weights))
@@ -393,6 +416,11 @@ def main():
     parser.add_argument("--imgsz", type=int, default=512,
                          help="Inference resolution for both models. Lower = faster, "
                          "slightly less accurate on small/far objects (default: 512)")
+    parser.add_argument("--detection-fps", type=float, default=None,
+                         help="Cap detector runs to this many per second of footage; the "
+                              "tracker bridges the gap and every frame is still blurred. "
+                              "Unset detects on every frame. Lower is faster but can miss "
+                              "an object that appears and leaves inside one gap.")
     parser.add_argument("--augment", action="store_true",
                          help="Enable Ultralytics test-time augmentation (measured slower; "
                               "off by default).")
@@ -437,6 +465,7 @@ def main():
         plate_conf=args.plate_conf,
         face_conf=args.face_conf,
         imgsz=args.imgsz,
+        detection_fps=args.detection_fps,
         augment=args.augment,
         pad_ratio=args.pad_ratio,
         persist_seconds=args.persist_seconds,

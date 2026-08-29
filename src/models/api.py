@@ -12,7 +12,10 @@ from src.models.incidents import (
     Claim,
     ClaimLogSummary,
     DraftReport,
+<<<<<<< HEAD
     TimelineEvent,
+=======
+>>>>>>> 1ac5567 (chore: overwrite src, tests, eval and .env.example from feature/ai-brain_v1)
     VerificationStatus,
 )
 
@@ -91,13 +94,17 @@ class ReportEdits(APIModel):
     claims: list[ReportClaimEdit] | None = None
     summary: str | None = Field(default=None, min_length=1)
     timeline: str | None = Field(default=None, min_length=1)
+<<<<<<< HEAD
     timeline_events: list[TimelineEvent] | None = None
+=======
+>>>>>>> 1ac5567 (chore: overwrite src, tests, eval and .env.example from feature/ai-brain_v1)
     video_observations: str | None = Field(default=None, min_length=1)
     log_findings: str | None = Field(default=None, min_length=1)
     alignment: str | None = Field(default=None, min_length=1)
     hypothesized_causes: str | None = Field(default=None, min_length=1)
     warnings: list[str] | None = None
 
+<<<<<<< HEAD
     @field_validator("timeline_events")
     @classmethod
     def validate_timeline_order(cls, value: list[TimelineEvent] | None) -> list[TimelineEvent] | None:
@@ -108,6 +115,8 @@ class ReportEdits(APIModel):
             raise ValueError("timeline events must be ordered by timestamp_s")
         return value
 
+=======
+>>>>>>> 1ac5567 (chore: overwrite src, tests, eval and .env.example from feature/ai-brain_v1)
 
 class IncidentCreateRequest(APIModel):
     incident_id: str = Field(min_length=1, max_length=128)

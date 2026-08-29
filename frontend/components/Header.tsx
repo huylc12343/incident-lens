@@ -111,7 +111,7 @@ export function Header({
           <span className="brand-mark"><Image src="/images/logo.png" alt="VLens" width={34} height={34} priority /></span>
           <span>
             <strong>VLens</strong>
-            <small>{text("Forensic Review Workspace", "Không gian rà soát sự cố")}</small>
+            <small><em>Trợ lí phân tích sự cố và viết báo cáo xe tự hành</em></small>
           </span>
         </Link>
         <nav aria-label={text("Main navigation", "Điều hướng chính")}>

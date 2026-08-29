@@ -13,15 +13,19 @@ const normalize = (value: string) => value
 const containsAny = (text: string, phrases: string[]) => phrases.some((phrase) => text.includes(phrase));
 
 const incidentTypeLabels: Record<string, string> = {
-  rear_end_collision: "Va chạm phía sau",
-  crossing_collision: "Va chạm cắt ngang",
-  side_collision: "Va chạm bên hông",
-  head_on_collision: "Va chạm đối đầu",
-  pedestrian_collision: "Va chạm với người đi bộ",
-  static_object_collision: "Va chạm vật thể tĩnh",
-  roadside_collision: "Sự cố ven đường",
-  no_incident: "Không phát hiện sự cố",
-  other_unknown: "Sự cố khác / chưa xác định",
+  vehicle_collision: "Va chạm với phương tiện khác",
+  crossing_collision: "Va chạm xe cắt ngang",
+  pedestrian_collision: "Va chạm người đi bộ",
+  environment_collision: "Va chạm môi trường / rời khỏi phần đường",
+  no_incident: "Không phát hiện tai nạn",
+  other_unknown: "Có tai nạn nhưng chưa xác định được loại",
+
+  // Labels for reports stored before the accident taxonomy was standardized.
+  rear_end_collision: "Va chạm với phương tiện khác",
+  side_collision: "Va chạm với phương tiện khác",
+  head_on_collision: "Va chạm với phương tiện khác",
+  static_object_collision: "Va chạm môi trường / rời khỏi phần đường",
+  roadside_collision: "Va chạm môi trường / rời khỏi phần đường",
 };
 
 export function classifyIncidentForDisplay(snapshot: IncidentSnapshot | null): DisplayIncidentClassification {

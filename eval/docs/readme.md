@@ -15,3 +15,5 @@ Mỗi sample được ghi ngay vào `eval/results/<sample_id>.json`. `has_reanal
 Khi mạng/API lỗi hoặc cần thay API key, cập nhật `.env` rồi chạy lại cùng lệnh. Chỉ sample chạy thành công mới được bỏ qua; sample workflow lỗi/chưa có file sẽ chạy lại. Dùng `--force` để chạy lại tất cả sample.
 
 `type_of_accident_precision`, `type_of_accident_recall` và `type_of_accident_f1` dùng exact golden label, macro-average trên các lớp xuất hiện trong tập eval.
+
+`metric.json` còn có block `aggregate.resource`: token trung bình (`mean_total_tokens`), thời gian hoàn thành trung bình (`mean_wall_time_s`) và chi phí trung bình (`mean_cost_usd`) mỗi sample, cùng breakdown per-sample ở `metrics.resource`. Chi phí lấy theo bảng giá cố định trong `eval/pricing.py` (sửa cho khớp hợp đồng; model chưa có giá => `cost_usd=null` và nằm trong `unpriced_models`).

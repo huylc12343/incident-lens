@@ -8,6 +8,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 import src.main as main_module
+from src.agents.nodes.incident import VLM_EMPTY_VIDEO_MEMORY_WARNING
 from src.config import Settings
 from src.models.api import IncidentCreateRequest, ReviewDecision
 from src.models.incidents import (
@@ -235,11 +236,26 @@ async def test_fastapi_lifespan_bootstraps_configured_workflow(monkeypatch, tmp_
                     "analysis_prompt": "Analyze",
                 },
             )
-            latest = await client.get("/api/v1/incidents/INC-BOOTSTRAP")
+            closed = await client.post(
+                "/api/v1/incidents/INC-BOOTSTRAP/review",
+                json={
+                    "action": "not_incident",
+                    "reviewer": "api-reviewer",
+                    "reason": "No safety-relevant event",
+                },
+            )
 
     assert health.status_code == 200
     assert created.status_code == 202
-    assert created.json()["status"] in {"queued", "running"}
-    assert latest.status_code == 200
-    assert latest.json()["incident_id"] == "INC-BOOTSTRAP"
-    assert latest.json()["status"] in {"queued", "running", "awaiting_review"}
+    assert created.json()["status"] == "awaiting_review"
+    # This scenario returns a VideoMemory with no claims and no timeline; the warning
+    # must reach the API response rather than the report silently coming back empty.
+    assert VLM_EMPTY_VIDEO_MEMORY_WARNING in created.json()["warnings"]
+    activities = created.json()["model_activities"]
+    assert [(item["step"], item["status"]) for item in activities] == [
+        ("vlm", "completed"),
+        ("report", "completed"),
+    ]
+    assert all(item["model"] for item in activities)
+    assert closed.status_code == 200
+    assert closed.json()["status"] == "not_incident"

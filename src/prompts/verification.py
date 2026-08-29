@@ -75,7 +75,7 @@ def build_verification_prompt(
             "Quy ước: speed_kmh>=0; brake, throttle thuộc [0,1]; steering<=-0.1 là trái, -0.1<steering<0.1 là thẳng, "
             "steering>=0.1 là phải. max_deceleration là độ lớn giảm tốc: càng lớn = giảm tốc càng mạnh/đột ngột. "
             "steering_activity: 0 = gần như không đổi, càng gần 2 = biến động rất mạnh. decel_brake_mismatch: "
-            "0 = không có mismatch đáng kể, >=60 = giảm tốc mạnh trong khi brake thấp. "
+            "0 = không có mismatch đáng kể, >=10 = giảm tốc mạnh trong khi brake thấp. "
             "max_deceleration và decel_brake_mismatch bám theo pha dọc của cửa sổ và luôn nhất quán với speed_trend: "
             "nếu cửa sổ là pha TĂNG TỐC thì hai metric này mô tả độ lớn tăng tốc, brake thấp khi tăng tốc là bình "
             "thường và KHÔNG phải dấu hiệu tai nạn; chỉ pha GIẢM TỐC mà brake thấp mới là bất thường. Luôn đọc field "

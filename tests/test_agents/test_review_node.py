@@ -3,12 +3,10 @@ from unittest.mock import Mock
 import pytest
 
 import src.agents.nodes.review as review_module
-from src.agents.nodes.review import apply_report_edits, human_review_interrupt_node
-from src.models.api import ReportEdits
+from src.agents.nodes.review import human_review_interrupt_node
 from src.models.incidents import (
     AnalysisMode,
     Claim,
-    ClaimVerification,
     DraftReport,
     IncidentWindow,
     ReportAlignmentSection,
@@ -17,9 +15,6 @@ from src.models.incidents import (
     ReportLogSection,
     ReportTimelineSection,
     ReportVideoObservationsSection,
-    TimelineEvent,
-    VerificationResult,
-    VerificationStatus,
     VideoMemory,
 )
 
@@ -65,59 +60,3 @@ async def test_review_payload_uses_claims_from_video_memory(monkeypatch: pytest.
 
     assert result["status"] == "approved"
     assert [claim["claim_id"] for claim in captured.call_args.args[0]["claims"]] == ["canonical-claim"]
-
-
-def test_report_edits_persist_timeline_and_claim_verification_status() -> None:
-    report = _report().model_copy(update={
-        "timeline": ReportTimelineSection(
-            narrative="Original timeline",
-            events=[TimelineEvent(timestamp_s=1, description="Original event", evidence_ids=["frame-1"])],
-        ),
-        "alignment": ReportAlignmentSection(
-            narrative="Original verification",
-            verification=VerificationResult(results=[
-                ClaimVerification(claim_id="claim-1", status="unverified", reason="Needs review")
-            ]),
-        ),
-    })
-    memory = VideoMemory(
-        global_scene="Road scene",
-        incident_window=IncidentWindow(t_start=1, t0=2, t_end=3),
-        timeline=[TimelineEvent(timestamp_s=1, description="Original event", evidence_ids=["frame-1"])],
-        claims=[Claim(claim_id="claim-1", text="Original claim", timestamp_s=1)],
-        analysis_mode=AnalysisMode.NATIVE_VIDEO,
-    )
-
-    edited_report, edited_memory = apply_report_edits(
-        report,
-        memory,
-        ReportEdits(
-            timeline="Reviewer timeline",
-            timeline_events=[
-                TimelineEvent(timestamp_s=1.5, description="Reviewer event", evidence_ids=["frame-1"])
-            ],
-            claims=[{
-                "claim_id": "claim-1",
-                "text": "Reviewer claim",
-                "timestamp_s": 1.5,
-                "verification_status": "supported",
-            }],
-        ),
-    )
-
-    assert edited_report.timeline.narrative == "Reviewer timeline"
-    assert edited_report.timeline.events[0].description == "Reviewer event"
-    assert edited_report.alignment.verification is not None
-    assert edited_report.alignment.verification.results[0].status == VerificationStatus.SUPPORTED
-    assert edited_memory is not None
-    assert edited_memory.timeline[0].timestamp_s == 1.5
-    assert edited_memory.claims[0].text == "Reviewer claim"
-    assert edited_memory.claims[0].verification_status == VerificationStatus.SUPPORTED
-
-
-def test_report_edits_reject_out_of_order_timeline() -> None:
-    with pytest.raises(ValueError, match="ordered"):
-        ReportEdits(timeline_events=[
-            TimelineEvent(timestamp_s=2, description="Later"),
-            TimelineEvent(timestamp_s=1, description="Earlier"),
-        ])

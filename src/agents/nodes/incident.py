@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
@@ -141,7 +140,6 @@ async def analyze_video_node(
     *,
     media: MediaWorkflowService,
     workflow: VideoMemoryWorkflow,
-    progress: Callable[[str, str], None] | None = None,
 ) -> dict[str, object]:
     incident_id = state.get("incident_id", "").strip()
     video_uri = state.get("video_uri", "").strip()
@@ -164,8 +162,6 @@ async def analyze_video_node(
     )
     processed_video_uri = video_uri
     try:
-        if progress is not None:
-            progress("validating", "Đang kiểm tra và chuẩn bị video")
         if mode == VLMInputMode.TIMESTAMPED_FRAMES:
             manifest = await media.sample_frames(
                 video_uri,
@@ -186,10 +182,7 @@ async def analyze_video_node(
             artifact_uris = {"frames": str(artifact_root / "frames")}
         else:
             if config.video_redaction_enabled:
-                if progress is not None:
-                    progress("normalizing", "Đang chuẩn hóa video")
                 normalized_source = artifact_root / "normalized_source.mp4"
-                redacted_source = artifact_root / "redacted_source.mp4"
                 normalized = await media.normalize_video(
                     video_uri,
                     str(normalized_source),
@@ -202,35 +195,13 @@ async def analyze_video_node(
                     max_duration_s=config.max_duration_s,
                 )
                 try:
-                    if progress is not None:
-                        progress("redacting", "Đang phát hiện và làm mờ mặt, biển số")
-                    redacted = await media.redact_video(
+                    processed_video = await media.redact_video(
                         normalized.uri,
-                        str(redacted_source),
-                    )
-                    # Redaction re-encodes the video and can increase its size
-                    # beyond Qwen's Base64 ceiling. Normalize the redacted copy
-                    # once more so only privacy-safe media leaves the machine
-                    # and the configured byte limit is still enforced.
-                    if progress is not None:
-                        progress("compressing", "Đang nén video đã bảo vệ quyền riêng tư")
-                    processed_video = await media.normalize_video(
-                        redacted.uri,
                         str(artifact_root / "normalized.mp4"),
-                        width=config.video_target_width,
-                        height=config.video_target_height,
-                        fps=config.video_target_fps,
-                        codec=config.video_codec,
-                        pixel_format=config.video_pixel_format,
-                        max_output_bytes=config.video_max_output_bytes,
-                        max_duration_s=config.max_duration_s,
                     )
                 finally:
                     normalized_source.unlink(missing_ok=True)
-                    redacted_source.unlink(missing_ok=True)
             else:
-                if progress is not None:
-                    progress("normalizing", "Đang chuẩn hóa video")
                 processed_video = await media.normalize_video(
                     video_uri,
                     str(artifact_root / "normalized.mp4"),
@@ -267,8 +238,6 @@ async def analyze_video_node(
             version=config.prompt_version,
         )
         request = request.model_copy(update={"prompt": prompt})
-        if progress is not None:
-            progress("vlm", "VLM đang phân tích diễn biến video")
         memory = await workflow.analyze(request)
         output: dict[str, object] = {
             "status": "running",

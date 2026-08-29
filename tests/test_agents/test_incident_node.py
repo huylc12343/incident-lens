@@ -226,11 +226,10 @@ async def test_analyze_video_node_builds_native_request(tmp_path: Path) -> None:
         size_bytes=100,
     )
     normalized = NormalizedVideoArtifact(uri=str(tmp_path / "normalized_source.mp4"), metadata=metadata)
-    redacted = NormalizedVideoArtifact(uri=str(tmp_path / "redacted_source.mp4"), metadata=metadata)
-    final = NormalizedVideoArtifact(uri=str(tmp_path / "normalized.mp4"), metadata=metadata)
+    redacted = NormalizedVideoArtifact(uri=str(tmp_path / "normalized.mp4"), metadata=metadata)
     media = SimpleNamespace(
         sample_frames=AsyncMock(),
-        normalize_video=AsyncMock(side_effect=[normalized, final]),
+        normalize_video=AsyncMock(return_value=normalized),
         redact_video=AsyncMock(return_value=redacted),
     )
     service = _service(VLMInputMode.NATIVE_VIDEO, _memory(AnalysisMode.NATIVE_VIDEO, 2))
@@ -251,28 +250,26 @@ async def test_analyze_video_node_builds_native_request(tmp_path: Path) -> None:
 
     assert result["status"] == "running"
     assert result["video_duration_s"] == 2
-    assert media.normalize_video.await_count == 2
-    assert media.normalize_video.await_args_list[0].args == (
+    media.normalize_video.assert_awaited_once_with(
         "video.mp4",
         str(tmp_path.resolve() / "INC-002" / "normalized_source.mp4"),
+        width=1280,
+        height=720,
+        fps=15,
+        codec="libx264",
+        pixel_format="yuv420p",
+        max_output_bytes=100_000_000,
+        max_duration_s=60,
     )
-    assert media.normalize_video.await_args_list[0].kwargs == {
-        "width": 1280, "height": 720, "fps": 15, "codec": "libx264",
-        "pixel_format": "yuv420p", "max_output_bytes": 100_000_000, "max_duration_s": 60,
-    }
     media.redact_video.assert_awaited_once_with(
         normalized.uri,
-        str(tmp_path.resolve() / "INC-002" / "redacted_source.mp4"),
-    )
-    assert media.normalize_video.await_args_list[1].args == (
-        redacted.uri,
         str(tmp_path.resolve() / "INC-002" / "normalized.mp4"),
     )
     media.sample_frames.assert_not_awaited()
     request = service.analyze_video.await_args.args[0]
-    assert request.normalized_video_uri == final.uri
-    assert result["video_uri"] == final.uri
-    assert result["artifact_uris"] == {"normalized_video": final.uri}
+    assert request.normalized_video_uri == redacted.uri
+    assert result["video_uri"] == redacted.uri
+    assert result["artifact_uris"] == {"normalized_video": redacted.uri}
 
 
 @pytest.mark.asyncio

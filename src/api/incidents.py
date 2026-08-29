@@ -1,6 +1,5 @@
 """HTTP endpoints for the incident analysis lifecycle."""
 
-import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
@@ -17,7 +16,6 @@ from src.models.api import (
 )
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
-logger = logging.getLogger(__name__)
 
 
 async def get_workflow_service(request: Request) -> Any:
@@ -61,21 +59,11 @@ async def create_incident(
     response: Response,
     service: Any = Depends(get_workflow_service),
 ) -> IncidentSnapshot:
-    incident_id = payload.incident_id.strip()
     try:
-        create_detached = getattr(service, "create_detached", None)
-        snapshot = await create_detached(payload) if create_detached is not None else await service.create(payload)
-        snapshot = IncidentSnapshot.model_validate(snapshot)
+        snapshot = await service.create(payload)
     except Exception as exc:
-        logger.exception("CREATE_RESPONSE_FAILED incident_id=%s", incident_id)
         raise incident_http_error(exc) from exc
     response.status_code = _response_status(snapshot)
-    logger.info(
-        "CREATE_RESPONSE_READY incident_id=%s status=%s http_status=%s",
-        snapshot.incident_id,
-        snapshot.status,
-        response.status_code,
-    )
     return snapshot
 
 

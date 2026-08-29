@@ -28,11 +28,20 @@ class NormalizedVideoArtifact:
 
 
 class MediaService:
-    def __init__(self, *, command_timeout_s: float = 120.0, redaction_image_size: int = 512) -> None:
+    def __init__(
+        self,
+        *,
+        command_timeout_s: float = 120.0,
+        redaction_image_size: int = 512,
+        redaction_detection_fps: float | None = None,
+    ) -> None:
         if command_timeout_s <= 0 or redaction_image_size <= 0:
             raise ValueError("command timeout and redaction image size must be positive")
+        if redaction_detection_fps is not None and redaction_detection_fps <= 0:
+            raise ValueError("redaction detection fps must be positive when set")
         self._command_timeout_s = command_timeout_s
         self._redaction_image_size = redaction_image_size
+        self._redaction_detection_fps = redaction_detection_fps
         self._ffmpeg = shutil.which("ffmpeg") or get_ffmpeg_exe()
         self._ffprobe = shutil.which("ffprobe")
 
@@ -170,6 +179,7 @@ class MediaService:
                 video_uri,
                 output_uri,
                 imgsz=self._redaction_image_size,
+                detection_fps=self._redaction_detection_fps,
             )
         except Exception as exc:
             raise MediaServiceError("VIDEO_REDACTION_FAILED", "video redaction failed") from exc

@@ -106,6 +106,14 @@ class Settings(BaseSettings):
     # YOLO inference resolution for that redaction pass. Lower is faster and
     # misses more; higher is slower and catches more.
     redaction_image_size: int = Field(default=512, gt=0)
+    # Detector runs per second of footage. The tracker bridges the frames in
+    # between, so every frame is still blurred, but an object that appears and
+    # leaves inside one gap is never localized and never blurred.
+    # Redaction runs on the normalized copy, so this is compared against
+    # vlm_video_target_fps, not the uploaded file's frame rate. At or above that
+    # value the stride collapses to 1 and every frame pays full inference, so
+    # keep it well below.
+    redaction_detection_fps: float = Field(default=5.0, gt=0)
 
     # ---- Frame artifacts used to canonicalize Qwen timestamps after analysis ----
     # Size and quality of the stills each claim and timeline event is pinned to.

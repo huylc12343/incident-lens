@@ -28,7 +28,6 @@ from src.models.api import ReviewDecision
 from src.models.incidents import ReportService, VerificationService
 from src.services.langsmith_tracing import LangSmithTracing
 from src.services.model_observability import ModelActivityRegistry
-from src.services.processing_progress import ProcessingProgressRegistry
 from src.services.video_memory import VideoMemoryWorkflow
 
 
@@ -47,27 +46,19 @@ class IncidentGraphDependencies:
     auto_reanalysis_enabled: bool = True
     cleanup_remote_resources: bool = True
     observability: ModelActivityRegistry = field(default_factory=ModelActivityRegistry)
-    progress: ProcessingProgressRegistry = field(default_factory=ProcessingProgressRegistry)
 
 
 def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointer: Any) -> Any:
     graph = StateGraph(IncidentState)
 
     async def analyze_video(state: IncidentState) -> dict[str, object]:
-        incident_id = state.get("incident_id", "")
-        result = await analyze_video_node(
-            state,
-            media=dependencies.media,
-            workflow=dependencies.video_workflow,
-            progress=lambda stage, message: dependencies.progress.update(incident_id, stage, message),
-        )
+        result = await analyze_video_node(state, media=dependencies.media, workflow=dependencies.video_workflow)
         return {
             **_with_model_activities(state, result, dependencies.observability),
             "canonical_evidence_phase": "initial",
         }
 
     async def map_canonical_evidence(state: IncidentState) -> dict[str, object]:
-        dependencies.progress.update(state.get("incident_id", ""), "evidence", "Đang chuẩn hóa bằng chứng theo timeline")
         return await map_canonical_evidence_node(
             state,
             media=dependencies.media,
@@ -78,7 +69,6 @@ def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointe
         return await cut_incident_video_node(state, media=dependencies.media, workflow=dependencies.video_workflow)
 
     async def analyze_log(state: IncidentState) -> dict[str, object]:
-        dependencies.progress.update(state.get("incident_id", ""), "telemetry", "Đang phân tích và đồng bộ telemetry")
         return await analyze_log_node(
             state,
             log_analysis=dependencies.log_analysis,
@@ -88,7 +78,6 @@ def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointe
         )
 
     async def verify(state: IncidentState) -> dict[str, object]:
-        dependencies.progress.update(state.get("incident_id", ""), "verification", "LLM đang kiểm chứng các nhận định")
         result = await align_and_verify_claims_node(
             state,
             verification=dependencies.verification,
@@ -121,7 +110,6 @@ def build_incident_graph(*, dependencies: IncidentGraphDependencies, checkpointe
         }
 
     async def build_report(state: IncidentState) -> dict[str, object]:
-        dependencies.progress.update(state.get("incident_id", ""), "report", "LLM đang tạo báo cáo sự cố")
         result = await build_draft_report_node(state, report=dependencies.report)
         return _with_model_activities(state, result, dependencies.observability)
 

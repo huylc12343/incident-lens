@@ -1,56 +1,100 @@
 {
-  "generated_at": "2026-08-22T11:22:30.245781+00:00",
+  "generated_at": "2026-08-29T03:53:36.483437+00:00",
   "golden_set": "golden_set",
-  "num_samples_total": 12,
-  "num_samples_completed": 12,
+  "num_samples_total": 38,
+  "num_samples_completed": 38,
   "failed_samples": [],
   "aggregate": {
     "vlm": {
       "vlm_incident_precision": 1.0,
-      "vlm_incident_recall": 0.6,
-      "vlm_incident_f1": 0.7499999999999999,
-      "tp": 6,
+      "vlm_incident_recall": 0.5769230769230769,
+      "vlm_incident_f1": 0.7317073170731707,
+      "tp": 15,
       "fp": 0,
-      "fn": 4,
-      "tn": 2,
-      "vlm_median_t0_error_s": 0.15000000000000036,
-      "vlm_temporal_iou_mean": 0.36718387970141125,
-      "vlm_temporal_iou_median": 0.3956043956043956,
-      "num_samples_used": 6,
-      "event_timestamp_mae_s": 3.1357142857142857,
-      "num_matched_events": 28,
-      "num_incident_samples_used": 12
+      "fn": 11,
+      "tn": 12,
+      "vlm_median_t0_error_s": 0.1999999999999993,
+      "vlm_temporal_iou_mean": 0.3821367196424722,
+      "vlm_temporal_iou_median": 0.396039603960396,
+      "vlm_num_samples_used": 15,
+      "num_incident_samples_used": 38
     },
     "verifier": {
       "verifier_incident_precision": 1.0,
-      "verifier_incident_recall": 0.8,
-      "verifier_incident_f1": 0.888888888888889,
-      "tp": 8,
+      "verifier_incident_recall": 0.9615384615384616,
+      "verifier_incident_f1": 0.9803921568627451,
+      "tp": 25,
       "fp": 0,
-      "fn": 2,
-      "tn": 2,
+      "fn": 1,
+      "tn": 12,
       "evidence_id_precision": 1.0,
       "claim_evidence_validity_rate": 1.0,
       "invalid_evidence_ids": [],
       "status_distribution": {
-        "supported": 0.7317073170731707,
-        "contradicted": 0.12195121951219512,
-        "unverified": 0.14634146341463414
+        "supported": 0.743801652892562,
+        "contradicted": 0.0,
+        "unverified": 0.256198347107438
       },
-      "num_verifier_samples_used": 12,
-      "num_verification_results": 41
+      "num_verifier_samples_used": 38,
+      "num_verification_results": 121
     },
     "report": {
       "report_decision_consistency": 1.0,
-      "passed": 7,
-      "eligible": 7,
-      "report_median_t0_error_s": 0.09999999999999964,
-      "report_temporal_iou_mean": 0.3560840521485683,
-      "report_temporal_iou_median": 0.3822222222222222,
-      "num_samples_used": 7,
-      "type_of_accident_precision": 0.7,
-      "type_of_accident_recall": 0.6666666666666667,
-      "type_of_accident_f1": 0.6333333333333333
+      "passed": 38,
+      "eligible": 38,
+      "report_median_t0_error_s": 0.25,
+      "report_temporal_iou_mean": 0.40528739000862735,
+      "report_temporal_iou_median": 0.4,
+      "report_num_samples_used": 25,
+      "type_of_accident_accuracy": 0.868421052631579,
+      "type_of_accident_precision": 0.7624320124320124,
+      "type_of_accident_recall": 0.7023809523809524,
+      "type_of_accident_f1": 0.7227289377289378,
+      "type_of_accident_confusion": {
+        "crossing_collision": {
+          "crossing_collision": 9,
+          "vehicle_collision": 1
+        },
+        "environment_collision": {
+          "crossing_collision": 1,
+          "environment_collision": 3,
+          "other_unknown": 1
+        },
+        "no_incident": {
+          "no_incident": 12
+        },
+        "pedestrian_collision": {
+          "pedestrian_collision": 4
+        },
+        "vehicle_collision": {
+          "crossing_collision": 1,
+          "no_incident": 1,
+          "vehicle_collision": 5
+        }
+      },
+      "type_of_accident_num_samples_used": 38
+    },
+    "temporal_comparison": {
+      "num_gold_incidents": 26,
+      "vlm_localised_count": 15,
+      "report_localised_count": 25,
+      "paired_num_samples": 15,
+      "vlm_temporal_iou_mean_paired": 0.3821367196424722,
+      "report_temporal_iou_mean_paired": 0.3821367196424722,
+      "report_minus_vlm_temporal_iou_delta": 0.0
+    },
+    "resource": {
+      "mean_total_tokens": 32716.5,
+      "mean_input_tokens": 28938.42105263158,
+      "mean_output_tokens": 3778.0789473684213,
+      "mean_num_model_requests": 3.6315789473684212,
+      "mean_wall_time_s": 64.77365605855245,
+      "mean_model_time_s": 61.97418421052631,
+      "mean_cost_usd": 0.004316042631578947,
+      "total_cost_usd": 0.16400961999999997,
+      "num_samples_used": 38,
+      "num_samples_costed": 38,
+      "unpriced_models": []
     }
   }
 }

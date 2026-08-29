@@ -1,6 +1,7 @@
 "use client";
 
 import { secondsToTimestamp } from "../../lib/incidentSession";
+import { orderClaimsByTimeline } from "../../lib/claimOrdering";
 import { normalizeReviewText } from "../../lib/reviewText";
 import type { Claim, ClaimLogSummary, ClaimVerification } from "../../types/incident";
 
@@ -66,10 +67,11 @@ export function ClaimReviewList({
 }) {
   const summaryByClaim = new Map(summaries.map((item) => [item.claim_id, item]));
   const verificationByClaim = new Map(verificationResults.map((item) => [item.claim_id, item]));
+  const orderedClaims = orderClaimsByTimeline(claims);
   return <section className="workspace-panel claim-review-section" id="claims" aria-labelledby="claims-title">
     <div className="workspace-panel-heading"><div><p className="eyebrow">Nhận định AI</p><h2 id="claims-title">Claims và đối chiếu bằng chứng</h2></div><span>{claims.length} claim</span></div>
     <div className="claim-review-list">
-      {claims.map((claim, index) => {
+      {orderedClaims.map((claim, index) => {
         const summary = summaryByClaim.get(claim.claim_id);
         const verification = verificationByClaim.get(claim.claim_id);
         return <article className={`claim-review-card ${selectedClaimId === claim.claim_id ? "selected" : ""}`} key={claim.claim_id}>

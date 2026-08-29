@@ -97,7 +97,7 @@ export function IncidentClipPlayer({ clipUrl, isOriginalVideo = false, noInciden
   return (
     <section className="incident-clip-card refined-clip-card" aria-labelledby="incident-clip-title">
       <header className="refined-clip-header">
-        <div><p className="eyebrow">{isOriginalVideo ? text("Original video", "Video gốc") : text("Extracted evidence", "Bằng chứng đã trích xuất")}</p><h2 id="incident-clip-title">{isOriginalVideo ? text("Original video for engineer review", "Video gốc để kỹ sư rà soát") : text("Incident evidence clip", "Video bằng chứng sự cố")}</h2></div>
+        <div><p className="eyebrow">{isOriginalVideo ? text("Original video", "Video gốc") : text("Extracted evidence", "DỮ LIỆU PHỤC VỤ RÀ SOÁT")}</p><h2 id="incident-clip-title">{isOriginalVideo ? text("Original video for engineer review", "Video gốc để kỹ sư rà soát") : text("Incident evidence clip", "đoạn dữ liệu đã được trích xuất")}</h2></div>
       </header>
 
       <div className="clip-player-shell" ref={containerRef}>
@@ -108,7 +108,7 @@ export function IncidentClipPlayer({ clipUrl, isOriginalVideo = false, noInciden
               playsInline
               preload="auto"
               src={clipUrl}
-              aria-label={isOriginalVideo ? text("Original video for engineer review", "Video gốc để kỹ sư rà soát") : text("Extracted data segment", "Đoạn dữ liệu đã được trích xuất")}
+              aria-label={isOriginalVideo ? text("Original video for engineer review", "Video gốc để kỹ sư rà soát") : text("Extracted data segment", "đoạn dữ liệu đã được trích xuất")}
               onClick={togglePlayback}
               onLoadedMetadata={(event) => {
                 const video = event.currentTarget;

@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useState } from "react";
 import { artifactUrl } from "../../lib/incidentApi";
+import { orderClaimsByTimeline } from "../../lib/claimOrdering";
 import { secondsToTimestamp } from "../../lib/incidentSession";
 import { normalizeReviewText } from "../../lib/reviewText";
 import type { Claim, IncidentSnapshot, ReviewPayload } from "../../types/incident";
@@ -57,6 +58,7 @@ export function ReviewSidebar({ snapshot, selectedClaim, busy, error, onSelectCl
   const [feedback, setFeedback] = useState("");
   const [editingReport, setEditingReport] = useState(false);
   const canReview = snapshot.status === "awaiting_review" && !busy;
+  const orderedClaims = orderClaimsByTimeline(snapshot.claims);
 
   return <section className="workspace-panel review-report-panel" id="report" aria-labelledby="report-title">
     <div className="workspace-panel-heading"><div><p className="eyebrow">Report</p><h2 id="report-title">Báo cáo rà soát</h2></div>{report && <button type="button" className="report-text-action" disabled={!canReview} onClick={() => setEditingReport((current) => !current)}>{editingReport ? "Cancel" : "Edit report"}</button>}</div>
@@ -69,7 +71,7 @@ export function ReviewSidebar({ snapshot, selectedClaim, busy, error, onSelectCl
       <header className="focused-reanalysis-heading"><div><span className="focused-reanalysis-icon" aria-hidden="true">↻</span><div><p className="eyebrow">Agent verification</p><h3 id="focused-reanalysis-title">Phân tích lại có trọng tâm</h3></div></div><small>Chỉ claim được chọn sẽ được gửi lại cho agent</small></header>
 
       <div className="focused-claim-picker" role="radiogroup" aria-label="Chọn claim cần phân tích lại">
-        {snapshot.claims.map((claim, index) => <button type="button" role="radio" aria-checked={selectedClaim?.claim_id === claim.claim_id} className={selectedClaim?.claim_id === claim.claim_id ? "selected" : ""} key={claim.claim_id} onClick={() => onSelectClaim(claim)}>
+        {orderedClaims.map((claim, index) => <button type="button" role="radio" aria-checked={selectedClaim?.claim_id === claim.claim_id} className={selectedClaim?.claim_id === claim.claim_id ? "selected" : ""} key={claim.claim_id} onClick={() => onSelectClaim(claim)}>
           <span>{index + 1}</span><div><strong>{claim.claim_id}</strong><small>{typeof claim.timestamp_s === "number" ? secondsToTimestamp(claim.timestamp_s) : "Không có timestamp"}</small></div><p className="review-multiline">{normalizeReviewText(claim.text)}</p>
         </button>)}
       </div>

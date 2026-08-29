@@ -33,6 +33,7 @@ export function IncidentClipPlayer({ clipUrl, isOriginalVideo = false, noInciden
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [videoAspectRatio, setVideoAspectRatio] = useState("16 / 9");
   const clipStart = start ?? 0;
   const expectedDuration = start !== undefined && end !== undefined ? Math.max(0, end - start) : 0;
   const timelineDuration = duration || expectedDuration;
@@ -48,6 +49,7 @@ export function IncidentClipPlayer({ clipUrl, isOriginalVideo = false, noInciden
     setCurrentTime(0);
     setDuration(0);
     setPlaying(false);
+    setVideoAspectRatio("16 / 9");
   }, [clipUrl]);
 
   // Paint playback controls at the browser refresh rate without triggering a
@@ -102,7 +104,7 @@ export function IncidentClipPlayer({ clipUrl, isOriginalVideo = false, noInciden
       </header>
 
       <div className="clip-player-shell" ref={containerRef}>
-        <div className="refined-clip-stage">
+        <div className="refined-clip-stage" style={{ aspectRatio: videoAspectRatio }}>
           {clipUrl ? (
             <video
               ref={videoRef}
@@ -111,7 +113,13 @@ export function IncidentClipPlayer({ clipUrl, isOriginalVideo = false, noInciden
               src={clipUrl}
               aria-label={isOriginalVideo ? text("Original video for engineer review", "Video gốc để kỹ sư rà soát") : text("Extracted data segment", "Đoạn dữ liệu đã được trích xuất")}
               onClick={togglePlayback}
-              onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
+              onLoadedMetadata={(event) => {
+                const video = event.currentTarget;
+                setDuration(video.duration);
+                if (video.videoWidth > 0 && video.videoHeight > 0) {
+                  setVideoAspectRatio(`${video.videoWidth} / ${video.videoHeight}`);
+                }
+              }}
               onDurationChange={(event) => setDuration(event.currentTarget.duration)}
               onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
               onPlay={() => setPlaying(true)}

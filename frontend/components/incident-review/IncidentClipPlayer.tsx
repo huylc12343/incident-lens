@@ -97,10 +97,7 @@ export function IncidentClipPlayer({ clipUrl, isOriginalVideo = false, noInciden
   return (
     <section className="incident-clip-card refined-clip-card" aria-labelledby="incident-clip-title">
       <header className="refined-clip-header">
-        <div><p className="eyebrow">{isOriginalVideo ? text("Original video", "Video gốc") : text("Review data", "Dữ liệu phục vụ rà soát")}</p><h2 id="incident-clip-title">{isOriginalVideo ? text("Original video for engineer review", "Video gốc để kỹ sư rà soát") : text("Extracted data segment", "Đoạn dữ liệu đã được trích xuất")}</h2></div>
-        <button type="button" className="clip-fullscreen-button" onClick={fullscreen} aria-label={text("View incident clip fullscreen", "Xem video sự cố toàn màn hình")} title={text("Fullscreen", "Toàn màn hình")}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" /></svg>
-        </button>
+        <div><p className="eyebrow">{isOriginalVideo ? text("Original video", "Video gốc") : text("Extracted evidence", "Bằng chứng đã trích xuất")}</p><h2 id="incident-clip-title">{isOriginalVideo ? text("Original video for engineer review", "Video gốc để kỹ sư rà soát") : text("Incident evidence clip", "Video bằng chứng sự cố")}</h2></div>
       </header>
 
       <div className="clip-player-shell" ref={containerRef}>
@@ -141,6 +138,9 @@ export function IncidentClipPlayer({ clipUrl, isOriginalVideo = false, noInciden
               {playing ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z" /></svg>}
             </button>
             <span className="clip-current-time"><b ref={currentTimeRef}>{playerTime(currentTime)}</b> <i>/</i> {playerTime(timelineDuration)}</span>
+            <button type="button" className="clip-fullscreen-button" onClick={fullscreen} aria-label={text("View incident clip fullscreen", "Xem video sự cố toàn màn hình")} title={text("Fullscreen", "Toàn màn hình")}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" /></svg>
+            </button>
           </div>
         </div>
       </div>

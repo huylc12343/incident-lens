@@ -24,6 +24,7 @@ from src.services.langsmith_tracing import LangSmithTracing, build_langsmith_tra
 from src.services.log_analysis import LogAnalysisService
 from src.services.media import MediaService
 from src.services.model_observability import ModelActivityRegistry
+from src.services.processing_progress import ProcessingProgressRegistry
 from src.services.report_repository import SQLiteReportRepository
 from src.services.reporting import OpenAIReportService
 from src.services.verification import OpenAIVerificationService
@@ -122,6 +123,7 @@ async def incident_workflow_service(
         max_activities_per_incident=settings.model_activity_max_per_incident,
         retention_hours=settings.model_activity_retention_hours,
     )
+    progress = ProcessingProgressRegistry()
     vlm = _build_vlm(settings, clients, observability, tracing)
     video_workflow = VideoMemoryWorkflow(
         vlm=vlm,
@@ -190,6 +192,7 @@ async def incident_workflow_service(
         auto_reanalysis_enabled=settings.auto_reanalysis_enabled,
         cleanup_remote_resources=True,
         observability=observability,
+        progress=progress,
     )
     checkpoint_path = Path(settings.incident_checkpoint_path).resolve()
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
@@ -207,6 +210,7 @@ async def incident_workflow_service(
             repository=repository,
             input_validator=ConfiguredIncidentInputValidator(settings=settings, media=media),
             observability=observability,
+            progress=progress,
             artifact_dir=settings.artifact_dir,
             upload_dir=settings.incident_upload_dir,
             remote_resource_releaser=vlm.release_remote_resources,
@@ -221,6 +225,8 @@ async def incident_workflow_service(
         )
         yield service
     finally:
+        if "service" in locals():
+            await service.shutdown()
         await checkpoint_worker.call(connection.close)
         checkpoint_worker.close()
 

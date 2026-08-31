@@ -12,6 +12,7 @@ from src.models.incidents import (
     Claim,
     ClaimLogSummary,
     DraftReport,
+    TimelineEvent,
     VerificationStatus,
 )
 
@@ -90,11 +91,22 @@ class ReportEdits(APIModel):
     claims: list[ReportClaimEdit] | None = None
     summary: str | None = Field(default=None, min_length=1)
     timeline: str | None = Field(default=None, min_length=1)
+    timeline_events: list[TimelineEvent] | None = None
     video_observations: str | None = Field(default=None, min_length=1)
     log_findings: str | None = Field(default=None, min_length=1)
     alignment: str | None = Field(default=None, min_length=1)
     hypothesized_causes: str | None = Field(default=None, min_length=1)
     warnings: list[str] | None = None
+
+    @field_validator("timeline_events")
+    @classmethod
+    def validate_timeline_order(cls, value: list[TimelineEvent] | None) -> list[TimelineEvent] | None:
+        if value is not None and any(
+            current.timestamp_s < previous.timestamp_s
+            for previous, current in zip(value, value[1:], strict=False)
+        ):
+            raise ValueError("timeline events must be ordered by timestamp_s")
+        return value
 
 
 class IncidentCreateRequest(APIModel):
@@ -196,6 +208,12 @@ class ModelActivity(APIModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class ProcessingProgress(APIModel):
+    stage: str
+    message: str
+    started_at: datetime
+
+
 class IncidentSnapshot(APIModel):
     incident_id: str
     status: IncidentStatus
@@ -211,6 +229,9 @@ class IncidentSnapshot(APIModel):
     final_report: DraftReport | None = None
     review_audit: list[ReviewAuditEntry] = Field(default_factory=list)
     model_activities: list[ModelActivity] = Field(default_factory=list)
+    progress: ProcessingProgress | None = None
+    ground_truth: GroundTruth | None = None
+    ai_evaluation: AiGroundTruthEvaluation | None = None
     warnings: list[str] = Field(default_factory=list)
     error_code: str | None = None
     error_message: str | None = None

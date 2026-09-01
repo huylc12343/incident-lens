@@ -20,7 +20,7 @@
 
 ## Video Demo Checklist
 
-- [ ] Giới thiệu problem (< 30 giây)
-- [ ] Demo live feature chính (2-3 phút)
-- [ ] Hiển thị kết quả AI (1 phút)
-- [ ] Tóm tắt impact (< 30 giây)
+- [x] Giới thiệu problem (< 30 giây)
+- [x] Demo live feature chính (2-3 phút)
+- [x] Hiển thị kết quả AI (1 phút)
+- [x] Tóm tắt impact (< 30 giây)

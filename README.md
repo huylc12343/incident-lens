@@ -2,6 +2,21 @@
 
 Backend FastAPI + LangGraph phân tích video giao thông dưới 60 giây, kết hợp log xe tùy chọn, tạo báo cáo 10 mục và dừng tại bước kỹ thuật viên review. Dự án có Streamlit client độc lập trong `main_test.py` để chạy toàn bộ lifecycle qua HTTP API.
 
+## Live Demo
+
+Truy cập sản phẩm tại: [https://vlens.site/](https://vlens.site/)
+
+## Team T207-Cá Hồi
+
+Các vai trò và nhiệm vụ được phân chia đồng đều để bảo đảm mọi thành viên đều tham gia và đóng góp trên nhiều mảng của dự án, thay vì chỉ phụ trách duy nhất một domain. Mỗi thành viên có một vai trò chính; các thành viên còn lại có trách nhiệm cùng tham gia, phối hợp và hỗ trợ khi cần thiết.
+
+| Thành viên | Mã học viên | Vai trò và nhiệm vụ chính |
+|------------|-------------|---------------------------|
+| **Nguyễn Phương Đông** | 2A202601474 | Nghiên cứu và phát triển bộ não AI; Prompt Engineer; thiết kế luồng VLM. |
+| **Nguyễn Quang Huy** | — | Backend; deploy; nghiên cứu telemetry; thu thập dataset. |
+| **Trần Trọng Nghĩa** | — | Nghiên cứu thuật toán và model Computer Vision; tối ưu code; kiểm thử. |
+| **Phan Trần Tường Vy** | — | UI/UX; frontend; quản lý dự án (PM); thu thập dataset; kiểm thử. |
+
 ## MVP capabilities
 
 - Phân tích video dưới 60 giây để tạo incident window, timeline, claim và evidence có timestamp.
@@ -10,6 +25,40 @@ Backend FastAPI + LangGraph phân tích video giao thông dưới 60 giây, kế
 - Frontend Next.js để upload và review evidence; video native có thể blur khuôn mặt/biển số trước khi gửi VLM.
 
 Xem [kiến trúc](ARCHITECTURE.md), [phương pháp đánh giá](docs/EVALUATION.md) và [privacy/redaction](docs/PRIVACY.md). Đây là MVP hỗ trợ review, không thay thế quyết định của kỹ sư.
+
+## Screenshots giao diện
+
+### Đăng nhập
+
+![Giao diện đăng nhập VLens](docs/images/screenshots/01-login.png)
+
+### Tổng quan hệ thống
+
+![Dashboard tổng quan VLens](docs/images/screenshots/02-dashboard-overview.png)
+
+### Tải video và dữ liệu telemetry
+
+![Giao diện tải bằng chứng sự cố](docs/images/screenshots/03-upload-evidence.png)
+
+### Lịch sử incident
+
+![Danh sách incident và trạng thái review](docs/images/screenshots/04-incident-history.png)
+
+### Không gian rà soát sự cố
+
+![Giao diện rà soát video và báo cáo sự cố](docs/images/screenshots/05-incident-review.png)
+
+### Biểu đồ telemetry
+
+![Biểu đồ tốc độ, gia tốc, phanh, ga và góc lái](docs/images/screenshots/06-telemetry-charts.png)
+
+### Thao tác human-in-the-loop
+
+![Giao diện nhập phản hồi và phê duyệt kết quả](docs/images/screenshots/07-review-actions.png)
+
+### Đánh giá quyết định
+
+![Giao diện metric sau khi hoàn thành review](docs/images/screenshots/08-decision-evaluation.png)
 
 ## Luồng xử lý
 

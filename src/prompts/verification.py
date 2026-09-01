@@ -130,7 +130,7 @@ def build_verification_prompt(
             "đây là bằng chứng RẤT MẠNH ủng hộ tai nạn và phải được cho trọng số cao khi kết hợp với video/VLM.",
 
             "Nếu video/VLM không mô tả tai nạn và không tồn tại telemetry anomaly hợp lệ đã được xác nhận như trên, "
-            "has_accident=false."
+            "has_accident=false.",
 
             "reason phải ngắn, rõ và chỉ mô tả telemetry của xe ego thực sự cho thấy. Với EVENT, nêu diễn biến trong window; "
             "với STATE, nêu trạng thái và diễn biến liên quan trong window. Không nhắc lại phần hình ảnh không log-observable.",

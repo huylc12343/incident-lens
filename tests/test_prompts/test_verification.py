@@ -41,8 +41,9 @@ def test_verification_system_prompt_matches_approved_text_exactly() -> None:
     )
 
     assert sha256(prompt.text.encode("utf-8")).hexdigest() == (
-        "b0c2bec37ecdd8edeb76fcd47fa4bb6349790c8f01453346732dd56fda308f55"
+        "fb64f5f090eadf0fea57da39e1325e05eaa008df17e89ce6c23633cbe4e7e80f"
     )
+    assert "has_accident=false.\nreason phải" in prompt.text
 
 
 def test_verification_prompt_requires_one_result_per_claim() -> None:

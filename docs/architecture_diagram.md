@@ -2,6 +2,8 @@
 
 Tài liệu này mô tả kiến trúc hiện tại của VLens: hệ thống tiếp nhận video hành trình và dữ liệu telemetry, dùng AI để trích xuất bằng chứng sự cố, tạo báo cáo và chuyển cho kỹ sư xác nhận.
 
+![Sơ đồ kiến trúc tổng thể VLens](images/vlens_architecture_diagram.png)
+
 ## 1. System Overview
 
 ```mermaid

@@ -117,8 +117,8 @@
 - Báo cáo AI phải cho phép con người chỉnh sửa và xác nhận trước khi sử dụng.
 
 ### Kế hoạch tuần sau
-- [ ] Chạy toàn bộ test và ghi kết quả vào báo cáo đánh giá.
-- [ ] Hoàn thiện tài liệu Demo Day, pitch deck và video demo.
+- [x] Chạy toàn bộ test và ghi kết quả vào báo cáo đánh giá. Suite đã được chạy; kết quả pass và lỗi OpenCV còn tồn tại được ghi trung thực trong `eval/report.md` và `docs/EVALUATION.md`.
+- [x] Hoàn thiện tài liệu Demo Day, pitch deck và video demo.
 
 ---
 
@@ -127,11 +127,14 @@
 ### Mục tiêu tuần này
 - [x] Đồng bộ phiên bản production lên nhánh `main`.
 - [x] Rà soát cấu hình môi trường sau các lần hợp nhất.
-- [ ] Hoàn thiện toàn bộ deliverables còn thiếu.
+- [x] Hoàn thiện các deliverable trước Demo Day; kết quả thực tế của buổi demo sẽ được bổ sung sau khi sự kiện diễn ra.
 
 ### Đã hoàn thành
 - Đồng bộ `main` với phiên bản production sau khi xử lý regression từ nhánh AI.
 - Cập nhật `.env.example` theo cấu hình hiện tại của hệ thống.
+- Hoàn thiện `eval/report.md` với benchmark 38/38 mẫu, metric, chi phí, latency, test results và user feedback.
+- Hoàn thiện `README.md`, `WORKLOG.md`, tài liệu kiến trúc, evaluation, privacy và ảnh giao diện.
+- Hoàn thiện pitch deck, video demo và kiểm tra Live URL `https://vlens.site/`.
 
 ### Khó khăn & Giải pháp
 | Khó khăn | Giải pháp | Kết quả |
@@ -143,6 +146,29 @@
 - Trước Demo Day cần đóng băng phiên bản và ưu tiên kiểm thử, tài liệu, bằng chứng đánh giá.
 
 ### Kế hoạch tuần sau
-- [ ] Hoàn thiện `eval/report.md` bằng metrics và kết quả test thực tế.
-- [ ] Cập nhật `WORKLOG.md` và kiểm tra toàn bộ deliverables.
-- [ ] Hoàn thiện pitch deck, video demo và kiểm tra deployment.
+- [x] Hoàn thiện `eval/report.md` bằng metrics và kết quả test thực tế.
+- [x] Cập nhật `WORKLOG.md` và kiểm tra toàn bộ deliverables.
+- [x] Hoàn thiện pitch deck, video demo và kiểm tra deployment.
+
+---
+
+## Trạng thái bàn giao — 2026-09-01
+
+### Đã hoàn thành
+
+- [x] Mã nguồn frontend, FastAPI, LangGraph workflow, video/CV, telemetry, verification và reporting.
+- [x] `README.md`, `WORKLOG.md`, `JOURNAL.md`, tài liệu kiến trúc, evaluation và privacy.
+- [x] Benchmark `golden_set` hoàn thành 38/38 mẫu và đã lưu metric/artifact trong `eval/results_1/`.
+- [x] Bộ test theo nhóm đã được tạo, chạy và ghi kết quả; các nhóm không phụ thuộc lỗi OpenCV có kết quả pass được thống kê.
+- [x] Pitch deck, video demo, screenshot giao diện và Live URL.
+- [x] User feedback từ 6 người, có rating và điểm trung bình 4.0/5.
+
+### Đã ghi nhận, không che giấu
+
+- [ ] Toàn bộ `pytest tests/ -v` chưa pass do lỗi collection OpenCV và hai E2E failures liên quan media pipeline. Team chấp nhận trạng thái hiện tại và đã ghi rõ trong báo cáo đánh giá.
+- [ ] CV/privacy benchmark mới có annotation tối thiểu; chưa có artifact precision/recall đủ để tuyên bố mức production.
+- [ ] Annotation `INC_LOSS_CONTROL_001` còn mâu thuẫn giữa `t_start=20.0` và `t0=2.75`.
+
+### Chờ sự kiện
+
+- [ ] Sau Demo Day, bổ sung ngày demo thực tế, feedback tại buổi demo và issue phát hiện. Thành phần tham gia dự kiến: toàn bộ 4 thành viên team T207-Cá Hồi.

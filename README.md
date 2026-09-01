@@ -13,9 +13,9 @@ Các vai trò và nhiệm vụ được phân chia đồng đều để bảo đ
 | Thành viên | Mã học viên | Vai trò và nhiệm vụ chính |
 |------------|-------------|---------------------------|
 | **Nguyễn Phương Đông** | 2A202601474 | Nghiên cứu và phát triển bộ não AI; Prompt Engineer; thiết kế luồng VLM. |
-| **Nguyễn Quang Huy** | — | Backend; deploy; nghiên cứu telemetry; thu thập dataset. |
-| **Trần Trọng Nghĩa** | — | Nghiên cứu thuật toán và model Computer Vision; tối ưu code; kiểm thử. |
-| **Phan Trần Tường Vy** | — | UI/UX; frontend; quản lý dự án (PM); thu thập dataset; kiểm thử. |
+| **Nguyễn Quang Huy** | 2A202601165 | Backend; deploy; nghiên cứu telemetry; thu thập dataset. |
+| **Trần Trọng Nghĩa** | 2A202601370 | Nghiên cứu thuật toán và model Computer Vision; tối ưu code; kiểm thử. |
+| **Phan Trần Tường Vy** | 2A202601701 | UI/UX; frontend; quản lý dự án (PM); thu thập dataset; kiểm thử. |
 
 ## MVP capabilities
 
